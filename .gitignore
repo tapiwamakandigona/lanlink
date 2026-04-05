@@ -1,0 +1,9 @@
+node_modules/
+dist/
+dist-electron/
+release/
+android/
+.capacitor/
+*.log
+.DS_Store
+Thumbs.db
