@@ -80,7 +80,7 @@ export function assembleFile(
   chunks: string[],
   mime: string
 ): Blob {
-  const parts = chunks.map((chunk) => base64ToUint8(chunk));
+  const parts = chunks.map((chunk) => base64ToUint8(chunk).buffer as ArrayBuffer);
   return new Blob(parts, { type: mime });
 }
 

@@ -137,12 +137,14 @@ export class WSClient {
  * [INTENT] Detect if running inside Electron
  */
 export function isElectron(): boolean {
-  return typeof window !== 'undefined' && !!(window as Record<string, unknown>).electronAPI;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return typeof window !== 'undefined' && !!(window as any).electronAPI;
 }
 
 /**
  * [INTENT] Detect if running inside Capacitor
  */
 export function isCapacitor(): boolean {
-  return typeof window !== 'undefined' && !!(window as Record<string, unknown>).Capacitor;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return typeof window !== 'undefined' && !!(window as any).Capacitor;
 }
