@@ -11,7 +11,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveFile: (name: string, data: ArrayBuffer) =>
     ipcRenderer.invoke('save-file', name, Buffer.from(data)),
   getDownloadsPath: () => ipcRenderer.invoke('get-downloads-path'),
-  onServerStarted: (callback: (info: { ip: string; port: number }) => void) => {
+  onServerStarted: (callback: (info: { ip: string; port: number; webUrl: string; webPort: number }) => void) => {
     ipcRenderer.on('server-started', (_event, info) => callback(info));
   },
 });

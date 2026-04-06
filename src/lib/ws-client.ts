@@ -148,3 +148,28 @@ export function isCapacitor(): boolean {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return typeof window !== 'undefined' && !!(window as any).Capacitor;
 }
+
+/**
+ * [INTENT] Detect if running as a web client (browser, not Electron or Capacitor)
+ */
+export function isWebMode(): boolean {
+  return !isElectron() && !isCapacitor();
+}
+
+/**
+ * [INTENT] Get the WebSocket server host for web mode clients
+ * [CONSTRAINT] Web clients are served from the same host as the WS server,
+ *   so we use the page's hostname and fetch the WS port from /__lanlink_config__
+ */
+export async function getWebModeWSUrl(): Promise<string | null> {
+  if (!isWebMode()) return null;
+  try {
+    const res = await fetch('/__lanlink_config__');
+    if (!res.ok) return null;
+    const config = await res.json();
+    return `${window.location.hostname}:${config.wsPort}`;
+  } catch {
+    // Fallback: assume WS is on the same host, default port
+    return `${window.location.hostname}:8765`;
+  }
+}

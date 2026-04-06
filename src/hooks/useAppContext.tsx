@@ -5,7 +5,7 @@
  */
 
 import React, { createContext, useContext, useReducer, useCallback, useRef, useEffect } from 'react';
-import { WSClient, ConnectionState } from '@/lib/ws-client';
+import { WSClient, ConnectionState, isWebMode, getWebModeWSUrl } from '@/lib/ws-client';
 import { WSMessage, CHUNK_SIZE, DEFAULT_PORT } from '@/lib/protocol';
 import {
   FileTransfer,
@@ -411,6 +411,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       clientRef.current?.disconnect();
     };
   }, []);
+
+  // [INTENT] Auto-connect in web mode — the page is served from the desktop,
+  //   so the WS server is on the same host
+  useEffect(() => {
+    if (isWebMode()) {
+      getWebModeWSUrl().then((wsHost) => {
+        if (wsHost) {
+          const [ip, portStr] = wsHost.split(':');
+          dispatch({ type: 'SET_SERVER_IP', ip });
+          if (!clientRef.current) {
+            clientRef.current = new WSClient({
+              onMessage: handleMessage,
+              onStateChange: (s) => dispatch({ type: 'SET_CONNECTION', state: s }),
+            });
+          }
+          clientRef.current.connect(ip, parseInt(portStr, 10));
+        }
+      });
+    }
+  }, [handleMessage]);
 
   return (
     <AppContext.Provider

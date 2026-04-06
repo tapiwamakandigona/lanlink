@@ -1,5 +1,5 @@
 /**
- * [INTENT] Electron main process — creates window, starts WebSocket server, handles file I/O
+ * [INTENT] Electron main process — creates window, starts WebSocket server, HTTP web server, handles file I/O
  * [CONSTRAINT] WebSocket server runs in main process (Node.js); renderer is the React UI
  * [EDGE-CASE] Must handle port conflicts, firewall prompts on Windows
  */
@@ -7,11 +7,13 @@
 import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import path from 'path';
 import { createWSServer, stopWSServer } from './ws-server';
+import { startWebServer, stopWebServer } from './web-server';
 import { startDiscovery, stopDiscovery } from './discovery';
 import { networkInterfaces } from 'os';
 import fs from 'fs';
 
 const DEFAULT_PORT = 8765;
+const WEB_SERVER_PORT = 3210;
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -73,6 +75,21 @@ app.whenReady().then(async () => {
     console.error('[LanLink] Failed to start WebSocket server:', err);
   }
 
+  // Start HTTP web server for LAN browser access
+  let webUrl = '';
+  try {
+    const distDir = path.join(__dirname, '../dist');
+    if (fs.existsSync(distDir)) {
+      await startWebServer(distDir, WEB_SERVER_PORT, port);
+      webUrl = `http://${localIP}:${WEB_SERVER_PORT}`;
+      console.log(`[LanLink] Web access: ${webUrl}`);
+    } else {
+      console.warn('[LanLink] dist/ folder not found — web mode unavailable');
+    }
+  } catch (err) {
+    console.error('[LanLink] Failed to start web server:', err);
+  }
+
   // Start LAN discovery broadcast
   try {
     startDiscovery(localIP, port);
@@ -82,11 +99,21 @@ app.whenReady().then(async () => {
 
   // Notify renderer of server info
   mainWindow?.webContents.on('did-finish-load', () => {
-    mainWindow?.webContents.send('server-started', { ip: localIP, port });
+    mainWindow?.webContents.send('server-started', {
+      ip: localIP,
+      port,
+      webUrl,
+      webPort: WEB_SERVER_PORT,
+    });
   });
 
   // IPC handlers
-  ipcMain.handle('get-server-info', () => ({ ip: localIP, port }));
+  ipcMain.handle('get-server-info', () => ({
+    ip: localIP,
+    port,
+    webUrl,
+    webPort: WEB_SERVER_PORT,
+  }));
 
   ipcMain.handle('select-files', async () => {
     const result = await dialog.showOpenDialog(mainWindow!, {
@@ -107,6 +134,7 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', () => {
   stopWSServer();
+  stopWebServer();
   stopDiscovery();
   app.quit();
 });
