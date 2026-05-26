@@ -1,0 +1,80 @@
+/// Metadata about a single file in a transfer.
+///
+/// This matches the per-file shape in LocalSend's `prepare-upload` request.
+class FileInfo {
+  FileInfo({
+    required this.id,
+    required this.fileName,
+    required this.size,
+    required this.fileType,
+    this.sha256,
+    this.preview,
+    this.localPath,
+  });
+
+  /// Sender-chosen ID, unique within a session.
+  final String id;
+  final String fileName;
+  final int size;
+
+  /// MIME-ish type string. Common values: `image`, `video`, `app`, `text`, `pdf`, `other`.
+  final String fileType;
+
+  /// Optional SHA-256 of the file. v2.0 does not require it but will record
+  /// it for verification when present.
+  final String? sha256;
+
+  /// Optional small inline preview (base64) for images. Not used by v2.0.
+  final String? preview;
+
+  /// Local filesystem path (sender-side). Receiver leaves this null and
+  /// fills in the eventual save path after acceptance.
+  final String? localPath;
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'fileName': fileName,
+        'size': size,
+        'fileType': fileType,
+        if (sha256 != null) 'sha256': sha256,
+        if (preview != null) 'preview': preview,
+      };
+
+  factory FileInfo.fromJson(Map<String, dynamic> json) => FileInfo(
+        id: json['id'] as String,
+        fileName: json['fileName'] as String,
+        size: (json['size'] as num).toInt(),
+        fileType: (json['fileType'] as String?) ?? 'other',
+        sha256: json['sha256'] as String?,
+        preview: json['preview'] as String?,
+      );
+
+  FileInfo copyWith({String? localPath}) => FileInfo(
+        id: id,
+        fileName: fileName,
+        size: size,
+        fileType: fileType,
+        sha256: sha256,
+        preview: preview,
+        localPath: localPath ?? this.localPath,
+      );
+}
+
+/// Best-effort MIME-ish categorization from a filename extension.
+String fileTypeForName(String fileName) {
+  final ext = fileName.split('.').last.toLowerCase();
+  const images = {'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'heic', 'svg'};
+  const videos = {'mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v'};
+  const audio = {'mp3', 'wav', 'flac', 'aac', 'ogg', 'm4a'};
+  const docs = {'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'odt'};
+  const archive = {'zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz'};
+  const code = {'txt', 'md', 'json', 'xml', 'yml', 'yaml', 'csv', 'log'};
+  if (ext == 'apk') return 'app';
+  if (images.contains(ext)) return 'image';
+  if (videos.contains(ext)) return 'video';
+  if (audio.contains(ext)) return 'audio';
+  if (docs.contains(ext)) return 'pdf';
+  if (archive.contains(ext)) return 'archive';
+  if (code.contains(ext)) return 'text';
+  return 'other';
+}
