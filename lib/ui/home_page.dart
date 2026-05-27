@@ -125,8 +125,7 @@ class _HomePageState extends State<HomePage> {
             ListTile(
               leading: const Icon(Icons.upload_file_outlined),
               title: const Text('Add files'),
-              subtitle:
-                  const Text('Pick documents, media, archives, or apps'),
+              subtitle: const Text('Pick documents, media, archives, or apps'),
               onTap: () => Navigator.of(context).pop(_AddAction.files),
             ),
             ListTile(
