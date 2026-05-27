@@ -203,11 +203,27 @@ class Receiver {
     if (info == null) return Response.notFound('no such file');
 
     final saveDir = await saveDirProvider();
-    await saveDir.create(recursive: true);
+    try {
+      await saveDir.create(recursive: true);
+    } catch (e) {
+      ps.session.markFile(fileId, TransferStatus.failed,
+          error: 'Cannot create save folder ${saveDir.path}: $e');
+      ps.session.markStatus(TransferStatus.failed);
+      return Response.internalServerError(
+          body: 'cannot create save folder: $e');
+    }
     final finalPath = await _uniqueOutputPath(saveDir, info.fileName);
     final tmpPath = '$finalPath.lanlink-part';
     final tmpFile = File(tmpPath);
-    final sink = tmpFile.openWrite();
+    IOSink? sink;
+    try {
+      sink = tmpFile.openWrite();
+    } catch (e) {
+      ps.session.markFile(fileId, TransferStatus.failed,
+          error: 'Cannot open ${tmpFile.path}: $e');
+      ps.session.markStatus(TransferStatus.failed);
+      return Response.internalServerError(body: 'cannot open temp file: $e');
+    }
 
     int received = 0;
     try {
@@ -219,7 +235,6 @@ class Receiver {
       await sink.flush();
       await sink.close();
       await tmpFile.rename(finalPath);
-      await _makeAndroidFileVisible(finalPath);
     } catch (e) {
       try {
         await sink.close();
@@ -232,7 +247,18 @@ class Receiver {
       return Response.internalServerError(body: 'write failed: $e');
     }
 
-    ps.session.markFile(fileId, TransferStatus.completed, savedPath: finalPath);
+    // On Android, the path we just wrote to is almost always inside the app's
+    // private external files directory (because scoped storage blocks direct
+    // writes to /storage/emulated/0/Download from API 30+). Publish a copy to
+    // MediaStore.Downloads so the file is visible to the user in the Files /
+    // Downloads app exactly like ShareIt / LocalSend.
+    final publicLocation = await _publishToPublicDownloads(
+      sourcePath: finalPath,
+      fileName: info.fileName,
+    );
+    final visiblePath = publicLocation ?? finalPath;
+    ps.session
+        .markFile(fileId, TransferStatus.completed, savedPath: visiblePath);
 
     // If every file in the session is done, mark the session complete.
     final allDone = ps.session.files.values
@@ -244,11 +270,44 @@ class Receiver {
     return Response.ok('ok');
   }
 
-  Future<void> _makeAndroidFileVisible(String path) async {
-    if (!Platform.isAndroid) return;
+  /// On Android publishes [sourcePath] into the user-visible
+  /// `Downloads/LanLink/` MediaStore collection and returns a human-readable
+  /// path like `Downloads/LanLink/foo.bin`. The source file is removed if the
+  /// publish succeeds so we don't end up with two copies on disk.
+  ///
+  /// On Windows / Linux / macOS this just runs the (optional) media scanner
+  /// hook and returns null — the file is already saved at [sourcePath] in a
+  /// user-visible location.
+  Future<String?> _publishToPublicDownloads({
+    required String sourcePath,
+    required String fileName,
+  }) async {
+    if (!Platform.isAndroid) return null;
     try {
-      await _platform.invokeMethod<void>('scanFile', {'path': path});
+      final publicPath = await _platform.invokeMethod<String>(
+        'publishToDownloads',
+        {'sourcePath': sourcePath, 'fileName': fileName},
+      );
+      if (publicPath != null && publicPath.isNotEmpty) {
+        // Source has been copied to public storage. Delete the temp copy so
+        // we don't waste space inside the app's private external dir.
+        try {
+          final src = File(sourcePath);
+          if (await src.exists()) await src.delete();
+        } catch (_) {}
+        return publicPath;
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('[receiver] publishToDownloads failed: $e');
+      }
+    }
+    // Fallback: at least poke the media scanner so the file shows up in
+    // gallery / file manager indexes.
+    try {
+      await _platform.invokeMethod<void>('scanFile', {'path': sourcePath});
     } catch (_) {}
+    return null;
   }
 
   Future<Response> _handleCancel(Request req) async {

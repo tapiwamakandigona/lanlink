@@ -126,20 +126,25 @@ class AppState extends ChangeNotifier {
   }
 
   Future<Directory> _resolveSaveDir() async {
+    // Android always writes to the app's private external files dir first;
+    // the receiver then republishes the finished file into the user-visible
+    // Downloads/LanLink MediaStore collection. Custom save folders picked
+    // through the Storage Access Framework would come back as `content://`
+    // URIs that dart:io can't open directly, so we deliberately ignore
+    // settings.saveDir on Android and route everything through MediaStore.
+    if (Platform.isAndroid) {
+      final dir = await getExternalStorageDirectory();
+      if (dir != null)
+        return Directory(p.join(dir.path, 'LanLink', 'incoming'));
+      // Last-ditch fallback (very old devices): app documents dir.
+      final docs = await getApplicationDocumentsDirectory();
+      return Directory(p.join(docs.path, 'LanLink'));
+    }
+
+    // Desktop platforms: honour the user-picked folder if it's set.
     final fromSettings = settings.saveDir;
     if (fromSettings != null && fromSettings.isNotEmpty) {
       return Directory(fromSettings);
-    }
-    // Fall back to per-platform sensible defaults.
-    if (Platform.isAndroid) {
-      final downloads = Directory('/storage/emulated/0/Download/LanLink');
-      try {
-        await downloads.create(recursive: true);
-        return downloads;
-      } catch (_) {
-        final dir = await getExternalStorageDirectory();
-        if (dir != null) return Directory(p.join(dir.path, 'LanLink'));
-      }
     }
     try {
       final downloads = await getDownloadsDirectory();
@@ -191,7 +196,12 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Initiates a send to [peer]. Returns the live [TransferSession].
+  /// Initiates a send to [peer]. Returns the live [TransferSession] that the
+  /// caller (and any subscribed UI) can listen to for progress.
+  ///
+  /// The returned session is the same object the sender mutates throughout
+  /// the transfer, so per-file byte counters and the overall status are
+  /// visible immediately as bytes leave the socket.
   Future<TransferSession> sendFiles({
     required Device peer,
     required List<FileInfo> files,
@@ -199,8 +209,8 @@ class AppState extends ChangeNotifier {
     if (settings.connectivityMode == ConnectivityMode.bluetooth) {
       return _sendFilesOverBluetooth(peer: peer, files: files);
     }
-    final placeholder = TransferSession(
-      sessionId: 'pending-${DateTime.now().microsecondsSinceEpoch}',
+    final session = TransferSession(
+      sessionId: 'sending-${DateTime.now().microsecondsSinceEpoch}',
       direction: TransferDirection.send,
       peer: peer,
       files: {
@@ -209,27 +219,15 @@ class AppState extends ChangeNotifier {
       },
       status: TransferStatus.transferring,
     );
-    _sessions.insert(0, placeholder);
-    placeholder.addListener(() => notifyListeners());
+    _sessions.insert(0, session);
+    session.addListener(() => notifyListeners());
     notifyListeners();
 
-    // Kick off the actual send in the background; replace the placeholder
-    // entry with the real session once we have the server-assigned ID.
-    unawaited(() async {
-      final real = await _sender.send(peer: peer, files: files);
-      final idx = _sessions.indexOf(placeholder);
-      if (idx >= 0) {
-        _sessions[idx] = real;
-        real.addListener(() => notifyListeners());
-        notifyListeners();
-      } else {
-        _sessions.insert(0, real);
-        real.addListener(() => notifyListeners());
-        notifyListeners();
-      }
-    }());
+    // Drive the transfer in the background. The sender mutates `session`
+    // directly so we don't have to swap anything in the list afterward.
+    unawaited(_sender.send(session: session, peer: peer, files: files));
 
-    return placeholder;
+    return session;
   }
 
   Future<TransferSession> _sendFilesOverBluetooth({

@@ -56,7 +56,11 @@ class TransferSession extends ChangeNotifier {
     this.status = TransferStatus.transferring,
   }) : _files = files;
 
-  final String sessionId;
+  /// Local identifier for this session. For send sessions this is initially
+  /// a "pending-…" placeholder; once `prepare-upload` returns it is updated
+  /// to the receiver-assigned sessionId so cancel requests can be addressed
+  /// to the right session on the receiver.
+  String sessionId;
   final TransferDirection direction;
   final Device peer;
 

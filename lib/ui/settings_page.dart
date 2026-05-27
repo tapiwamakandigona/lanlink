@@ -65,38 +65,59 @@ class _SettingsPageState extends State<SettingsPage> {
           Text('Save folder', style: theme.textTheme.titleMedium),
           const SizedBox(height: 4),
           Text(
-            'Where incoming files are saved.',
+            Platform.isAndroid
+                ? 'Incoming files are saved to your phone\'s Downloads/LanLink folder so you can find them in the Files app right away.'
+                : 'Where incoming files are saved.',
             style: theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
             ),
           ),
           const SizedBox(height: 8),
-          TextField(
-            controller: _saveDirCtrl,
-            readOnly: true,
-            decoration: InputDecoration(
-              hintText: '(default location)',
-              border: const OutlineInputBorder(),
-              suffixIcon: Row(
-                mainAxisSize: MainAxisSize.min,
+          if (Platform.isAndroid)
+            InputDecorator(
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+              ),
+              child: Row(
                 children: [
-                  IconButton(
-                    tooltip: 'Reset to default',
-                    icon: const Icon(Icons.refresh),
-                    onPressed: () async {
-                      await state.settings.setSaveDir(null);
-                      _saveDirCtrl.text = '';
-                    },
-                  ),
-                  IconButton(
-                    tooltip: 'Choose folder',
-                    icon: const Icon(Icons.folder_open),
-                    onPressed: _pickFolder,
+                  const Icon(Icons.folder, size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Download/LanLink',
+                      style: theme.textTheme.bodyMedium,
+                    ),
                   ),
                 ],
               ),
+            )
+          else
+            TextField(
+              controller: _saveDirCtrl,
+              readOnly: true,
+              decoration: InputDecoration(
+                hintText: '(default location)',
+                border: const OutlineInputBorder(),
+                suffixIcon: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      tooltip: 'Reset to default',
+                      icon: const Icon(Icons.refresh),
+                      onPressed: () async {
+                        await state.settings.setSaveDir(null);
+                        _saveDirCtrl.text = '';
+                      },
+                    ),
+                    IconButton(
+                      tooltip: 'Choose folder',
+                      icon: const Icon(Icons.folder_open),
+                      onPressed: _pickFolder,
+                    ),
+                  ],
+                ),
+              ),
             ),
-          ),
           const Divider(height: 32),
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
