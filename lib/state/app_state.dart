@@ -5,10 +5,14 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../core/connectivity/connectivity_mode.dart';
 import '../core/discovery/multicast_discovery.dart';
+import '../core/discovery/subnet_scanner.dart';
+import '../core/update/update_checker.dart';
 import '../core/models/device.dart';
 import '../core/models/file_info.dart';
 import '../core/models/session.dart';
+import '../core/platform/platform_share.dart';
 import '../core/protocol/constants.dart';
 import '../core/settings/app_settings.dart';
 import '../core/transfer/receiver.dart';
@@ -42,6 +46,14 @@ class AppState extends ChangeNotifier {
   late Receiver _receiver;
   late Sender _sender;
   late MulticastDiscovery _discovery;
+  late SubnetScanner _subnetScanner;
+  late UpdateChecker _updateChecker;
+
+  /// Whether a manual / automatic subnet sweep is currently in flight.
+  bool _scanning = false;
+  bool get isScanning => _scanning;
+
+  UpdateChecker get updateChecker => _updateChecker;
 
   /// UI hook installed by main.dart once the navigator is alive.
   IncomingTransferPrompt? _incomingPrompt;
@@ -85,12 +97,76 @@ class AppState extends ChangeNotifier {
       selfDevice: state._buildSelfDevice(),
       onPeer: state._onPeerSeen,
     );
+    state._subnetScanner = SubnetScanner(
+      sender: state._sender,
+      onPeer: state._onPeerSeen,
+    );
+    state._updateChecker = UpdateChecker();
+    state._updateChecker.addListener(state.notifyListeners);
 
     settings.addListener(state._onSettingsChanged);
 
     await state._receiver.start();
     await state._discovery.start();
+    if (settings.connectivityMode == ConnectivityMode.hotspot) {
+      unawaited(state._kickSubnetScan());
+    }
+    if (settings.autoUpdateCheck) {
+      unawaited(state._updateChecker.initialize());
+    }
     return state;
+  }
+
+  /// Detects which side of a hotspot we are on based on the local IPs.
+  /// `HotspotRole.auto` is replaced with the best guess; the explicit
+  /// settings override always wins.
+  HotspotRole resolveHotspotRole() {
+    final explicit = settings.hotspotRole;
+    if (explicit != HotspotRole.auto) return explicit;
+    for (final ip in _localIps) {
+      if (_looksLikeHotspotGateway(ip)) return HotspotRole.hosting;
+    }
+    return HotspotRole.joining;
+  }
+
+  static bool _looksLikeHotspotGateway(String ip) {
+    const gateways = <String>{
+      '192.168.43.1',
+      '192.168.49.1',
+      '192.168.1.1',
+      '10.0.0.1',
+      '172.20.10.1',
+    };
+    return gateways.contains(ip);
+  }
+
+  /// Pokes multicast announce and kicks off a fresh subnet sweep. Wired to
+  /// the refresh button in the home page and the mode-switch handler so
+  /// changing modes immediately rediscovers peers.
+  Future<void> refreshDiscovery() async {
+    _discovery.poke();
+    final ips = await listLocalIPv4Addresses();
+    _localIps
+      ..clear()
+      ..addAll(ips);
+    if (settings.connectivityMode == ConnectivityMode.hotspot ||
+        settings.connectivityMode == ConnectivityMode.lan) {
+      await _kickSubnetScan();
+    }
+  }
+
+  Future<void> _kickSubnetScan() async {
+    if (_scanning) {
+      _subnetScanner.cancel();
+    }
+    _scanning = true;
+    notifyListeners();
+    try {
+      await _subnetScanner.scan(localIps: _localIps);
+    } finally {
+      _scanning = false;
+      notifyListeners();
+    }
   }
 
   void installIncomingPrompt(IncomingTransferPrompt prompt) {
@@ -124,16 +200,26 @@ class AppState extends ChangeNotifier {
   }
 
   Future<Directory> _resolveSaveDir() async {
+    // Android always writes to the app's private external files dir first;
+    // the receiver then republishes the finished file into the user-visible
+    // Downloads/LanLink MediaStore collection. Custom save folders picked
+    // through the Storage Access Framework would come back as `content://`
+    // URIs that dart:io can't open directly, so we deliberately ignore
+    // settings.saveDir on Android and route everything through MediaStore.
+    if (Platform.isAndroid) {
+      final dir = await getExternalStorageDirectory();
+      if (dir != null) {
+        return Directory(p.join(dir.path, 'LanLink', 'incoming'));
+      }
+      // Last-ditch fallback (very old devices): app documents dir.
+      final docs = await getApplicationDocumentsDirectory();
+      return Directory(p.join(docs.path, 'LanLink'));
+    }
+
+    // Desktop platforms: honour the user-picked folder if it's set.
     final fromSettings = settings.saveDir;
     if (fromSettings != null && fromSettings.isNotEmpty) {
       return Directory(fromSettings);
-    }
-    // Fall back to per-platform sensible defaults.
-    if (Platform.isAndroid) {
-      // External app-files dir is always writable on Android 8+ without
-      // additional permissions; user can pick a different folder later.
-      final dir = await getExternalStorageDirectory();
-      if (dir != null) return Directory(p.join(dir.path, 'LanLink'));
     }
     try {
       final downloads = await getDownloadsDirectory();
@@ -182,16 +268,27 @@ class AppState extends ChangeNotifier {
   void _onSettingsChanged() {
     _discovery.selfDevice = _buildSelfDevice();
     _discovery.poke();
+    if (settings.connectivityMode == ConnectivityMode.hotspot && !_scanning) {
+      unawaited(_kickSubnetScan());
+    }
     notifyListeners();
   }
 
-  /// Initiates a send to [peer]. Returns the live [TransferSession].
+  /// Initiates a send to [peer]. Returns the live [TransferSession] that the
+  /// caller (and any subscribed UI) can listen to for progress.
+  ///
+  /// The returned session is the same object the sender mutates throughout
+  /// the transfer, so per-file byte counters and the overall status are
+  /// visible immediately as bytes leave the socket.
   Future<TransferSession> sendFiles({
     required Device peer,
     required List<FileInfo> files,
   }) async {
-    final placeholder = TransferSession(
-      sessionId: 'pending-${DateTime.now().microsecondsSinceEpoch}',
+    if (settings.connectivityMode == ConnectivityMode.bluetooth) {
+      return _sendFilesOverBluetooth(peer: peer, files: files);
+    }
+    final session = TransferSession(
+      sessionId: 'sending-${DateTime.now().microsecondsSinceEpoch}',
       direction: TransferDirection.send,
       peer: peer,
       files: {
@@ -200,27 +297,57 @@ class AppState extends ChangeNotifier {
       },
       status: TransferStatus.transferring,
     );
-    _sessions.insert(0, placeholder);
-    placeholder.addListener(() => notifyListeners());
+    _sessions.insert(0, session);
+    session.addListener(() => notifyListeners());
     notifyListeners();
 
-    // Kick off the actual send in the background; replace the placeholder
-    // entry with the real session once we have the server-assigned ID.
-    unawaited(() async {
-      final real = await _sender.send(peer: peer, files: files);
-      final idx = _sessions.indexOf(placeholder);
-      if (idx >= 0) {
-        _sessions[idx] = real;
-        real.addListener(() => notifyListeners());
-        notifyListeners();
-      } else {
-        _sessions.insert(0, real);
-        real.addListener(() => notifyListeners());
-        notifyListeners();
-      }
-    }());
+    // Drive the transfer in the background. The sender mutates `session`
+    // directly so we don't have to swap anything in the list afterward.
+    unawaited(_sender.send(session: session, peer: peer, files: files));
 
-    return placeholder;
+    return session;
+  }
+
+  Future<TransferSession> _sendFilesOverBluetooth({
+    required Device peer,
+    required List<FileInfo> files,
+  }) async {
+    final session = TransferSession(
+      sessionId: 'bluetooth-${DateTime.now().microsecondsSinceEpoch}',
+      direction: TransferDirection.send,
+      peer: peer,
+      files: {
+        for (final f in files)
+          f.id: FileProgress(file: f, status: TransferStatus.awaitingAccept),
+      },
+      status: TransferStatus.awaitingAccept,
+    );
+    _sessions.insert(0, session);
+    session.addListener(() => notifyListeners());
+    notifyListeners();
+
+    final paths = files
+        .map((file) => file.localPath)
+        .whereType<String>()
+        .where((path) => path.isNotEmpty)
+        .toList();
+    final shared = await PlatformShare.shareViaBluetooth(paths: paths);
+    if (shared) {
+      for (final file in files) {
+        session.markFile(file.id, TransferStatus.completed);
+      }
+      session.markStatus(TransferStatus.completed);
+    } else {
+      for (final file in files) {
+        session.markFile(
+          file.id,
+          TransferStatus.failed,
+          error: 'Bluetooth sharing is unavailable on this device.',
+        );
+      }
+      session.markStatus(TransferStatus.failed);
+    }
+    return session;
   }
 
   /// Manually adds a peer by host:port. Useful when discovery is blocked.
@@ -249,6 +376,9 @@ class AppState extends ChangeNotifier {
   @override
   void dispose() {
     settings.removeListener(_onSettingsChanged);
+    _updateChecker.removeListener(notifyListeners);
+    _updateChecker.dispose();
+    _subnetScanner.cancel();
     _discovery.stop();
     _receiver.stop();
     super.dispose();

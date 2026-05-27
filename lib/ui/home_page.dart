@@ -3,13 +3,18 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:uuid/uuid.dart';
 
+import '../core/connectivity/connectivity_mode.dart';
 import '../core/models/device.dart';
 import '../core/models/file_info.dart';
+import '../core/platform/android_apps.dart';
 import '../state/app_state.dart';
+import 'about_page.dart';
 import 'history_page.dart';
 import 'settings_page.dart';
+import 'widgets/attribution_banner.dart';
 import 'widgets/device_card.dart';
 import 'widgets/progress_card.dart';
+import 'widgets/update_available_banner.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -25,6 +30,7 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
+    final mode = state.settings.connectivityMode;
     final peers = state.peers.values.toList()
       ..sort((a, b) => a.alias.compareTo(b.alias));
     final active = state.sessions
@@ -37,6 +43,24 @@ class _HomePageState extends State<HomePage> {
       appBar: AppBar(
         title: const Text('LanLink'),
         actions: [
+          IconButton(
+            tooltip: state.isScanning ? 'Scanning…' : 'Rescan for devices',
+            icon: state.isScanning
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.refresh),
+            onPressed: state.isScanning ? null : () => state.refreshDiscovery(),
+          ),
+          IconButton(
+            tooltip: 'About',
+            icon: const Icon(Icons.info_outline),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const AboutPage()),
+            ),
+          ),
           IconButton(
             tooltip: 'History',
             icon: const Icon(Icons.history),
@@ -59,11 +83,23 @@ class _HomePageState extends State<HomePage> {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
               children: [
+                if (state.updateChecker.availableUpdate != null)
+                  UpdateAvailableBanner(
+                    release: state.updateChecker.availableUpdate!,
+                  ),
+                _modePanel(context, state),
+                if (mode == ConnectivityMode.hotspot) ...[
+                  const SizedBox(height: 8),
+                  _hotspotPanel(context, state),
+                ],
+                const SizedBox(height: 16),
                 _stagedFilesPanel(context),
                 const SizedBox(height: 16),
-                _nearbyHeader(context, peers.length),
-                if (peers.isEmpty)
-                  _emptyPeers(context)
+                _nearbyHeader(context, mode, peers.length),
+                if (mode == ConnectivityMode.bluetooth)
+                  _bluetoothPanel(context, state)
+                else if (peers.isEmpty)
+                  _emptyPeers(context, mode)
                 else
                   ...peers.map(
                     (p) => Padding(
@@ -87,12 +123,153 @@ class _HomePageState extends State<HomePage> {
               ],
             ),
           ),
+          const AttributionBanner(),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: _pickFiles,
+        onPressed: _showAddMenu,
         icon: const Icon(Icons.add),
-        label: const Text('Add files'),
+        label: const Text('Add'),
+      ),
+    );
+  }
+
+  Future<void> _showAddMenu() async {
+    final action = await showModalBottomSheet<_AddAction>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.upload_file_outlined),
+              title: const Text('Add files'),
+              subtitle: const Text('Pick documents, media, archives, or apps'),
+              onTap: () => Navigator.of(context).pop(_AddAction.files),
+            ),
+            ListTile(
+              leading: const Icon(Icons.android),
+              title: const Text('Add installed apps as APKs'),
+              subtitle: const Text('Android only'),
+              onTap: () => Navigator.of(context).pop(_AddAction.apps),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (action == null) return;
+    switch (action) {
+      case _AddAction.files:
+        await _pickFiles();
+        break;
+      case _AddAction.apps:
+        await _pickApps();
+        break;
+    }
+  }
+
+  Widget _hotspotPanel(BuildContext context, AppState state) {
+    final theme = Theme.of(context);
+    final resolvedRole = state.resolveHotspotRole();
+    final selected = state.settings.hotspotRole;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  resolvedRole == HotspotRole.hosting
+                      ? Icons.wifi_tethering
+                      : Icons.wifi,
+                  size: 18,
+                  color: theme.colorScheme.primary,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  'Hotspot role',
+                  style: theme.textTheme.titleSmall,
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final role in HotspotRole.values)
+                  ChoiceChip(
+                    label: Text(role.label),
+                    selected: selected == role,
+                    onSelected: (_) async {
+                      await state.settings.setHotspotRole(role);
+                      await state.refreshDiscovery();
+                    },
+                  ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              resolvedRole.hint,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            if (resolvedRole == HotspotRole.hosting &&
+                state.localIps.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Other devices should look for IPs in your hotspot subnet '
+                '(currently ${state.localIps.first}).',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _modePanel(BuildContext context, AppState state) {
+    final theme = Theme.of(context);
+    final selected = state.settings.connectivityMode;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Transfer mode', style: theme.textTheme.titleMedium),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final mode in ConnectivityMode.values)
+                  ChoiceChip(
+                    label: Text(mode.label),
+                    avatar: Icon(_modeIcon(mode), size: 18),
+                    selected: selected == mode,
+                    onSelected: mode.isAvailable
+                        ? (_) => state.settings.setConnectivityMode(mode)
+                        : null,
+                  ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              selected.description,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -178,13 +355,18 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _nearbyHeader(BuildContext context, int n) {
+  Widget _nearbyHeader(BuildContext context, ConnectivityMode mode, int n) {
     final theme = Theme.of(context);
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Row(
         children: [
-          Text('Nearby devices', style: theme.textTheme.titleMedium),
+          Text(
+            mode == ConnectivityMode.bluetooth
+                ? 'Bluetooth sharing'
+                : 'Nearby devices',
+            style: theme.textTheme.titleMedium,
+          ),
           const SizedBox(width: 8),
           if (n > 0)
             Container(
@@ -196,17 +378,18 @@ class _HomePageState extends State<HomePage> {
               child: Text('$n', style: theme.textTheme.labelSmall),
             ),
           const Spacer(),
-          IconButton(
-            tooltip: 'Add device by IP',
-            icon: const Icon(Icons.add_circle_outline),
-            onPressed: _addManualPeer,
-          ),
+          if (mode.usesLanTransport)
+            IconButton(
+              tooltip: 'Add device by IP',
+              icon: const Icon(Icons.add_circle_outline),
+              onPressed: _addManualPeer,
+            ),
         ],
       ),
     );
   }
 
-  Widget _emptyPeers(BuildContext context) {
+  Widget _emptyPeers(BuildContext context, ConnectivityMode mode) {
     final theme = Theme.of(context);
     return Card(
       child: Padding(
@@ -217,19 +400,64 @@ class _HomePageState extends State<HomePage> {
                 color: theme.colorScheme.onSurfaceVariant),
             const SizedBox(height: 8),
             Text(
-              'Looking for devices on your Wi-Fi…',
+              mode == ConnectivityMode.hotspot
+                  ? 'Ready for hotspot sharing'
+                  : 'Looking for devices on your Wi-Fi…',
               style: theme.textTheme.bodyMedium,
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 4),
             Text(
-              'Make sure both devices are on the same network. '
-              'If discovery is blocked, tap the + icon to enter the other '
-              'device\'s IP manually.',
+              mode == ConnectivityMode.hotspot
+                  ? 'Turn on a phone hotspot, connect the other device to it, then tap + to enter the host address shown in Settings.'
+                  : 'Make sure both devices are on the same network. If discovery is blocked, tap the + icon to enter the other device\'s IP manually.',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
               textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _bluetoothPanel(BuildContext context, AppState state) {
+    final theme = Theme.of(context);
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.bluetooth, color: theme.colorScheme.primary),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Bluetooth uses the system share sheet. Pick files or APKs, then tap Share via Bluetooth.',
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              onPressed: _staged.isEmpty
+                  ? null
+                  : () => _sendStagedTo(Device(
+                        alias: 'Bluetooth device',
+                        version: 'bluetooth',
+                        deviceModel: 'System Bluetooth',
+                        deviceType: 'headless',
+                        fingerprint: 'bluetooth',
+                        port: 0,
+                        protocol: 'http',
+                        ip: '0.0.0.0',
+                      )),
+              icon: const Icon(Icons.bluetooth),
+              label: const Text('Share via Bluetooth'),
             ),
           ],
         ),
@@ -252,6 +480,80 @@ class _HomePageState extends State<HomePage> {
           size: f.size,
           fileType: fileTypeForName(f.name),
           localPath: f.path,
+        ));
+      }
+    });
+  }
+
+  Future<void> _pickApps() async {
+    if (!AndroidApps.isSupported) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('APK app sharing is available on Android.')),
+      );
+      return;
+    }
+    final apps = await AndroidApps.listLaunchableApps();
+    if (!mounted) return;
+    if (apps.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No shareable installed apps found.')),
+      );
+      return;
+    }
+    final selected = <AndroidAppInfo>{};
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Share apps as APKs'),
+          content: SizedBox(
+            width: 420,
+            child: ListView.builder(
+              shrinkWrap: true,
+              itemCount: apps.length,
+              itemBuilder: (context, i) {
+                final app = apps[i];
+                return CheckboxListTile(
+                  value: selected.contains(app),
+                  onChanged: (checked) => setDialogState(() {
+                    if (checked == true) {
+                      selected.add(app);
+                    } else {
+                      selected.remove(app);
+                    }
+                  }),
+                  title: Text(app.label, overflow: TextOverflow.ellipsis),
+                  subtitle:
+                      Text('${app.packageName} • ${_humanBytes(app.size)}'),
+                );
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: selected.isEmpty
+                  ? null
+                  : () => Navigator.of(context).pop(true),
+              child: const Text('Add APKs'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (ok != true) return;
+    setState(() {
+      for (final app in selected) {
+        _staged.add(FileInfo(
+          id: _uuid.v4(),
+          fileName: '${_safeApkName(app.label)}.apk',
+          size: app.size,
+          fileType: 'app',
+          localPath: app.apkPath,
         ));
       }
     });
@@ -314,6 +616,24 @@ class _HomePageState extends State<HomePage> {
     }
   }
 }
+
+IconData _modeIcon(ConnectivityMode mode) {
+  switch (mode) {
+    case ConnectivityMode.lan:
+      return Icons.wifi;
+    case ConnectivityMode.hotspot:
+      return Icons.wifi_tethering;
+    case ConnectivityMode.bluetooth:
+      return Icons.bluetooth;
+  }
+}
+
+String _safeApkName(String label) {
+  final cleaned = label.replaceAll(RegExp(r'[\\/:*?"<>|]+'), '_').trim();
+  return cleaned.isEmpty ? 'app' : cleaned;
+}
+
+enum _AddAction { files, apps }
 
 String _humanBytes(int bytes) {
   if (bytes < 1024) return '$bytes B';

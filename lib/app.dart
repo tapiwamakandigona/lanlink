@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 
 import 'core/transfer/receiver.dart';
 import 'state/app_state.dart';
-import 'ui/home_page.dart';
+import 'ui/splash_gate.dart';
 import 'ui/widgets/receive_dialog.dart';
 
 class LanLinkApp extends StatefulWidget {
@@ -57,7 +57,7 @@ class _LanLinkAppState extends State<LanLinkApp> {
             themeMode: ThemeMode.system,
             theme: _buildLight(),
             darkTheme: _buildDark(),
-            home: const HomePage(),
+            home: const SplashGate(),
           ),
         );
       },
