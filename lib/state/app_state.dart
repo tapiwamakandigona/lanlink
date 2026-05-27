@@ -5,10 +5,12 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../core/connectivity/connectivity_mode.dart';
 import '../core/discovery/multicast_discovery.dart';
 import '../core/models/device.dart';
 import '../core/models/file_info.dart';
 import '../core/models/session.dart';
+import '../core/platform/platform_share.dart';
 import '../core/protocol/constants.dart';
 import '../core/settings/app_settings.dart';
 import '../core/transfer/receiver.dart';
@@ -130,10 +132,14 @@ class AppState extends ChangeNotifier {
     }
     // Fall back to per-platform sensible defaults.
     if (Platform.isAndroid) {
-      // External app-files dir is always writable on Android 8+ without
-      // additional permissions; user can pick a different folder later.
-      final dir = await getExternalStorageDirectory();
-      if (dir != null) return Directory(p.join(dir.path, 'LanLink'));
+      final downloads = Directory('/storage/emulated/0/Download/LanLink');
+      try {
+        await downloads.create(recursive: true);
+        return downloads;
+      } catch (_) {
+        final dir = await getExternalStorageDirectory();
+        if (dir != null) return Directory(p.join(dir.path, 'LanLink'));
+      }
     }
     try {
       final downloads = await getDownloadsDirectory();
@@ -190,6 +196,9 @@ class AppState extends ChangeNotifier {
     required Device peer,
     required List<FileInfo> files,
   }) async {
+    if (settings.connectivityMode == ConnectivityMode.bluetooth) {
+      return _sendFilesOverBluetooth(peer: peer, files: files);
+    }
     final placeholder = TransferSession(
       sessionId: 'pending-${DateTime.now().microsecondsSinceEpoch}',
       direction: TransferDirection.send,
@@ -221,6 +230,48 @@ class AppState extends ChangeNotifier {
     }());
 
     return placeholder;
+  }
+
+  Future<TransferSession> _sendFilesOverBluetooth({
+    required Device peer,
+    required List<FileInfo> files,
+  }) async {
+    final session = TransferSession(
+      sessionId: 'bluetooth-${DateTime.now().microsecondsSinceEpoch}',
+      direction: TransferDirection.send,
+      peer: peer,
+      files: {
+        for (final f in files)
+          f.id: FileProgress(file: f, status: TransferStatus.awaitingAccept),
+      },
+      status: TransferStatus.awaitingAccept,
+    );
+    _sessions.insert(0, session);
+    session.addListener(() => notifyListeners());
+    notifyListeners();
+
+    final paths = files
+        .map((file) => file.localPath)
+        .whereType<String>()
+        .where((path) => path.isNotEmpty)
+        .toList();
+    final shared = await PlatformShare.shareViaBluetooth(paths: paths);
+    if (shared) {
+      for (final file in files) {
+        session.markFile(file.id, TransferStatus.completed);
+      }
+      session.markStatus(TransferStatus.completed);
+    } else {
+      for (final file in files) {
+        session.markFile(
+          file.id,
+          TransferStatus.failed,
+          error: 'Bluetooth sharing is unavailable on this device.',
+        );
+      }
+      session.markStatus(TransferStatus.failed);
+    }
+    return session;
   }
 
   /// Manually adds a peer by host:port. Useful when discovery is blocked.

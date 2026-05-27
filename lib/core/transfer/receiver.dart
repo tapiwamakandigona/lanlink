@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart' as shelf_io;
@@ -60,6 +61,7 @@ class Receiver {
 
   HttpServer? _httpServer;
   final _uuid = const Uuid();
+  static const _platform = MethodChannel('lanlink/received_files');
 
   /// Active receive sessions, keyed by sessionId.
   final Map<String, _PendingSession> _pending = {};
@@ -216,8 +218,8 @@ class Receiver {
       }
       await sink.flush();
       await sink.close();
-      // Atomically move the .part into place.
       await tmpFile.rename(finalPath);
+      await _makeAndroidFileVisible(finalPath);
     } catch (e) {
       try {
         await sink.close();
@@ -240,6 +242,13 @@ class Receiver {
       _pending.remove(sessionId);
     }
     return Response.ok('ok');
+  }
+
+  Future<void> _makeAndroidFileVisible(String path) async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _platform.invokeMethod<void>('scanFile', {'path': path});
+    } catch (_) {}
   }
 
   Future<Response> _handleCancel(Request req) async {
