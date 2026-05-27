@@ -16,6 +16,8 @@ class AppSettings extends ChangeNotifier {
   static const _quickSaveKey = 'lanlink_quick_save';
   static const _trustedKey = 'lanlink_trusted_fingerprints';
   static const _connectivityModeKey = 'lanlink_connectivity_mode';
+  static const _hotspotRoleKey = 'lanlink_hotspot_role';
+  static const _autoUpdateKey = 'lanlink_auto_update_check';
 
   final SharedPreferences _prefs;
 
@@ -35,6 +37,16 @@ class AppSettings extends ChangeNotifier {
       orElse: () => ConnectivityMode.lan,
     );
   }
+
+  HotspotRole get hotspotRole {
+    final name = _prefs.getString(_hotspotRoleKey);
+    return HotspotRole.values.firstWhere(
+      (role) => role.name == name,
+      orElse: () => HotspotRole.auto,
+    );
+  }
+
+  bool get autoUpdateCheck => _prefs.getBool(_autoUpdateKey) ?? true;
 
   Set<String> get trustedFingerprints {
     final raw = _prefs.getString(_trustedKey);
@@ -72,6 +84,16 @@ class AppSettings extends ChangeNotifier {
 
   Future<void> setConnectivityMode(ConnectivityMode value) async {
     await _prefs.setString(_connectivityModeKey, value.name);
+    notifyListeners();
+  }
+
+  Future<void> setHotspotRole(HotspotRole value) async {
+    await _prefs.setString(_hotspotRoleKey, value.name);
+    notifyListeners();
+  }
+
+  Future<void> setAutoUpdateCheck(bool value) async {
+    await _prefs.setBool(_autoUpdateKey, value);
     notifyListeners();
   }
 

@@ -14,6 +14,7 @@ import 'settings_page.dart';
 import 'widgets/attribution_banner.dart';
 import 'widgets/device_card.dart';
 import 'widgets/progress_card.dart';
+import 'widgets/update_available_banner.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -43,6 +44,17 @@ class _HomePageState extends State<HomePage> {
         title: const Text('LanLink'),
         actions: [
           IconButton(
+            tooltip: state.isScanning ? 'Scanning…' : 'Rescan for devices',
+            icon: state.isScanning
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.refresh),
+            onPressed: state.isScanning ? null : () => state.refreshDiscovery(),
+          ),
+          IconButton(
             tooltip: 'About',
             icon: const Icon(Icons.info_outline),
             onPressed: () => Navigator.of(context).push(
@@ -71,7 +83,15 @@ class _HomePageState extends State<HomePage> {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
               children: [
+                if (state.updateChecker.availableUpdate != null)
+                  UpdateAvailableBanner(
+                    release: state.updateChecker.availableUpdate!,
+                  ),
                 _modePanel(context, state),
+                if (mode == ConnectivityMode.hotspot) ...[
+                  const SizedBox(height: 8),
+                  _hotspotPanel(context, state),
+                ],
                 const SizedBox(height: 16),
                 _stagedFilesPanel(context),
                 const SizedBox(height: 16),
@@ -147,6 +167,72 @@ class _HomePageState extends State<HomePage> {
         await _pickApps();
         break;
     }
+  }
+
+  Widget _hotspotPanel(BuildContext context, AppState state) {
+    final theme = Theme.of(context);
+    final resolvedRole = state.resolveHotspotRole();
+    final selected = state.settings.hotspotRole;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  resolvedRole == HotspotRole.hosting
+                      ? Icons.wifi_tethering
+                      : Icons.wifi,
+                  size: 18,
+                  color: theme.colorScheme.primary,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  'Hotspot role',
+                  style: theme.textTheme.titleSmall,
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final role in HotspotRole.values)
+                  ChoiceChip(
+                    label: Text(role.label),
+                    selected: selected == role,
+                    onSelected: (_) async {
+                      await state.settings.setHotspotRole(role);
+                      await state.refreshDiscovery();
+                    },
+                  ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              resolvedRole.hint,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            if (resolvedRole == HotspotRole.hosting &&
+                state.localIps.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Other devices should look for IPs in your hotspot subnet '
+                '(currently ${state.localIps.first}).',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _modePanel(BuildContext context, AppState state) {
