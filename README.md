@@ -1,8 +1,8 @@
 # LanLink
 
-> Fast, reliable local file sharing between Windows and Android. Same Wi-Fi, same hotspot, no internet, no account, no cloud.
+> Fast, reliable local file sharing between Windows, macOS, Android and iOS. Same Wi-Fi, same hotspot, no internet, no account, no cloud.
 
-LanLink is a single Flutter codebase that runs on **Android 8+** and **Windows 10/11**. Every running instance hosts its own HTTP server and announces itself on the local network, so transfers are peer-to-peer — PC ↔ phone, phone ↔ phone, and phone ↔ PC all work the same way.
+LanLink is a single Flutter codebase that runs on **Android 8+**, **iOS 12+**, **Windows 10/11** and **macOS 10.15+**. Every running instance hosts its own HTTP server and announces itself on the local network, so transfers are peer-to-peer — PC ↔ phone, phone ↔ phone, phone ↔ Mac, Mac ↔ PC all work the same way.
 
 LanLink speaks the [LocalSend v2 wire protocol](https://github.com/localsend/protocol), so it can also interoperate with LocalSend out of the box.
 
@@ -24,6 +24,8 @@ LanLink speaks the [LocalSend v2 wire protocol](https://github.com/localsend/pro
 - **Polished dark mode.** Hand-tuned dark palette (deep neutral surfaces, soft blue primary, designed contrast) instead of inverted Material defaults. Settings → Appearance lets you pick Follow system / Light / Dark.
 - **Animated transfer outcome.** When a session reaches Done / Failed / Cancelled, its status chip scales in with a bouncy entrance and the matching check / X icon, so success is visible at a glance.
 - **System notifications with progress on Android.** Incoming and outgoing transfers post an ongoing progress notification ("Receiving from Tapiwa's phone — 14.2 MB / 38.5 MB (37%)") that updates in the shade. On completion the notification swaps to "Received 3 files — Saved to Downloads/LanLink". Throttled to a 250ms update interval so we don't flood the NotificationManager.
+- **Background transfers on Android.** A foreground service holds a "LanLink is transferring" notification while any send / receive is in flight, so the OS won't kill the app when you switch away or lock your screen mid-transfer. The service shuts itself down the moment the last transfer finishes.
+- **Persistent transfer history.** Completed, failed, and cancelled sessions are written to `SharedPreferences` and reload on next launch — open History and your last hundreds of transfers are still there after a reboot or app update. Per-peer history (long-press a peer → View history with this device) is also restored. A new "Clear history" button in the History screen wipes the on-disk record.
 - **Manual rescan button** in the app bar — pokes multicast and kicks the subnet scan in all modes.
 - **Stream-based file I/O.** Files go straight from disk → network → disk; memory usage stays flat regardless of file size. Multi-gigabyte transfers work fine.
 - **Live progress on both sides.** The sender and receiver both see real-time bytes-transferred — no more "stuck at 100%" with nothing actually delivered.
@@ -32,7 +34,8 @@ LanLink speaks the [LocalSend v2 wire protocol](https://github.com/localsend/pro
 - **Decline ≠ failure.** A peer that declines your send is reported as cancelled, not failed.
 - **Cross-platform UX** that follows platform conventions (Material 3 light/dark, system theme).
 - **Optional in-app update checker.** Polls the GitHub Releases API in the background and surfaces a dismissible "Update available" banner. Tap the banner (or **Settings → Updates → Check now**) to see the release notes and download the binary for your platform directly — never a link to the source code, and never a forced install.
-- **Reproducible CI builds:** every PR produces a downloadable debug APK + Windows zip, and tags produce a signed release APK + NSIS installer.
+- **Smaller Android downloads.** R8 + resource shrinking and per-ABI APK splits cut the typical Android install size by roughly 60% versus a fat universal APK. CI publishes per-architecture APKs alongside the universal one — installing `lanlink-vX.Y.Z-arm64-v8a.apk` on a modern phone gives you a ~25 MB download instead of ~65 MB.
+- **Reproducible CI builds:** every PR produces a downloadable debug APK + Windows zip + macOS .app + unsigned iOS .app, and tags produce signed release APKs (per-ABI + universal) + NSIS Windows installer + macOS .dmg / .zip + unsigned iOS .ipa.
 
 ---
 
