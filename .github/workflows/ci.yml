@@ -100,3 +100,67 @@ jobs:
           name: lanlink-windows
           path: build/lanlink-windows.zip
           if-no-files-found: error
+
+  build-macos:
+    name: Build macOS app
+    runs-on: macos-latest
+    needs: analyze-and-test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: ${{ env.FLUTTER_CHANNEL }}
+          cache: true
+
+      - name: Pub get
+        run: flutter pub get
+
+      - name: Build macOS release
+        run: flutter build macos --release
+
+      - name: Zip macOS .app
+        run: |
+          mkdir -p build/dist
+          cd build/macos/Build/Products/Release
+          zip -ry "$GITHUB_WORKSPACE/build/dist/lanlink-macos.zip" lanlink.app
+
+      - name: Upload macOS build
+        uses: actions/upload-artifact@v4
+        with:
+          name: lanlink-macos
+          path: build/dist/lanlink-macos.zip
+          if-no-files-found: error
+
+  build-ios:
+    name: Build iOS app (unsigned)
+    runs-on: macos-latest
+    needs: analyze-and-test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: ${{ env.FLUTTER_CHANNEL }}
+          cache: true
+
+      - name: Pub get
+        run: flutter pub get
+
+      - name: Build iOS (no codesign)
+        run: flutter build ios --release --no-codesign
+
+      - name: Package unsigned .app
+        run: |
+          mkdir -p build/dist
+          cd build/ios/iphoneos
+          zip -ry "$GITHUB_WORKSPACE/build/dist/lanlink-ios-unsigned.zip" Runner.app
+
+      - name: Upload iOS build
+        uses: actions/upload-artifact@v4
+        with:
+          name: lanlink-ios-unsigned
+          path: build/dist/lanlink-ios-unsigned.zip
+          if-no-files-found: error

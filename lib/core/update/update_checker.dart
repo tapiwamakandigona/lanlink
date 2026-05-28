@@ -16,6 +16,8 @@ class ReleaseInfo {
     required this.body,
     required this.androidAssetUrl,
     required this.windowsAssetUrl,
+    required this.macosAssetUrl,
+    required this.iosAssetUrl,
     required this.publishedAt,
     required this.isPrerelease,
   });
@@ -26,6 +28,8 @@ class ReleaseInfo {
   final String body;
   final String? androidAssetUrl;
   final String? windowsAssetUrl;
+  final String? macosAssetUrl;
+  final String? iosAssetUrl;
   final DateTime publishedAt;
   final bool isPrerelease;
 
@@ -34,6 +38,8 @@ class ReleaseInfo {
   String? get downloadUrlForCurrentPlatform {
     if (Platform.isAndroid) return androidAssetUrl;
     if (Platform.isWindows) return windowsAssetUrl;
+    if (Platform.isMacOS) return macosAssetUrl;
+    if (Platform.isIOS) return iosAssetUrl;
     return null;
   }
 }
@@ -147,7 +153,7 @@ class UpdateChecker extends ChangeNotifier {
       final version = _parseVersion(tag);
       if (version == null) continue;
       final assets = (entry['assets'] as List?) ?? const [];
-      String? android, windows;
+      String? android, windows, macos, ios;
       for (final raw in assets) {
         if (raw is! Map<String, dynamic>) continue;
         final name = (raw['name'] as String? ?? '').toLowerCase();
@@ -155,6 +161,14 @@ class UpdateChecker extends ChangeNotifier {
         if (name.endsWith('.apk')) android ??= url;
         if (name.contains('windows') && name.endsWith('.zip')) {
           windows ??= url;
+        }
+        if (name.endsWith('.dmg') ||
+            (name.contains('macos') && name.endsWith('.zip'))) {
+          macos ??= url;
+        }
+        if (name.endsWith('.ipa') ||
+            (name.contains('ios') && name.endsWith('.zip'))) {
+          ios ??= url;
         }
       }
       releases.add(ReleaseInfo(
@@ -164,6 +178,8 @@ class UpdateChecker extends ChangeNotifier {
         body: entry['body'] as String? ?? '',
         androidAssetUrl: android,
         windowsAssetUrl: windows,
+        macosAssetUrl: macos,
+        iosAssetUrl: ios,
         publishedAt:
             DateTime.tryParse(entry['published_at'] as String? ?? '') ??
                 DateTime.fromMillisecondsSinceEpoch(0),
