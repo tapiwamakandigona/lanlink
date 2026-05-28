@@ -23,6 +23,11 @@
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
 
+    <!-- Camera access for the LanLink QR pair scanner. Optional — the QR
+         flow degrades gracefully if the user denies the permission. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+
     <application
         android:label="LanLink"
         android:name="${applicationName}"

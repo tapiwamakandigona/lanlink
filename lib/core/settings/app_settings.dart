@@ -19,6 +19,7 @@ class AppSettings extends ChangeNotifier {
   static const _hotspotRoleKey = 'lanlink_hotspot_role';
   static const _autoUpdateKey = 'lanlink_auto_update_check';
   static const _skippedUpdateKey = 'lanlink_skipped_update_version';
+  static const _peerNicknamesKey = 'lanlink_peer_nicknames';
 
   final SharedPreferences _prefs;
 
@@ -54,6 +55,29 @@ class AppSettings extends ChangeNotifier {
   /// pull up release notes by tapping "Check for updates" in Settings.
   /// Cleared automatically once a newer release supersedes it.
   String? get skippedUpdateVersion => _prefs.getString(_skippedUpdateKey);
+
+  /// Per-fingerprint user-assigned nicknames. The keys are device
+  /// fingerprints (stable across sessions); the values are whatever the
+  /// user typed (e.g. "My Laptop", "Tapiwa's phone").
+  Map<String, String> get peerNicknames {
+    final raw = _prefs.getString(_peerNicknamesKey);
+    if (raw == null || raw.isEmpty) return const {};
+    try {
+      final decoded = json.decode(raw);
+      if (decoded is! Map) return const {};
+      return decoded.map((k, v) => MapEntry(k.toString(), v.toString()));
+    } catch (_) {
+      return const {};
+    }
+  }
+
+  /// Returns the user-assigned nickname for [fingerprint], or `null`.
+  String? nicknameFor(String fingerprint) {
+    if (fingerprint.isEmpty) return null;
+    final value = peerNicknames[fingerprint];
+    if (value == null || value.trim().isEmpty) return null;
+    return value;
+  }
 
   Set<String> get trustedFingerprints {
     final raw = _prefs.getString(_trustedKey);
@@ -109,6 +133,23 @@ class AppSettings extends ChangeNotifier {
       await _prefs.remove(_skippedUpdateKey);
     } else {
       await _prefs.setString(_skippedUpdateKey, value);
+    }
+    notifyListeners();
+  }
+
+  Future<void> setNickname(String fingerprint, String? nickname) async {
+    if (fingerprint.isEmpty) return;
+    final current = Map<String, String>.from(peerNicknames);
+    final trimmed = nickname?.trim() ?? '';
+    if (trimmed.isEmpty) {
+      current.remove(fingerprint);
+    } else {
+      current[fingerprint] = trimmed;
+    }
+    if (current.isEmpty) {
+      await _prefs.remove(_peerNicknamesKey);
+    } else {
+      await _prefs.setString(_peerNicknamesKey, json.encode(current));
     }
     notifyListeners();
   }

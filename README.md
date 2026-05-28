@@ -17,6 +17,10 @@ LanLink speaks the [LocalSend v2 wire protocol](https://github.com/localsend/pro
   - **Hotspot** — phone-to-phone over a mobile hotspot, with a host/joining picker and an automatic subnet scan (no router required).
   - **Bluetooth** — falls back to the Android system share sheet (`ACTION_SEND_MULTIPLE`).
 - **Hotspot UX:** pick "I'm hosting", "I'm joining", or "Detect for me". A subnet scan sweeps the local `/24` plus the well-known Android hotspot ranges (`192.168.43.0/24`, `192.168.49.0/24`) for any device answering `/api/localsend/v2/info`. Useful because phone hotspots typically drop UDP multicast.
+- **QR pairing.** Show a QR code carrying this device's IP, port, alias, and fingerprint; the other phone scans it (camera preview, torch + camera-flip controls) and lands directly in the peer list. No typing required.
+- **Per-peer nicknames + persistent trust.** Long-press a peer to assign a friendly name ("My laptop", "Tapiwa's phone") that survives restarts, jump to that peer's transfer history, or toggle their trusted status from one sheet.
+- **Send to multiple peers at once.** Multi-select mode in the peer list — pick N nearby devices and fan out the same staged files to all of them as parallel sessions.
+- **Per-peer transfer history.** Long-press a peer → "View history with this device" → only the transfers you've done with that fingerprint, regardless of what their alias was at the time.
 - **Manual rescan button** in the app bar — pokes multicast and kicks the subnet scan in all modes.
 - **Stream-based file I/O.** Files go straight from disk → network → disk; memory usage stays flat regardless of file size. Multi-gigabyte transfers work fine.
 - **Live progress on both sides.** The sender and receiver both see real-time bytes-transferred — no more "stuck at 100%" with nothing actually delivered.
@@ -96,6 +100,14 @@ On Android 10+ scoped storage blocks `dart:io` from writing into `/storage/emula
 3. Deleting the private copy on success.
 
 That way the file is visible in the Files app the moment the transfer finishes, with no extra permission prompts on modern Android. Android 9 and below take the legacy direct path. The Settings page on Android shows a clear "Files are saved to Downloads/LanLink" hint instead of a folder picker, because Android's Storage Access Framework returns `content://` tree URIs that `dart:io` can't open. The picker is still available on Windows where the path-based API actually works.
+
+### QR pairing
+
+When multicast is blocked and you don't want to type IPs, both ends open the **QR** actions in the home page's "Nearby devices" header. The "Show QR" sheet renders a QR encoding a `lanlink://pair?ip=…&port=…&alias=…&fp=…` URI; the "Scan QR" page opens a camera viewfinder, decodes that URI, and calls the same `/info` probe path that manual IP entry uses. The QR payload is intentionally tiny so even low-end scanners can decode it from a phone screen.
+
+### Per-peer state
+
+User-assigned data (nicknames, trusted fingerprints) is keyed off the peer's **fingerprint** — a stable SHA-256 of the device's install identity — rather than its alias, which can change. That means a peer renamed in Settings will still be greeted as your nickname, and a peer marked trusted last week stays trusted even if they updated their device's name. Long-press any peer card to bring up the action sheet (rename / view history with this device / toggle trusted).
 
 ### Hotspot role detection
 

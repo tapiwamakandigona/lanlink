@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../../core/models/session.dart';
 import '../../core/util/format.dart';
+import '../../state/app_state.dart';
 
 /// Compact progress UI for a single [TransferSession].
 class ProgressCard extends StatelessWidget {
@@ -34,11 +36,21 @@ class ProgressCard extends StatelessWidget {
                     ),
                     const SizedBox(width: 8),
                     Expanded(
-                      child: Text(
-                        '${session.direction == TransferDirection.send ? "Sending to" : "Receiving from"} '
-                        '${session.peer.alias}',
-                        style: theme.textTheme.titleMedium,
-                        overflow: TextOverflow.ellipsis,
+                      child: Builder(
+                        builder: (innerCtx) {
+                          final settings = innerCtx.watch<AppState>().settings;
+                          final name =
+                              settings.nicknameFor(session.peer.fingerprint) ??
+                                  (session.peer.alias.isEmpty
+                                      ? 'Unknown device'
+                                      : session.peer.alias);
+                          return Text(
+                            '${session.direction == TransferDirection.send ? "Sending to" : "Receiving from"} '
+                            '$name',
+                            style: theme.textTheme.titleMedium,
+                            overflow: TextOverflow.ellipsis,
+                          );
+                        },
                       ),
                     ),
                     _statusBadge(context),

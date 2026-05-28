@@ -10,9 +10,12 @@ import '../core/platform/android_apps.dart';
 import '../state/app_state.dart';
 import 'about_page.dart';
 import 'history_page.dart';
+import 'scan_qr_page.dart';
 import 'settings_page.dart';
 import 'widgets/attribution_banner.dart';
 import 'widgets/device_card.dart';
+import 'widgets/pair_qr_sheet.dart';
+import 'widgets/peer_action_sheet.dart';
 import 'widgets/progress_card.dart';
 import 'widgets/update_available_banner.dart';
 
@@ -26,6 +29,8 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   final List<FileInfo> _staged = [];
   final _uuid = const Uuid();
+  final Set<String> _selectedFingerprints = <String>{};
+  bool _multiSelect = false;
 
   @override
   Widget build(BuildContext context) {
@@ -111,7 +116,24 @@ class _HomePageState extends State<HomePage> {
                       padding: const EdgeInsets.only(bottom: 8),
                       child: DeviceCard(
                         device: p,
-                        onTap: () => _sendStagedTo(p),
+                        selected: _multiSelect &&
+                            _selectedFingerprints.contains(p.fingerprint),
+                        trailing: _multiSelect
+                            ? Icon(
+                                _selectedFingerprints.contains(p.fingerprint)
+                                    ? Icons.check_circle
+                                    : Icons.radio_button_unchecked,
+                                color: Theme.of(context).colorScheme.primary,
+                              )
+                            : null,
+                        onTap: () {
+                          if (_multiSelect) {
+                            _toggleSelection(p);
+                          } else {
+                            _sendStagedTo(p);
+                          }
+                        },
+                        onLongPress: () => showPeerActionSheet(context, p),
                       ),
                     ),
                   ),
@@ -131,11 +153,22 @@ class _HomePageState extends State<HomePage> {
           const AttributionBanner(),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _showAddMenu,
-        icon: const Icon(Icons.add),
-        label: const Text('Add'),
-      ),
+      floatingActionButton: _multiSelect
+          ? FloatingActionButton.extended(
+              onPressed:
+                  _selectedFingerprints.isEmpty ? null : _sendStagedToSelected,
+              icon: const Icon(Icons.send),
+              label: Text(
+                _selectedFingerprints.isEmpty
+                    ? 'Pick devices'
+                    : 'Send to ${_selectedFingerprints.length}',
+              ),
+            )
+          : FloatingActionButton.extended(
+              onPressed: _showAddMenu,
+              icon: const Icon(Icons.add),
+              label: const Text('Add'),
+            ),
     );
   }
 
@@ -362,6 +395,7 @@ class _HomePageState extends State<HomePage> {
 
   Widget _nearbyHeader(BuildContext context, ConnectivityMode mode, int n) {
     final theme = Theme.of(context);
+    final canScan = ScanQrPage.isSupported;
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Row(
@@ -383,6 +417,26 @@ class _HomePageState extends State<HomePage> {
               child: Text('$n', style: theme.textTheme.labelSmall),
             ),
           const Spacer(),
+          if (mode.usesLanTransport && n > 1)
+            IconButton(
+              tooltip:
+                  _multiSelect ? 'Cancel multi-select' : 'Send to multiple',
+              icon: Icon(
+                  _multiSelect ? Icons.close : Icons.checklist_rtl_outlined),
+              onPressed: _toggleMultiSelect,
+            ),
+          if (mode.usesLanTransport)
+            IconButton(
+              tooltip: 'Show pair QR',
+              icon: const Icon(Icons.qr_code_2),
+              onPressed: () => showPairQrSheet(context),
+            ),
+          if (mode.usesLanTransport && canScan)
+            IconButton(
+              tooltip: 'Scan pair QR',
+              icon: const Icon(Icons.qr_code_scanner),
+              onPressed: _scanQr,
+            ),
           if (mode.usesLanTransport)
             IconButton(
               tooltip: 'Add device by IP',
@@ -392,6 +446,61 @@ class _HomePageState extends State<HomePage> {
         ],
       ),
     );
+  }
+
+  void _toggleMultiSelect() {
+    setState(() {
+      _multiSelect = !_multiSelect;
+      _selectedFingerprints.clear();
+    });
+  }
+
+  void _toggleSelection(Device peer) {
+    setState(() {
+      if (_selectedFingerprints.contains(peer.fingerprint)) {
+        _selectedFingerprints.remove(peer.fingerprint);
+      } else {
+        _selectedFingerprints.add(peer.fingerprint);
+      }
+    });
+  }
+
+  Future<void> _scanQr() async {
+    final result = await Navigator.of(context).push<String?>(
+      MaterialPageRoute(builder: (_) => const ScanQrPage()),
+    );
+    if (!mounted) return;
+    if (result != null && result.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Added $result')),
+      );
+    }
+  }
+
+  Future<void> _sendStagedToSelected() async {
+    if (_staged.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Add files first.')),
+      );
+      return;
+    }
+    if (_selectedFingerprints.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Tap one or more devices to send to.')),
+      );
+      return;
+    }
+    final state = context.read<AppState>();
+    final targets = state.peers.values
+        .where((p) => _selectedFingerprints.contains(p.fingerprint))
+        .toList();
+    final files = _staged.toList();
+    setState(() {
+      _staged.clear();
+      _selectedFingerprints.clear();
+      _multiSelect = false;
+    });
+    await state.sendFilesToMany(peers: targets, files: files);
   }
 
   Widget _emptyPeers(BuildContext context, ConnectivityMode mode) {

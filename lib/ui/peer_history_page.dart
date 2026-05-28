@@ -1,39 +1,51 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../core/models/device.dart';
 import '../core/models/session.dart';
 import '../core/util/format.dart';
 import '../state/app_state.dart';
 
-class HistoryPage extends StatelessWidget {
-  const HistoryPage({super.key});
+/// History list filtered to a single peer fingerprint. Shows the same
+/// completed / failed / cancelled sessions as [HistoryPage] but only those
+/// whose peer matches the given fingerprint — useful for "what did I send
+/// to my laptop last week".
+class PeerHistoryPage extends StatelessWidget {
+  const PeerHistoryPage({super.key, required this.peer});
+
+  final Device peer;
 
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
-    final finished = state.sessions
+    final nickname = state.settings.nicknameFor(peer.fingerprint);
+    final title =
+        nickname ?? (peer.alias.isEmpty ? 'Unknown device' : peer.alias);
+    final all = state.sessions
         .where((s) =>
-            s.status == TransferStatus.completed ||
-            s.status == TransferStatus.failed ||
-            s.status == TransferStatus.cancelled)
+            s.peer.fingerprint == peer.fingerprint &&
+            (s.status == TransferStatus.completed ||
+                s.status == TransferStatus.failed ||
+                s.status == TransferStatus.cancelled))
         .toList();
 
     return Scaffold(
-      appBar: AppBar(title: const Text('History')),
-      body: finished.isEmpty
+      appBar: AppBar(title: Text('History • $title')),
+      body: all.isEmpty
           ? Center(
               child: Padding(
                 padding: const EdgeInsets.all(32),
                 child: Text(
-                  'No completed transfers yet.',
+                  'No transfers with $title yet.',
                   style: Theme.of(context).textTheme.bodyMedium,
+                  textAlign: TextAlign.center,
                 ),
               ),
             )
           : ListView.builder(
               padding: const EdgeInsets.all(16),
-              itemCount: finished.length,
-              itemBuilder: (context, i) => _historyTile(context, finished[i]),
+              itemCount: all.length,
+              itemBuilder: (context, i) => _historyTile(context, all[i]),
             ),
     );
   }
@@ -68,19 +80,18 @@ class HistoryPage extends StatelessWidget {
         status = 'In progress';
     }
     final total = s.files.values.fold<int>(0, (a, b) => a + b.file.size);
-    final settings = context.watch<AppState>().settings;
-    final peerLabel = settings.nicknameFor(s.peer.fingerprint) ??
-        (s.peer.alias.isEmpty ? 'Unknown device' : s.peer.alias);
     return Card(
       child: ListTile(
         leading: Icon(icon, color: color),
-        title: Text('$status • $peerLabel', overflow: TextOverflow.ellipsis),
+        title: Text(
+          '$status • ${isSend ? "Sent" : "Received"}',
+          overflow: TextOverflow.ellipsis,
+        ),
         subtitle: Text(
           '${s.files.length} file${s.files.length == 1 ? "" : "s"} • '
           '${formatBytes(total)} • ${_timeAgo(s.finishedAt ?? s.startedAt)}',
           style: theme.textTheme.bodySmall,
         ),
-        isThreeLine: false,
       ),
     );
   }

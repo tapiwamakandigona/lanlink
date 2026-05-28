@@ -350,6 +350,29 @@ class AppState extends ChangeNotifier {
     return session;
   }
 
+  /// Sends the same staged files to multiple peers in parallel. Each peer
+  /// gets its own [TransferSession] (and its own progress card in the UI) —
+  /// the upload is not actually de-duplicated on the wire, so this is just
+  /// a convenience over calling [sendFiles] in a loop. Bluetooth peers are
+  /// silently filtered out because [_sendFilesOverBluetooth] runs through
+  /// the system share sheet which can only target one device per chooser.
+  Future<List<TransferSession>> sendFilesToMany({
+    required List<Device> peers,
+    required List<FileInfo> files,
+  }) async {
+    final lan = peers
+        .where((p) =>
+            p.fingerprint != _fingerprint &&
+            (p.protocol.isEmpty || p.protocol != 'bluetooth'))
+        .toList();
+    final sessions = <TransferSession>[];
+    for (final peer in lan) {
+      final session = await sendFiles(peer: peer, files: files);
+      sessions.add(session);
+    }
+    return sessions;
+  }
+
   /// Manually adds a peer by host:port. Useful when discovery is blocked.
   Future<Device?> probeManualPeer(String hostPort) async {
     final parts = hostPort.split(':');
