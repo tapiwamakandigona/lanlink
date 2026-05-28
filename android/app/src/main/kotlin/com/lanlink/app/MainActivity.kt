@@ -38,6 +38,37 @@ class MainActivity : FlutterActivity() {
                 result.success(shareFiles(paths))
             }
 
+        val notifier = TransferNotifier(applicationContext)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "lanlink/notifications")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "showProgress" -> {
+                        val id = call.argument<Int>("id") ?: 0
+                        val title = call.argument<String>("title").orEmpty()
+                        val text = call.argument<String>("text").orEmpty()
+                        val progress = call.argument<Int>("progress") ?: 0
+                        val max = call.argument<Int>("max") ?: 100
+                        val indeterminate = call.argument<Boolean>("indeterminate") ?: false
+                        notifier.showProgress(id, title, text, progress, max, indeterminate)
+                        result.success(true)
+                    }
+                    "showFinal" -> {
+                        val id = call.argument<Int>("id") ?: 0
+                        val title = call.argument<String>("title").orEmpty()
+                        val text = call.argument<String>("text").orEmpty()
+                        val success = call.argument<Boolean>("success") ?: false
+                        notifier.showFinal(id, title, text, success)
+                        result.success(true)
+                    }
+                    "cancel" -> {
+                        val id = call.argument<Int>("id") ?: 0
+                        notifier.cancel(id)
+                        result.success(true)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "lanlink/received_files")
             .setMethodCallHandler { call, result ->
                 when (call.method) {

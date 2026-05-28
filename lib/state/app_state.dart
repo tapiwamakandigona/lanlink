@@ -13,6 +13,7 @@ import '../core/models/device.dart';
 import '../core/models/file_info.dart';
 import '../core/models/session.dart';
 import '../core/platform/platform_share.dart';
+import '../core/platform/transfer_notifications.dart';
 import '../core/protocol/constants.dart';
 import '../core/settings/app_settings.dart';
 import '../core/transfer/receiver.dart';
@@ -249,7 +250,40 @@ class AppState extends ChangeNotifier {
   void _handleNewReceiveSession(TransferSession session) {
     _sessions.insert(0, session);
     notifyListeners();
+    _attachNotifications(session);
     session.addListener(() => notifyListeners());
+  }
+
+  /// Wires the system notification helper to a session's lifecycle. The
+  /// receive side always gets notifications (so the user can see incoming
+  /// transfers without the app in the foreground); the send side gets them
+  /// too so they don't ghost away into the background. Each notification
+  /// is keyed by `session.sessionId` so updates collapse onto a single row.
+  void _attachNotifications(TransferSession session) {
+    if (!TransferNotifications.instance.isSupported) return;
+    final notifications = TransferNotifications.instance;
+    unawaited(notifications.ensurePermission());
+    var done = false;
+    // Throttle updates so we don't slam the system NotificationManager.
+    DateTime lastPosted = DateTime.fromMillisecondsSinceEpoch(0);
+    unawaited(notifications.showProgress(session));
+    session.addListener(() {
+      if (done) return;
+      switch (session.status) {
+        case TransferStatus.completed:
+        case TransferStatus.failed:
+        case TransferStatus.cancelled:
+          done = true;
+          unawaited(notifications.showFinal(session));
+          return;
+        case TransferStatus.awaitingAccept:
+        case TransferStatus.transferring:
+          final now = DateTime.now();
+          if (now.difference(lastPosted).inMilliseconds < 250) return;
+          lastPosted = now;
+          unawaited(notifications.showProgress(session));
+      }
+    });
   }
 
   void _onPeerSeen(Device peer) {
@@ -299,6 +333,7 @@ class AppState extends ChangeNotifier {
     );
     _sessions.insert(0, session);
     session.addListener(() => notifyListeners());
+    _attachNotifications(session);
     notifyListeners();
 
     // Drive the transfer in the background. The sender mutates `session`
@@ -324,6 +359,7 @@ class AppState extends ChangeNotifier {
     );
     _sessions.insert(0, session);
     session.addListener(() => notifyListeners());
+    _attachNotifications(session);
     notifyListeners();
 
     final paths = files

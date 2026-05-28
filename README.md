@@ -23,6 +23,7 @@ LanLink speaks the [LocalSend v2 wire protocol](https://github.com/localsend/pro
 - **Per-peer transfer history.** Long-press a peer → "View history with this device" → only the transfers you've done with that fingerprint, regardless of what their alias was at the time.
 - **Polished dark mode.** Hand-tuned dark palette (deep neutral surfaces, soft blue primary, designed contrast) instead of inverted Material defaults. Settings → Appearance lets you pick Follow system / Light / Dark.
 - **Animated transfer outcome.** When a session reaches Done / Failed / Cancelled, its status chip scales in with a bouncy entrance and the matching check / X icon, so success is visible at a glance.
+- **System notifications with progress on Android.** Incoming and outgoing transfers post an ongoing progress notification ("Receiving from Tapiwa's phone — 14.2 MB / 38.5 MB (37%)") that updates in the shade. On completion the notification swaps to "Received 3 files — Saved to Downloads/LanLink". Throttled to a 250ms update interval so we don't flood the NotificationManager.
 - **Manual rescan button** in the app bar — pokes multicast and kicks the subnet scan in all modes.
 - **Stream-based file I/O.** Files go straight from disk → network → disk; memory usage stays flat regardless of file size. Multi-gigabyte transfers work fine.
 - **Live progress on both sides.** The sender and receiver both see real-time bytes-transferred — no more "stuck at 100%" with nothing actually delivered.
