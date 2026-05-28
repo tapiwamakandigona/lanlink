@@ -69,6 +69,41 @@ class MainActivity : FlutterActivity() {
                 }
             }
 
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "lanlink/foreground_service")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "start" -> {
+                        val activeCount = call.argument<Int>("activeCount") ?: 1
+                        val intent = Intent(applicationContext, TransferForegroundService::class.java).apply {
+                            action = TransferForegroundService.ACTION_START
+                            putExtra(TransferForegroundService.EXTRA_ACTIVE_COUNT, activeCount)
+                        }
+                        try {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                applicationContext.startForegroundService(intent)
+                            } else {
+                                applicationContext.startService(intent)
+                            }
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.error("FG_START_FAILED", e.message, null)
+                        }
+                    }
+                    "stop" -> {
+                        val intent = Intent(applicationContext, TransferForegroundService::class.java).apply {
+                            action = TransferForegroundService.ACTION_STOP
+                        }
+                        try {
+                            applicationContext.startService(intent)
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.error("FG_STOP_FAILED", e.message, null)
+                        }
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "lanlink/received_files")
             .setMethodCallHandler { call, result ->
                 when (call.method) {
