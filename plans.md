@@ -185,14 +185,94 @@ stay current as the UI changes.
 - [ ] Local-only crash / event log — ring buffer of last ~200 log lines
   with a "Copy to clipboard" button in Settings for support.
 
+**UI/UX picks Tapiwa selected (v3.1.0):**
+- [ ] Estimated time left ("About 30 seconds left") instead of just %.
+- [ ] Replay-tutorial button in Settings.
+- [ ] First-time success animation (confetti / checkmark).
+- [ ] File thumbnails next to progress bar during transfer.
+- [ ] Plain-language status chips ("Got it ✓", "Stopped", "Didn't work — tap to retry").
+- [ ] Connection-quality indicator (Wi-Fi-style bars) in the AppBar.
+- [ ] Glossary tooltips (ⓘ icons) on jargon in Settings.
+- [ ] "Send another?" prompt after a successful send.
+- [ ] Slow-network warning (<100 KB/s for 5s → "Move closer").
+- [ ] "I've used apps like this before" wording on the Skip button.
+- [ ] Drop technical jargon from user-facing UI (MDNS, multicast, fingerprint).
+- [ ] "Need help?" footer on every screen except home (home has floating ?).
+
 **Deferred / not selected:**
 - Beta update channel (skipped — keep stable-only for now).
 - End-to-end encryption / TLS for the wire (skipped for v3.1.0 — the
   LAN-only model already limits exposure).
+- Big-button "easy" mode (deferred — accessibility revisit later).
+- Success chime + vibrate (deferred).
+- Dark mode = follow system default (deferred — already a setting).
 - Background transfers on iOS via BGTaskScheduler / URLSession (Swift
   rewrite needed for true background).
 - Apple Push, Apple Developer signing for iOS/Mac, localisations,
   per-session bandwidth cap. All out of scope for now.
+
+---
+
+## User flows after v3.1.0 ships
+
+These are what we're building toward. Each flow assumes the v3.1.0
+onboarding + Receive/Send landing is in place. "Hotspot" means
+phone-tethered Wi-Fi; "LAN" means an existing Wi-Fi router.
+
+### Phone-to-phone (Android → Android, the headline flow)
+**Receiver:** open app → "Receive". Card shows our pair QR + a big
+button "Turn on your hotspot". Tap → OS hotspot settings open → toggle
+hotspot on → return to app. App polls network interfaces, detects the
+hotspot is up, flips card to "Ready — ask them to scan this QR".
+**Sender:** open app → "Send". App opens Wi-Fi settings if they're not
+yet on the receiver's hotspot. They join the hotspot from Wi-Fi
+settings → return → camera opens → scan QR → file picker → pick files →
+transfer starts. Cancel button is always visible. On success, "Send
+another?" prompt.
+
+### Android (sender) → iPhone (receiver)
+Not supported as receiver-hosts — iOS can't host a hotspot from inside
+LanLink. Flow flips: iPhone joins the Android phone's hotspot or any
+shared Wi-Fi, Android sends. Onboarding explains this — "If you're
+using an iPhone to receive, ask the Android person to host the hotspot
+instead."
+
+### iPhone (sender) → Android (receiver)
+Android hosts the hotspot as above. iPhone joins from
+Settings → Wi-Fi → tap the Android hotspot SSID. Then iPhone opens
+LanLink → "Send" → scans the Android's QR → picks files. Works
+end-to-end. The QR is the bridge — no manual IP typing.
+
+### Phone → Mac / PC, or Mac / PC → Phone
+Mac/PC keeps LAN as default. Both devices need to be on the **same
+Wi-Fi network** (a regular router, not a phone hotspot — Mac/PC don't
+have hotspot toggles easily). The Mac/PC shows up in the peer list
+automatically via multicast. Phone user opens "Send" → peer list (no
+QR needed because multicast discovery already found them) → pick
+files. For cross-network edge case (Mac on Ethernet, phone on Wi-Fi
+that bridge), the user can fall back to scanning the Mac's QR.
+
+### Mac ↔ Mac, Windows ↔ Windows, Mac ↔ Windows
+Standard LAN mode. Both on same Wi-Fi → drag files onto the window
+(post-v3.1.0 drag-and-drop feature) → peer list shows the other
+machine → click → send. No QR needed unless multicast is blocked.
+
+### iPhone ↔ iPhone
+Awkward case. Neither can host a hotspot programmatically. Two options:
+1. Both on the **same Wi-Fi router** → standard LAN mode, multicast
+   discovery, works fine.
+2. One iPhone enables Personal Hotspot from Control Center
+   manually, the other joins; from LanLink's perspective this is the
+   same as Android-host flow. Onboarding documents this.
+
+### Edge cases handled by v3.1.0
+- Permission denials at first run → onboarding re-asks with explanation.
+- Hotspot subnet not in our known list → expanded list (Samsung .45,
+  Xiaomi, etc.) covers the long tail.
+- Slow link → user gets a "move closer" hint instead of staring at a
+  stuck progress bar.
+- Transfer fails partway → status chip says "Didn't work — tap to
+  retry"; history entry has Retry button.
 
 ## Known bugs / quirks (as of v3.0.0)
 
