@@ -6,9 +6,11 @@ import 'package:uuid/uuid.dart';
 import '../core/connectivity/connectivity_mode.dart';
 import '../core/models/device.dart';
 import '../core/models/file_info.dart';
+import '../core/models/session.dart';
 import '../core/platform/android_apps.dart';
 import '../state/app_state.dart';
 import 'about_page.dart';
+import 'help_page.dart';
 import 'history_page.dart';
 import 'scan_qr_page.dart';
 import 'settings_page.dart';
@@ -57,6 +59,11 @@ class _HomePageState extends State<HomePage> {
                   )
                 : const Icon(Icons.refresh),
             onPressed: state.isScanning ? null : () => state.refreshDiscovery(),
+          ),
+          IconButton(
+            tooltip: 'Help & getting connected',
+            icon: const Icon(Icons.help_outline),
+            onPressed: () => showHelp(context),
           ),
           IconButton(
             tooltip: 'About',
@@ -578,23 +585,30 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _pickFiles() async {
+    final picked = await _pickFileInfos();
+    if (picked.isEmpty) return;
+    setState(() => _staged.addAll(picked));
+  }
+
+  /// Opens the system file picker and maps the selection to [FileInfo]s.
+  /// Returns an empty list if the user cancels.
+  Future<List<FileInfo>> _pickFileInfos() async {
     final result = await FilePicker.platform.pickFiles(
       allowMultiple: true,
       withData: false,
     );
-    if (result == null) return;
-    setState(() {
-      for (final f in result.files) {
-        if (f.path == null) continue;
-        _staged.add(FileInfo(
-          id: _uuid.v4(),
-          fileName: f.name,
-          size: f.size,
-          fileType: fileTypeForName(f.name),
-          localPath: f.path,
-        ));
-      }
-    });
+    if (result == null) return const [];
+    return [
+      for (final f in result.files)
+        if (f.path != null)
+          FileInfo(
+            id: _uuid.v4(),
+            fileName: f.name,
+            size: f.size,
+            fileType: fileTypeForName(f.name),
+            localPath: f.path,
+          ),
+    ];
   }
 
   Future<void> _pickApps() async {
@@ -682,7 +696,43 @@ class _HomePageState extends State<HomePage> {
     final state = context.read<AppState>();
     final files = _staged.toList();
     setState(() => _staged.clear());
-    await state.sendFiles(peer: peer, files: files);
+    final session = await state.sendFiles(peer: peer, files: files);
+    _offerSendAnotherOnComplete(session, peer);
+  }
+
+  /// After a send finishes successfully, nudge the user with a "Send another?"
+  /// SnackBar that re-opens the file picker for the same peer. Bluetooth
+  /// sessions are skipped — they hand off to the system share sheet, which
+  /// has its own follow-up flow.
+  void _offerSendAnotherOnComplete(TransferSession session, Device peer) {
+    if (peer.fingerprint == 'bluetooth') return;
+    void listener() {
+      if (session.status != TransferStatus.completed) return;
+      session.removeListener(listener);
+      if (!mounted) return;
+      final peerName = context.read<AppState>().settings
+              .nicknameFor(peer.fingerprint) ??
+          (peer.alias.isEmpty ? 'device' : peer.alias);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Sent to $peerName.'),
+          action: SnackBarAction(
+            label: 'Send another',
+            onPressed: () => _sendAnotherTo(peer),
+          ),
+        ),
+      );
+    }
+
+    session.addListener(listener);
+  }
+
+  Future<void> _sendAnotherTo(Device peer) async {
+    final state = context.read<AppState>();
+    final picked = await _pickFileInfos();
+    if (picked.isEmpty || !mounted) return;
+    final session = await state.sendFiles(peer: peer, files: picked);
+    _offerSendAnotherOnComplete(session, peer);
   }
 
   Future<void> _addManualPeer() async {

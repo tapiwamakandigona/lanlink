@@ -146,6 +146,8 @@ class TransferSession extends ChangeNotifier {
                   'status': p.status.name,
                   if (p.error != null) 'error': p.error,
                   if (p.savedPath != null) 'savedPath': p.savedPath,
+                  // Persisted so a restored send session can be retried.
+                  if (p.file.localPath != null) 'localPath': p.file.localPath,
                 })
             .toList(),
       };
@@ -178,6 +180,7 @@ class TransferSession extends ChangeNotifier {
         fileName: (map['fileName'] as String?) ?? 'unknown',
         size: (map['size'] as num?)?.toInt() ?? 0,
         fileType: (map['fileType'] as String?) ?? 'other',
+        localPath: map['localPath'] as String?,
       );
       files[id] = FileProgress(
         file: fileInfo,

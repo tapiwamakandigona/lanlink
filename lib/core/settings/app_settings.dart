@@ -21,6 +21,7 @@ class AppSettings extends ChangeNotifier {
   static const _themeModeKey = 'lanlink_theme_mode';
   static const _skippedUpdateKey = 'lanlink_skipped_update_version';
   static const _peerNicknamesKey = 'lanlink_peer_nicknames';
+  static const _lastOnboardedVersionKey = 'lanlink_last_onboarded_version';
 
   final SharedPreferences _prefs;
 
@@ -160,6 +161,25 @@ class AppSettings extends ChangeNotifier {
     } else {
       await _prefs.setString(_peerNicknamesKey, json.encode(current));
     }
+    notifyListeners();
+  }
+
+  /// The app version whose onboarding the user has already seen. Empty/absent
+  /// means they have never completed onboarding. Used by [SplashGate] to
+  /// decide whether to show the welcome carousel on launch (first run) and
+  /// again after an update bumps the version.
+  String get lastOnboardedVersion =>
+      _prefs.getString(_lastOnboardedVersionKey) ?? '';
+
+  Future<void> setLastOnboardedVersion(String value) async {
+    await _prefs.setString(_lastOnboardedVersionKey, value);
+    notifyListeners();
+  }
+
+  /// Clears the onboarded marker so the carousel replays on next launch.
+  /// Wired to the "Replay tutorial" button in Settings.
+  Future<void> resetOnboarding() async {
+    await _prefs.remove(_lastOnboardedVersionKey);
     notifyListeners();
   }
 

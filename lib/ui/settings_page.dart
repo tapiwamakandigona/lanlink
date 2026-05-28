@@ -5,7 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
+import '../core/util/event_log.dart';
 import '../state/app_state.dart';
+import 'onboarding_page.dart';
 import 'widgets/check_for_updates_tile.dart';
 
 class SettingsPage extends StatefulWidget {
@@ -185,6 +187,33 @@ class _SettingsPageState extends State<SettingsPage> {
           const SizedBox(height: 8),
           const CheckForUpdatesTile(),
           const Divider(height: 32),
+          Text('Help & diagnostics', style: theme.textTheme.titleMedium),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            icon: const Icon(Icons.replay),
+            label: const Text('Replay the welcome tour'),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (ctx) =>
+                    OnboardingPage(onDone: () => Navigator.of(ctx).pop()),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            icon: const Icon(Icons.copy_all_outlined),
+            label: const Text('Copy diagnostics'),
+            onPressed: () => _copyDiagnostics(context),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Copies a short, local-only activity log to your clipboard so you '
+            'can paste it when reporting a problem. Nothing is sent anywhere.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const Divider(height: 32),
           Text('About this build', style: theme.textTheme.titleMedium),
           const SizedBox(height: 4),
           Text(
@@ -256,5 +285,16 @@ class _SettingsPageState extends State<SettingsPage> {
     await state.settings.setSaveDir(path);
     if (!mounted) return;
     _saveDirCtrl.text = path;
+  }
+
+  Future<void> _copyDiagnostics(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final log = EventLog.instance.export(header: 'LanLink diagnostics');
+    await Clipboard.setData(ClipboardData(
+      text: log.isEmpty ? 'LanLink diagnostics\n(no events recorded yet)' : log,
+    ));
+    messenger.showSnackBar(
+      const SnackBar(content: Text('Diagnostics copied to clipboard.')),
+    );
   }
 }

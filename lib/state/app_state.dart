@@ -20,6 +20,7 @@ import '../core/protocol/constants.dart';
 import '../core/settings/app_settings.dart';
 import '../core/transfer/receiver.dart';
 import '../core/transfer/sender.dart';
+import '../core/util/event_log.dart';
 import '../core/util/fingerprint.dart';
 import '../core/util/network.dart';
 
@@ -113,6 +114,9 @@ class AppState extends ChangeNotifier {
     settings.addListener(state._onSettingsChanged);
 
     await state._receiver.start();
+    EventLog.instance.add(
+      'Receiver listening on ${ips.join(", ")}:${state._receiver.port}',
+    );
     await state._discovery.start();
     if (settings.connectivityMode == ConnectivityMode.hotspot) {
       unawaited(state._kickSubnetScan());
@@ -253,6 +257,10 @@ class AppState extends ChangeNotifier {
   }
 
   void _handleNewReceiveSession(TransferSession session) {
+    EventLog.instance.add(
+      'Incoming transfer from ${session.peer.alias} '
+      '(${session.files.length} file(s))',
+    );
     _sessions.insert(0, session);
     notifyListeners();
     _attachNotifications(session);
@@ -425,14 +433,41 @@ class AppState extends ChangeNotifier {
     _attachNotifications(session);
     _attachHistoryPersistence(session);
     _attachForegroundLifecycle(session);
+    _attachOutcomeLog(session, peer.alias);
     notifyListeners();
     _refreshForegroundService();
+
+    EventLog.instance.add('Sending ${files.length} file(s) to ${peer.alias}');
 
     // Drive the transfer in the background. The sender mutates `session`
     // directly so we don't have to swap anything in the list afterward.
     unawaited(_sender.send(session: session, peer: peer, files: files));
 
     return session;
+  }
+
+  /// Records the terminal outcome of [session] to the diagnostics log.
+  void _attachOutcomeLog(TransferSession session, String peerAlias) {
+    var logged = false;
+    session.addListener(() {
+      if (logged) return;
+      switch (session.status) {
+        case TransferStatus.completed:
+          logged = true;
+          EventLog.instance.add('Transfer to $peerAlias completed');
+        case TransferStatus.failed:
+          logged = true;
+          EventLog.instance
+              .add('Transfer to $peerAlias failed', level: EventLevel.error);
+        case TransferStatus.cancelled:
+          logged = true;
+          EventLog.instance
+              .add('Transfer to $peerAlias cancelled', level: EventLevel.warn);
+        case TransferStatus.awaitingAccept:
+        case TransferStatus.transferring:
+          return;
+      }
+    });
   }
 
   Future<TransferSession> _sendFilesOverBluetooth({
@@ -502,6 +537,36 @@ class AppState extends ChangeNotifier {
       sessions.add(session);
     }
     return sessions;
+  }
+
+  /// Whether [session] can be retried: it must be an outgoing send that
+  /// ended in a non-success state and still has at least one source file we
+  /// can read off disk.
+  static bool canRetry(TransferSession session) {
+    if (session.direction != TransferDirection.send) return false;
+    if (session.status != TransferStatus.failed &&
+        session.status != TransferStatus.cancelled) {
+      return false;
+    }
+    return session.files.values.any(
+      (p) => (p.file.localPath ?? '').isNotEmpty,
+    );
+  }
+
+  /// Re-stages the files from a failed/cancelled send [session] and sends
+  /// them to the same peer again. Returns the fresh [TransferSession], or
+  /// null when none of the original files are still available on disk.
+  Future<TransferSession?> retrySession(TransferSession session) async {
+    if (session.direction != TransferDirection.send) return null;
+    final files = session.files.values
+        .map((p) => p.file)
+        .where((f) => (f.localPath ?? '').isNotEmpty)
+        .toList();
+    if (files.isEmpty) return null;
+    EventLog.instance.add(
+      'Retrying send of ${files.length} file(s) to ${session.peer.alias}',
+    );
+    return sendFiles(peer: session.peer, files: files);
   }
 
   /// Manually adds a peer by host:port. Useful when discovery is blocked.
