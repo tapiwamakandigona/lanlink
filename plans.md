@@ -90,32 +90,47 @@ Key invariants worth not breaking:
 
 ## Active asks from Tapiwa (v3.1.0 candidates)
 
-Surface order = priority order. Tick when done.
+Surface order = priority order. Tick when done. Locked design decisions in
+**bold**.
 
-- [ ] **First-run + post-update onboarding slides.** 4–5 carousel slides with
-  in-app screenshots + arrows, "Skip" button, "Got it" on the last. Show
-  on first launch ever, plus once after every version bump (compare stored
-  `last_seen_version` against running version in `package_info_plus`).
+- [ ] **First-run + post-update onboarding slides.** 4–5 Flutter-rendered
+  carousel slides (no PNG assets — we redraw the real UI with arrows /
+  tooltips so they stay in sync). Skip button + "Got it" on the last
+  slide. Triggered on first launch and once after every version bump
+  (compare stored `last_seen_version` against `package_info_plus`).
+  **Decision: Flutter-rendered (Tapiwa confirmed).**
 - [ ] **"?" help button on home page.** Opens a sheet that links into the
-  same slides + "Email Tapiwa" + a 1-line "common problems" FAQ.
+  same slides + a tiny FAQ.
 - [ ] **Idle help nudge.** If the user has been on the home page for ~30s
   without picking a peer / opening the sender, surface a small "Need
   help getting started?" banner that opens the help sheet.
-- [ ] **Make Hotspot the default connectivity mode.** Today the default is
-  LAN; switch to Hotspot. Keep LAN + Bluetooth as picker options.
-- [ ] **New "Are you sending or receiving?" guided flow.** A big landing
-  screen with two cards:
-  - Receiver: shows our pair QR + (Android) a "Turn on your hotspot"
-    deep-link button into `Settings.Panel.ACTION_INTERNET_CONNECTIVITY`
-    or `WIFI_TETHER_SETTINGS`. The pair QR already encodes
-    `ip / port / alias / fingerprint`; sender will join the hotspot,
-    scan the QR, and we land in the existing peer-handshake path.
-  - Sender: opens the scanner, then drops them on the file picker.
-- [ ] **Pause / Resume / Cancel** on the per-session sheet. Cancel exists;
-  pause is new and has to be designed carefully because the LocalSend v2
-  protocol doesn't have a `pause-upload` verb. See "Constraints" below.
+- [ ] **Hotspot becomes the default connectivity mode** on Android.
+  iOS / macOS / Windows keep LAN as default (see "hotspot-first
+  platform split" below).
+- [ ] **New "Are you sending or receiving?" guided flow.** Full-screen
+  landing that replaces the home page on launch (Option 1: dramatic
+  Setup-Assistant style — **Tapiwa confirmed**). Two big cards:
+  - **Receive**: shows our pair QR + (Android) a "Turn on your hotspot"
+    button that deep-links into Settings, plus instructions. We poll
+    network interfaces for `192.168.43.0/24` / `192.168.49.0/24` and
+    flip the card to "Ready — ask them to scan" when we see one.
+  - **Send**: opens the scanner, then drops them on the file picker.
+  Hotspot-first only on Android; iOS / Mac / Windows users can still
+  send via this flow (they just join the Android side's hotspot from
+  their Wi-Fi settings before scanning the QR).
+- [ ] **Cancel button on the per-session sheet** (already exists — make
+  sure it's prominently surfaced in the new sender flow).
+  **Decision: pause/resume dropped (Tapiwa confirmed). Cancel-only.**
 
 ## Known constraints / things to discuss
+
+### Hotspot-first platform split
+**Tapiwa's decision:** Hotspot becomes the default on Android. iOS /
+macOS / Windows keep LAN as the default. iOS users can still **send**
+via the new flow — they join the Android side's hotspot from their
+Wi-Fi settings, scan the QR, transfer. iOS can't reliably **host** a
+hotspot programmatically (no public API), so we don't pretend
+otherwise.
 
 ### Hotspot auto-on is not possible
 - **Android:** since 8.0 (Oreo) `WifiManager.startTethering()` / SoftAp
@@ -134,29 +149,17 @@ Surface order = priority order. Tick when done.
   multicast / subnet announce so the sender finds us."
 
 ### Pause / resume on the wire
-- LocalSend v2 uses one HTTP POST per file (multipart). We can:
-  - **Cancel** by aborting the dio request and `markStatus(cancelled)`.
-    (Already implemented.)
-  - **"Pause"** by cancelling on the wire, but keeping the
-    TransferSession alive in a new `paused` status so the user can
-    "Resume", which kicks off a fresh `prepare-upload` for the remaining
-    files. Files already fully uploaded stay uploaded; files
-    half-uploaded restart from byte 0 (no protocol resume). For most
-    users this is OK because LAN transfers are fast.
-  - True resume from a byte offset is **out of scope** without
-    extending LocalSend v2 with a non-standard header.
+**Tapiwa's decision: not shipping pause/resume.** Only Cancel.
+The LocalSend v2 protocol doesn't expose a byte-offset resume and the
+cost of faking it (restart files from 0 on resume) was deemed not worth
+the UI complexity. Cancel already works — we just need to make sure it's
+obvious in the new sender flow.
 
 ### Onboarding screenshots
-We have two options:
-1. **Render synthetic screenshots in-Flutter** at slide time (cheaper —
-   no PNG assets, easy to keep up to date). Slides become little Flutter
-   widgets that draw stylised UI + arrows.
-2. **Real PNG screenshots** captured on a phone and bundled as assets.
-   Higher fidelity, bigger APK (~5–10 MB more), harder to maintain when
-   the UI changes.
-
-Recommendation: option 1, with the same fonts / Material 3 widgets the
-real app uses. Onboarding stays in sync automatically.
+**Tapiwa's decision: Flutter-rendered.** Onboarding slides are small
+Flutter widgets that draw the real UI + yellow arrows / tooltips, sharing
+the same theme as the running app. No PNG assets, no APK growth, slides
+stay current as the UI changes.
 
 ---
 
