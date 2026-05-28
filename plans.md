@@ -165,17 +165,34 @@ stay current as the UI changes.
 
 ## Backlog / future ideas
 
-- Background transfers on iOS — currently iOS will suspend us within ~30s
-  of backgrounding. Realistic options: `BGTaskScheduler` for "finish
-  what's in flight" with hard 30-second budget; or `URLSession` background
-  transfers which would require a Swift-side rewrite of the upload path.
-- Apple Push for "device available" cross-network — out of scope; the
-  whole point of LanLink is no cloud.
-- Real signing for iOS / Mac releases (Apple Developer account + secrets).
-- Localise into one or two additional languages (we deliberately stripped
-  locales in v3.0.0 to shrink the APK; reintroducing one is fine).
-- Optional encryption-at-rest of received files until the user opens them.
-- Per-session bandwidth cap.
+**v3.1.0 selected from suggestion round (Tapiwa picked):**
+- [ ] Permission priming on first run — request notification + local-network
+  + camera permissions upfront in the onboarding flow, not mid-transfer.
+- [ ] System share-sheet integration — register LanLink as a target for
+  Android `ACTION_SEND` / `ACTION_SEND_MULTIPLE` so users can hit
+  "Share → LanLink" from Photos / Files. iOS share extension later.
+- [ ] Retry button on failed / cancelled transfers — history entry gets
+  a "Retry" action that re-stages the same files to the same peer.
+- [ ] Drag-and-drop on macOS / Windows — drop files onto the window to
+  pre-stage them for the next send.
+- [ ] Proper app icons + splash for iOS / macOS — v3.0.0 still has default
+  Flutter icons on those platforms.
+- [ ] Friendly error messages — map `SocketException`, `TimeoutException`,
+  HTTP 4xx/5xx to plain English ("Couldn't reach Tapiwa's phone — make
+  sure both phones are on the same hotspot").
+- [ ] Expand hotspot subnet detection — add Samsung `192.168.45.0/24` and
+  other OEM ranges beyond the current `.43` / `.49`.
+- [ ] Local-only crash / event log — ring buffer of last ~200 log lines
+  with a "Copy to clipboard" button in Settings for support.
+
+**Deferred / not selected:**
+- Beta update channel (skipped — keep stable-only for now).
+- End-to-end encryption / TLS for the wire (skipped for v3.1.0 — the
+  LAN-only model already limits exposure).
+- Background transfers on iOS via BGTaskScheduler / URLSession (Swift
+  rewrite needed for true background).
+- Apple Push, Apple Developer signing for iOS/Mac, localisations,
+  per-session bandwidth cap. All out of scope for now.
 
 ## Known bugs / quirks (as of v3.0.0)
 
