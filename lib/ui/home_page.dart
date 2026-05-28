@@ -12,7 +12,6 @@ import 'about_page.dart';
 import 'history_page.dart';
 import 'scan_qr_page.dart';
 import 'settings_page.dart';
-import 'widgets/attribution_banner.dart';
 import 'widgets/device_card.dart';
 import 'widgets/pair_qr_sheet.dart';
 import 'widgets/peer_action_sheet.dart';
@@ -150,7 +149,6 @@ class _HomePageState extends State<HomePage> {
               ],
             ),
           ),
-          const AttributionBanner(),
         ],
       ),
       floatingActionButton: _multiSelect

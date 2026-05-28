@@ -1,12 +1,35 @@
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import 'widgets/check_for_updates_tile.dart';
-
-class AboutPage extends StatelessWidget {
+class AboutPage extends StatefulWidget {
   const AboutPage({super.key});
 
+  @override
+  State<AboutPage> createState() => _AboutPageState();
+}
+
+class _AboutPageState extends State<AboutPage> {
   static final Uri _website = Uri.parse('https://tapiwa.me');
+  String _version = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadVersion();
+  }
+
+  Future<void> _loadVersion() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      if (mounted) {
+        setState(
+            () => _version = 'Version ${info.version} (${info.buildNumber})');
+      }
+    } catch (_) {
+      // Ignore — version label is decorative.
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -34,9 +57,18 @@ class AboutPage extends StatelessWidget {
                   Text('LanLink', style: theme.textTheme.headlineSmall),
                   const SizedBox(height: 8),
                   Text(
-                    'Fast local file sharing for Windows and Android.',
+                    'Fast local file sharing for Windows, macOS, Android and iOS.',
                     style: theme.textTheme.bodyMedium,
                   ),
+                  if (_version.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      _version,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 16),
                   Text(
                     'Made by Tapiwa Makandigona',
@@ -46,8 +78,6 @@ class AboutPage extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(height: 12),
-          const CheckForUpdatesTile(),
           const SizedBox(height: 12),
           Card(
             child: ListTile(

@@ -185,6 +185,15 @@ class _SettingsPageState extends State<SettingsPage> {
           const SizedBox(height: 8),
           const CheckForUpdatesTile(),
           const Divider(height: 32),
+          Text('About this build', style: theme.textTheme.titleMedium),
+          const SizedBox(height: 4),
+          Text(
+            'Made by Tapiwa Makandigona',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const Divider(height: 32),
           Text('Trusted devices', style: theme.textTheme.titleMedium),
           if (state.settings.trustedFingerprints.isEmpty)
             Padding(
