@@ -60,6 +60,23 @@ class SubnetScanner {
     }
   }
 
+  /// Well-known /24 prefixes that OEM phone hotspots hand out. These are
+  /// always swept in addition to whatever our own interfaces report, because
+  /// some Androids drop multicast in hotspot mode and our own IP lookup can
+  /// be stale right after toggling the hotspot.
+  ///
+  /// Sources: stock Android (`.43`), Wi-Fi Direct / legacy tethering
+  /// (`.49`), Samsung (`.45`), iOS Personal Hotspot (`172.20.10`), and a
+  /// handful of common router defaults so a regular-LAN scan also has a
+  /// fallback when interface enumeration fails.
+  static const Set<String> wellKnownHotspotPrefixes = {
+    '192.168.43', // stock Android hotspot
+    '192.168.49', // Wi-Fi Direct / legacy tethering
+    '192.168.45', // Samsung hotspot
+    '192.168.137', // Windows mobile hotspot (ICS)
+    '172.20.10', // iOS Personal Hotspot
+  };
+
   Set<String> _subnetsToScan(List<String> localIps) {
     final subnets = <String>{};
     for (final ip in localIps) {
@@ -67,10 +84,7 @@ class SubnetScanner {
       if (parts.length != 4) continue;
       subnets.add('${parts[0]}.${parts[1]}.${parts[2]}');
     }
-    // Common Android hotspot gateway subnets — guaranteed to be there even
-    // when our own IP lookup returns something stale.
-    subnets.add('192.168.43');
-    subnets.add('192.168.49');
+    subnets.addAll(wellKnownHotspotPrefixes);
     return subnets;
   }
 

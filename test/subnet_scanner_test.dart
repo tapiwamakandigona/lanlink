@@ -89,4 +89,19 @@ void main() {
     expect(seen!.alias, 'unit-test-peer');
     expect(seen!.fingerprint, 'abc123');
   });
+
+  test('well-known hotspot prefixes cover the common OEM gateways', () {
+    // Regression guard: these are the gateway /24s phones hand out. If one
+    // is dropped, hotspot discovery silently regresses on that OEM.
+    const prefixes = SubnetScanner.wellKnownHotspotPrefixes;
+    expect(
+        prefixes,
+        containsAll(<String>{
+          '192.168.43', // stock Android
+          '192.168.49', // Wi-Fi Direct / legacy tethering
+          '192.168.45', // Samsung
+          '192.168.137', // Windows mobile hotspot
+          '172.20.10', // iOS Personal Hotspot
+        }));
+  });
 }

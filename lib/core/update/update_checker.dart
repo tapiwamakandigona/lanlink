@@ -54,12 +54,14 @@ class UpdateChecker extends ChangeNotifier {
     String? manifestUrl,
     bool includePrereleases = true,
     HttpClient? httpClient,
-  })  : _manifestUrl = manifestUrl ?? _defaultManifestUrl,
+  })  : _manifestUrl = manifestUrl ?? defaultManifestUrl,
         _includePrereleases = includePrereleases,
         _client = httpClient ?? HttpClient();
 
-  static const _defaultManifestUrl =
-      'https://api.github.com/repos/tapiwamakandigona/lanlink/releases';
+  // Public releases live in the `lanlink-downloads` mirror repo so the update
+  // check keeps working even though the app's source repo is private.
+  static const defaultManifestUrl =
+      'https://api.github.com/repos/tapiwamakandigona/lanlink-downloads/releases';
 
   final String _manifestUrl;
   final bool _includePrereleases;
@@ -159,7 +161,8 @@ class UpdateChecker extends ChangeNotifier {
         final name = (raw['name'] as String? ?? '').toLowerCase();
         final url = raw['browser_download_url'] as String? ?? '';
         if (name.endsWith('.apk')) android ??= url;
-        if (name.contains('windows') && name.endsWith('.zip')) {
+        if (name.contains('windows') &&
+            (name.endsWith('.exe') || name.endsWith('.zip'))) {
           windows ??= url;
         }
         if (name.endsWith('.dmg') ||

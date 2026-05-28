@@ -8,6 +8,7 @@ import '../models/device.dart';
 import '../models/file_info.dart';
 import '../models/session.dart';
 import '../protocol/constants.dart';
+import '../util/friendly_error.dart';
 
 /// Drives outgoing transfers from this device to a [Device] peer.
 ///
@@ -91,7 +92,7 @@ class Sender {
         ),
       );
     } on DioException catch (e) {
-      _failAll(session, files, 'Could not reach ${peer.alias}: ${e.message}');
+      _failAll(session, files, friendlyTransferError(e, peerName: peer.alias));
       return;
     }
 
@@ -102,7 +103,7 @@ class Sender {
     }
     if (prepResp.statusCode != 200 || prepResp.data is! Map) {
       _failAll(session, files,
-          'Peer rejected prepare-upload (HTTP ${prepResp.statusCode}).');
+          friendlyHttpStatus(prepResp.statusCode, peerName: peer.alias));
       return;
     }
     final prepData = prepResp.data as Map<String, dynamic>;
@@ -171,7 +172,8 @@ class Sender {
         session.markFile(fileId, TransferStatus.completed);
       } catch (e) {
         if (kDebugMode) debugPrint('[sender] upload of $fileId failed: $e');
-        session.markFile(fileId, TransferStatus.failed, error: '$e');
+        session.markFile(fileId, TransferStatus.failed,
+            error: friendlyTransferError(e, peerName: peer.alias));
         session.markStatus(TransferStatus.failed);
         return;
       }

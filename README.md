@@ -16,7 +16,7 @@ LanLink speaks the [LocalSend v2 wire protocol](https://github.com/localsend/pro
   - **LAN** — standard Wi-Fi / wired LAN with UDP-multicast discovery.
   - **Hotspot** — phone-to-phone over a mobile hotspot, with a host/joining picker and an automatic subnet scan (no router required).
   - **Bluetooth** — falls back to the Android system share sheet (`ACTION_SEND_MULTIPLE`).
-- **Hotspot UX:** pick "I'm hosting", "I'm joining", or "Detect for me". A subnet scan sweeps the local `/24` plus the well-known Android hotspot ranges (`192.168.43.0/24`, `192.168.49.0/24`) for any device answering `/api/localsend/v2/info`. Useful because phone hotspots typically drop UDP multicast.
+- **Hotspot UX:** pick "I'm hosting", "I'm joining", or "Detect for me". A subnet scan sweeps the local `/24` plus the well-known phone-hotspot ranges (stock Android `192.168.43.0/24`, Wi-Fi Direct `192.168.49.0/24`, Samsung `192.168.45.0/24`, Windows mobile hotspot `192.168.137.0/24`, and iOS Personal Hotspot `172.20.10.0/24`) for any device answering `/api/localsend/v2/info`. Useful because phone hotspots typically drop UDP multicast.
 - **QR pairing.** Show a QR code carrying this device's IP, port, alias, and fingerprint; the other phone scans it (camera preview, torch + camera-flip controls) and lands directly in the peer list. No typing required.
 - **Per-peer nicknames + persistent trust.** Long-press a peer to assign a friendly name ("My laptop", "Tapiwa's phone") that survives restarts, jump to that peer's transfer history, or toggle their trusted status from one sheet.
 - **Send to multiple peers at once.** Multi-select mode in the peer list — pick N nearby devices and fan out the same staged files to all of them as parallel sessions.
@@ -33,6 +33,12 @@ LanLink speaks the [LocalSend v2 wire protocol](https://github.com/localsend/pro
 - **Per-transfer accept prompt** so random devices on your network can't dump files on you. Optionally mark senders as **trusted** for one-tap acceptance next time.
 - **Decline ≠ failure.** A peer that declines your send is reported as cancelled, not failed.
 - **Cross-platform UX** that follows platform conventions (Material 3 light/dark, system theme).
+- **First-run & post-update onboarding.** A Flutter-rendered welcome carousel (no bundled screenshots) introduces the app on first launch and again after an update bumps the version, then gets out of the way. Replay it anytime from Settings or the help screen.
+- **"?" help & "Get connected" guide.** A help button on the home screen answers two quick questions — what you want to do and what the other device is — and shows tailored, step-by-step pairing instructions for that exact combination, plus a short FAQ.
+- **Plain-English error messages.** Transfer failures are translated from raw exceptions (`SocketException`, timeouts, HTTP codes) into short, actionable sentences like "Timed out reaching Tapiwa's phone. Make sure both devices are on the same Wi-Fi or hotspot and try again."
+- **One-tap retry.** Failed or cancelled sends show a **Retry** button in History that re-sends the same files to the same device — the source paths are persisted so retry survives an app restart.
+- **"Send another?" follow-up.** After a successful send, a snackbar offers to immediately pick more files for the same device.
+- **Copyable diagnostics.** Settings → Help & diagnostics → **Copy diagnostics** puts a short, local-only activity log on your clipboard for bug reports. Nothing is ever sent anywhere.
 - **Optional in-app update checker.** Polls the GitHub Releases API in the background and surfaces a dismissible "Update available" banner. Tap the banner (or **Settings → Updates → Check now**) to see the release notes and download the binary for your platform directly — never a link to the source code, and never a forced install.
 - **Smaller Android downloads.** R8 + resource shrinking and per-ABI APK splits cut the typical Android install size by roughly 60% versus a fat universal APK. CI publishes per-architecture APKs alongside the universal one — installing `lanlink-vX.Y.Z-arm64-v8a.apk` on a modern phone gives you a ~25 MB download instead of ~65 MB.
 - **Reproducible CI builds:** every PR produces a downloadable debug APK + Windows zip + macOS .app + unsigned iOS .app, and tags produce signed release APKs (per-ABI + universal) + NSIS Windows installer + macOS .dmg / .zip + unsigned iOS .ipa.
@@ -83,7 +89,7 @@ Every LanLink instance opens a UDP socket on `224.0.0.167:53317` and announces i
 
 For networks where multicast is blocked, the Home screen has an **Add device by IP** action that probes a manually entered `host:port` over HTTP.
 
-In **Hotspot mode** the app also runs an active `SubnetScanner` in parallel with multicast — sweeping the local `/24` and the well-known Android hotspot subnets (`192.168.43.x`, `192.168.49.x`) with 32 concurrent HTTP probes against `/api/localsend/v2/info`. Anything that responds gets added to the peer list automatically.
+In **Hotspot mode** the app also runs an active `SubnetScanner` in parallel with multicast — sweeping the local `/24` and the well-known phone-hotspot subnets (`192.168.43.x`, `192.168.49.x`, `192.168.45.x`, `192.168.137.x`, `172.20.10.x`) with 32 concurrent HTTP probes against `/api/localsend/v2/info`. Anything that responds gets added to the peer list automatically.
 
 ### Transfer
 

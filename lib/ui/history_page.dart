@@ -84,17 +84,17 @@ class HistoryPage extends StatelessWidget {
             ? Icons.cloud_upload_outlined
             : Icons.cloud_download_outlined;
         color = Colors.green;
-        status = 'Completed';
+        status = isSend ? 'Sent' : 'Received';
         break;
       case TransferStatus.failed:
         icon = Icons.error_outline;
         color = theme.colorScheme.error;
-        status = 'Failed';
+        status = "Didn't go through";
         break;
       case TransferStatus.cancelled:
         icon = Icons.cancel_outlined;
         color = theme.colorScheme.onSurfaceVariant;
-        status = 'Cancelled';
+        status = 'Stopped';
         break;
       default:
         icon = Icons.sync;
@@ -102,7 +102,8 @@ class HistoryPage extends StatelessWidget {
         status = 'In progress';
     }
     final total = s.files.values.fold<int>(0, (a, b) => a + b.file.size);
-    final settings = context.watch<AppState>().settings;
+    final state = context.watch<AppState>();
+    final settings = state.settings;
     final peerLabel = settings.nicknameFor(s.peer.fingerprint) ??
         (s.peer.alias.isEmpty ? 'Unknown device' : s.peer.alias);
     return Card(
@@ -114,8 +115,35 @@ class HistoryPage extends StatelessWidget {
           '${formatBytes(total)} • ${_timeAgo(s.finishedAt ?? s.startedAt)}',
           style: theme.textTheme.bodySmall,
         ),
+        trailing: AppState.canRetry(s)
+            ? TextButton.icon(
+                icon: const Icon(Icons.refresh, size: 18),
+                label: const Text('Retry'),
+                onPressed: () => _retry(context, s),
+              )
+            : null,
         isThreeLine: false,
       ),
+    );
+  }
+
+  Future<void> _retry(BuildContext context, TransferSession s) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final state = context.read<AppState>();
+    final peerLabel = state.settings.nicknameFor(s.peer.fingerprint) ??
+        (s.peer.alias.isEmpty ? 'the device' : s.peer.alias);
+    final session = await state.retrySession(s);
+    if (session == null) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content:
+              Text("Can't retry — the original files are no longer available."),
+        ),
+      );
+      return;
+    }
+    messenger.showSnackBar(
+      SnackBar(content: Text('Retrying transfer to $peerLabel…')),
     );
   }
 
