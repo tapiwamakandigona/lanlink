@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import '../protocol/constants.dart';
 import 'device.dart';
 import 'file_info.dart';
 
@@ -114,5 +115,107 @@ class TransferSession extends ChangeNotifier {
         DateTime.now().difference(startedAt).inMilliseconds / 1000.0;
     if (elapsed <= 0) return;
     speedBytesPerSec = transferredBytes / elapsed;
+  }
+
+  /// Snapshot the terminal state of this session as a JSON-serializable map
+  /// suitable for persisting to history. Only finished sessions
+  /// (`completed`, `failed`, `cancelled`) should be persisted — restoring an
+  /// in-flight session across restarts is not currently supported.
+  Map<String, dynamic> toJsonSnapshot() => {
+        'sessionId': sessionId,
+        'direction': direction.name,
+        'status': status.name,
+        'startedAt': startedAt.toIso8601String(),
+        if (finishedAt != null) 'finishedAt': finishedAt!.toIso8601String(),
+        'peer': {
+          'alias': peer.alias,
+          'fingerprint': peer.fingerprint,
+          'deviceModel': peer.deviceModel,
+          'deviceType': peer.deviceType,
+          'ip': peer.ip,
+          'port': peer.port,
+          'protocol': peer.protocol,
+        },
+        'files': _files.values
+            .map((p) => {
+                  'id': p.file.id,
+                  'fileName': p.file.fileName,
+                  'size': p.file.size,
+                  'fileType': p.file.fileType,
+                  'bytes': p.bytes,
+                  'status': p.status.name,
+                  if (p.error != null) 'error': p.error,
+                  if (p.savedPath != null) 'savedPath': p.savedPath,
+                })
+            .toList(),
+      };
+
+  /// Reconstruct a session from a snapshot produced by [toJsonSnapshot]. The
+  /// returned session is "frozen" — listeners are not wired and progress
+  /// will not advance. Intended for display in history.
+  static TransferSession fromJsonSnapshot(Map<String, dynamic> json) {
+    final peerJson =
+        Map<String, dynamic>.from(json['peer'] as Map? ?? const {});
+    final peer = Device(
+      alias: (peerJson['alias'] as String?) ?? 'Unknown device',
+      version: LanLinkProtocol.protocolVersion,
+      deviceModel: (peerJson['deviceModel'] as String?) ?? '',
+      deviceType: (peerJson['deviceType'] as String?) ??
+          LanLinkProtocol.deviceTypeHeadless,
+      fingerprint: (peerJson['fingerprint'] as String?) ?? '',
+      port: (peerJson['port'] as num?)?.toInt() ?? LanLinkProtocol.defaultPort,
+      protocol: (peerJson['protocol'] as String?) ?? 'http',
+      ip: (peerJson['ip'] as String?) ?? '0.0.0.0',
+    );
+    final filesJson = (json['files'] as List?) ?? const [];
+    final files = <String, FileProgress>{};
+    for (final raw in filesJson) {
+      final map = Map<String, dynamic>.from(raw as Map);
+      final id = (map['id'] as String?) ?? '';
+      if (id.isEmpty) continue;
+      final fileInfo = FileInfo(
+        id: id,
+        fileName: (map['fileName'] as String?) ?? 'unknown',
+        size: (map['size'] as num?)?.toInt() ?? 0,
+        fileType: (map['fileType'] as String?) ?? 'other',
+      );
+      files[id] = FileProgress(
+        file: fileInfo,
+        bytes: (map['bytes'] as num?)?.toInt() ?? 0,
+        status: _statusFromName(map['status'] as String?),
+        error: map['error'] as String?,
+        savedPath: map['savedPath'] as String?,
+      );
+    }
+    final session = TransferSession(
+      sessionId: (json['sessionId'] as String?) ?? '',
+      direction: _directionFromName(json['direction'] as String?),
+      peer: peer,
+      files: files,
+      status: _statusFromName(json['status'] as String?),
+    );
+    final startedRaw = json['startedAt'] as String?;
+    if (startedRaw != null) {
+      session.startedAt = DateTime.tryParse(startedRaw) ?? DateTime.now();
+    }
+    final finishedRaw = json['finishedAt'] as String?;
+    if (finishedRaw != null) {
+      session.finishedAt = DateTime.tryParse(finishedRaw);
+    }
+    return session;
+  }
+
+  static TransferStatus _statusFromName(String? name) {
+    return TransferStatus.values.firstWhere(
+      (s) => s.name == name,
+      orElse: () => TransferStatus.completed,
+    );
+  }
+
+  static TransferDirection _directionFromName(String? name) {
+    return TransferDirection.values.firstWhere(
+      (d) => d.name == name,
+      orElse: () => TransferDirection.send,
+    );
   }
 }

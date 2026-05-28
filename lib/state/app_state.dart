@@ -8,10 +8,12 @@ import 'package:path_provider/path_provider.dart';
 import '../core/connectivity/connectivity_mode.dart';
 import '../core/discovery/multicast_discovery.dart';
 import '../core/discovery/subnet_scanner.dart';
+import '../core/history/transfer_history_store.dart';
 import '../core/update/update_checker.dart';
 import '../core/models/device.dart';
 import '../core/models/file_info.dart';
 import '../core/models/session.dart';
+import '../core/platform/foreground_service.dart';
 import '../core/platform/platform_share.dart';
 import '../core/platform/transfer_notifications.dart';
 import '../core/protocol/constants.dart';
@@ -49,6 +51,7 @@ class AppState extends ChangeNotifier {
   late MulticastDiscovery _discovery;
   late SubnetScanner _subnetScanner;
   late UpdateChecker _updateChecker;
+  late TransferHistoryStore _history;
 
   /// Whether a manual / automatic subnet sweep is currently in flight.
   bool _scanning = false;
@@ -86,6 +89,8 @@ class AppState extends ChangeNotifier {
       fingerprint: fingerprint,
       localIps: ips,
     );
+    state._history = await TransferHistoryStore.getInstance();
+    state._sessions.addAll(state._history.load());
 
     state._receiver = Receiver(
       localDeviceProvider: state._buildSelfDevice,
@@ -251,7 +256,91 @@ class AppState extends ChangeNotifier {
     _sessions.insert(0, session);
     notifyListeners();
     _attachNotifications(session);
+    _attachHistoryPersistence(session);
+    _attachForegroundLifecycle(session);
     session.addListener(() => notifyListeners());
+    _refreshForegroundService();
+  }
+
+  /// Hooks a session into the Android foreground service so the OS keeps
+  /// our process alive while the user backgrounds the app mid-transfer.
+  /// The actual start / stop call lives in [_refreshForegroundService];
+  /// this just makes sure status transitions re-evaluate it.
+  void _attachForegroundLifecycle(TransferSession session) {
+    var hasFiredTerminal = false;
+    void onChange() {
+      switch (session.status) {
+        case TransferStatus.completed:
+        case TransferStatus.failed:
+        case TransferStatus.cancelled:
+          if (hasFiredTerminal) return;
+          hasFiredTerminal = true;
+          _refreshForegroundService();
+        case TransferStatus.awaitingAccept:
+        case TransferStatus.transferring:
+          return;
+      }
+    }
+
+    session.addListener(onChange);
+  }
+
+  /// Counts active (non-terminal) sessions and (re)reconciles the Android
+  /// foreground service. The bridge itself is a no-op on non-Android
+  /// platforms so we can call it unconditionally.
+  void _refreshForegroundService() {
+    final active = _sessions.where((s) {
+      switch (s.status) {
+        case TransferStatus.awaitingAccept:
+        case TransferStatus.transferring:
+          return true;
+        case TransferStatus.completed:
+        case TransferStatus.failed:
+        case TransferStatus.cancelled:
+          return false;
+      }
+    }).length;
+    unawaited(TransferForegroundService.instance.sync(active));
+  }
+
+  /// Wires a session to the history store so it gets persisted as soon as
+  /// it reaches a terminal status (`completed`, `failed`, or `cancelled`).
+  /// Each lifecycle change triggers a debounced save of the full session
+  /// list so the on-disk copy always reflects the latest state.
+  void _attachHistoryPersistence(TransferSession session) {
+    var saved = false;
+    void onChange() {
+      switch (session.status) {
+        case TransferStatus.completed:
+        case TransferStatus.failed:
+        case TransferStatus.cancelled:
+          if (saved) return;
+          saved = true;
+          _history.scheduleSave(_sessions);
+        case TransferStatus.awaitingAccept:
+        case TransferStatus.transferring:
+          return;
+      }
+    }
+
+    session.addListener(onChange);
+  }
+
+  /// Wipe persisted history and drop any finished sessions from memory.
+  Future<void> clearHistory() async {
+    await _history.clear();
+    _sessions.removeWhere((s) {
+      switch (s.status) {
+        case TransferStatus.completed:
+        case TransferStatus.failed:
+        case TransferStatus.cancelled:
+          return true;
+        case TransferStatus.awaitingAccept:
+        case TransferStatus.transferring:
+          return false;
+      }
+    });
+    notifyListeners();
   }
 
   /// Wires the system notification helper to a session's lifecycle. The
@@ -334,7 +423,10 @@ class AppState extends ChangeNotifier {
     _sessions.insert(0, session);
     session.addListener(() => notifyListeners());
     _attachNotifications(session);
+    _attachHistoryPersistence(session);
+    _attachForegroundLifecycle(session);
     notifyListeners();
+    _refreshForegroundService();
 
     // Drive the transfer in the background. The sender mutates `session`
     // directly so we don't have to swap anything in the list afterward.
@@ -360,7 +452,10 @@ class AppState extends ChangeNotifier {
     _sessions.insert(0, session);
     session.addListener(() => notifyListeners());
     _attachNotifications(session);
+    _attachHistoryPersistence(session);
+    _attachForegroundLifecycle(session);
     notifyListeners();
+    _refreshForegroundService();
 
     final paths = files
         .map((file) => file.localPath)

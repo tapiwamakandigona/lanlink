@@ -19,7 +19,41 @@ class HistoryPage extends StatelessWidget {
         .toList();
 
     return Scaffold(
-      appBar: AppBar(title: const Text('History')),
+      appBar: AppBar(
+        title: const Text('History'),
+        actions: [
+          if (finished.isNotEmpty)
+            IconButton(
+              tooltip: 'Clear history',
+              icon: const Icon(Icons.delete_outline),
+              onPressed: () async {
+                final ok = await showDialog<bool>(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    title: const Text('Clear transfer history?'),
+                    content: const Text(
+                      'This deletes the saved record of past transfers on this '
+                      'device. The actual transferred files are not removed.',
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.of(ctx).pop(false),
+                        child: const Text('Cancel'),
+                      ),
+                      FilledButton(
+                        onPressed: () => Navigator.of(ctx).pop(true),
+                        child: const Text('Clear'),
+                      ),
+                    ],
+                  ),
+                );
+                if (ok == true && context.mounted) {
+                  await context.read<AppState>().clearHistory();
+                }
+              },
+            ),
+        ],
+      ),
       body: finished.isEmpty
           ? Center(
               child: Padding(
