@@ -36,6 +36,14 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        // Strip resources we don't ship UI for (we use Material 3 English-
+        // only strings) to keep the APK small.
+        resourceConfigurations += ["en"]
+        ndk {
+            // Drop x86 entirely — no Android device ships it any more.
+            // Keep armeabi-v7a + arm64-v8a (mobile) and x86_64 (emulator).
+            abiFilters "armeabi-v7a", "arm64-v8a", "x86_64"
+        }
     }
 
     signingConfigs {
@@ -54,6 +62,45 @@ android {
             // Use the release config when present, otherwise fall back to
             // debug signing so `flutter run --release` keeps working locally.
             signingConfig = keystorePropertiesFile.exists() ? signingConfigs.release : signingConfigs.debug
+            // R8 + resource shrinking. Keeps reflection-sensitive plugins
+            // (path_provider, shared_preferences, etc.) working via the
+            // ProGuard rules in proguard-rules.pro.
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    // Per-ABI APK splits — each install only ships native libs for the
+    // device's own architecture. The "universal" APK is also produced for
+    // sideloading; CI publishes both.
+    splits {
+        abi {
+            enable true
+            reset()
+            include "armeabi-v7a", "arm64-v8a", "x86_64"
+            universalApk true
+        }
+    }
+
+    bundle {
+        language { enableSplit = true }
+        density { enableSplit = true }
+        abi { enableSplit = true }
+    }
+
+    packagingOptions {
+        resources {
+            excludes += [
+                "META-INF/LICENSE*",
+                "META-INF/NOTICE*",
+                "META-INF/AL2.0",
+                "META-INF/LGPL2.1",
+                "META-INF/*.kotlin_module",
+                "kotlin/**",
+                "**/*.proto",
+                "DebugProbesKt.bin",
+            ]
         }
     }
 }
