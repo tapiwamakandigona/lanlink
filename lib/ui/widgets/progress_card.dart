@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../core/models/session.dart';
 import '../../core/util/format.dart';
 import '../../state/app_state.dart';
+import 'transfer_outcome.dart';
 
 /// Compact progress UI for a single [TransferSession].
 class ProgressCard extends StatelessWidget {
@@ -126,29 +127,21 @@ class ProgressCard extends StatelessWidget {
 
   Widget _statusBadge(BuildContext context) {
     final theme = Theme.of(context);
-    late final String text;
-    late final Color color;
-    switch (session.status) {
-      case TransferStatus.transferring:
-      case TransferStatus.awaitingAccept:
-        text = session.status == TransferStatus.awaitingAccept
-            ? 'Waiting'
-            : 'In progress';
-        color = theme.colorScheme.primary;
-        break;
-      case TransferStatus.completed:
-        text = 'Done';
-        color = Colors.green;
-        break;
-      case TransferStatus.failed:
-        text = 'Failed';
-        color = theme.colorScheme.error;
-        break;
-      case TransferStatus.cancelled:
-        text = 'Cancelled';
-        color = theme.colorScheme.onSurfaceVariant;
-        break;
+    // Terminal states get the animated outcome chip (scale-bounce + check/X
+    // icon). It uses an internal AnimationController, so the rebuild on
+    // status change instantiates a fresh State that drives the entrance.
+    if (session.status == TransferStatus.completed ||
+        session.status == TransferStatus.failed ||
+        session.status == TransferStatus.cancelled) {
+      return TransferOutcome(
+        key: ValueKey('${session.sessionId}-${session.status.name}'),
+        status: session.status,
+      );
     }
+    final text = session.status == TransferStatus.awaitingAccept
+        ? 'Waiting'
+        : 'In progress';
+    final color = theme.colorScheme.primary;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(

@@ -130,6 +130,26 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
           ),
           const Divider(height: 32),
+          Text('Appearance', style: theme.textTheme.titleMedium),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final entry in const [
+                ('system', 'Follow system', Icons.brightness_auto),
+                ('light', 'Light', Icons.light_mode_outlined),
+                ('dark', 'Dark', Icons.dark_mode_outlined),
+              ])
+                ChoiceChip(
+                  label: Text(entry.$2),
+                  avatar: Icon(entry.$3, size: 18),
+                  selected: state.settings.themeModeRaw == entry.$1,
+                  onSelected: (_) => state.settings.setThemeMode(entry.$1),
+                ),
+            ],
+          ),
+          const Divider(height: 32),
           Text('Network', style: theme.textTheme.titleMedium),
           const SizedBox(height: 8),
           _kv(

@@ -18,6 +18,7 @@ class AppSettings extends ChangeNotifier {
   static const _connectivityModeKey = 'lanlink_connectivity_mode';
   static const _hotspotRoleKey = 'lanlink_hotspot_role';
   static const _autoUpdateKey = 'lanlink_auto_update_check';
+  static const _themeModeKey = 'lanlink_theme_mode';
   static const _skippedUpdateKey = 'lanlink_skipped_update_version';
   static const _peerNicknamesKey = 'lanlink_peer_nicknames';
 
@@ -49,6 +50,14 @@ class AppSettings extends ChangeNotifier {
   }
 
   bool get autoUpdateCheck => _prefs.getBool(_autoUpdateKey) ?? true;
+
+  /// User-chosen theme mode (system | light | dark). Defaults to system.
+  String get themeModeRaw => _prefs.getString(_themeModeKey) ?? 'system';
+
+  Future<void> setThemeMode(String value) async {
+    await _prefs.setString(_themeModeKey, value);
+    notifyListeners();
+  }
 
   /// The release tag the user explicitly dismissed via "Skip this version".
   /// The update banner won't reappear for this tag, but the user can still

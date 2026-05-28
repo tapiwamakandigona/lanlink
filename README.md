@@ -21,6 +21,8 @@ LanLink speaks the [LocalSend v2 wire protocol](https://github.com/localsend/pro
 - **Per-peer nicknames + persistent trust.** Long-press a peer to assign a friendly name ("My laptop", "Tapiwa's phone") that survives restarts, jump to that peer's transfer history, or toggle their trusted status from one sheet.
 - **Send to multiple peers at once.** Multi-select mode in the peer list — pick N nearby devices and fan out the same staged files to all of them as parallel sessions.
 - **Per-peer transfer history.** Long-press a peer → "View history with this device" → only the transfers you've done with that fingerprint, regardless of what their alias was at the time.
+- **Polished dark mode.** Hand-tuned dark palette (deep neutral surfaces, soft blue primary, designed contrast) instead of inverted Material defaults. Settings → Appearance lets you pick Follow system / Light / Dark.
+- **Animated transfer outcome.** When a session reaches Done / Failed / Cancelled, its status chip scales in with a bouncy entrance and the matching check / X icon, so success is visible at a glance.
 - **Manual rescan button** in the app bar — pokes multicast and kicks the subnet scan in all modes.
 - **Stream-based file I/O.** Files go straight from disk → network → disk; memory usage stays flat regardless of file size. Multi-gigabyte transfers work fine.
 - **Live progress on both sides.** The sender and receiver both see real-time bytes-transferred — no more "stuck at 100%" with nothing actually delivered.

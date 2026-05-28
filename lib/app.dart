@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import 'core/settings/app_settings.dart';
+import 'core/theme/app_theme.dart';
 import 'core/transfer/receiver.dart';
 import 'state/app_state.dart';
 import 'ui/splash_gate.dart';
@@ -24,7 +26,6 @@ class _LanLinkAppState extends State<LanLinkApp> {
     widget.state.installIncomingPrompt((peer, files) async {
       final nav = _navigatorKey.currentState;
       if (nav == null) {
-        // UI not ready yet — reject so sender can retry.
         return AcceptDecision.reject();
       }
       final result = await showReceivePrompt(
@@ -46,66 +47,23 @@ class _LanLinkAppState extends State<LanLinkApp> {
     return ChangeNotifierProvider.value(
       value: widget.state,
       builder: (context, _) {
-        // Also expose settings so widgets that only need settings can listen
-        // to it directly without depending on AppState.
         return ChangeNotifierProvider.value(
           value: widget.state.settings,
-          child: MaterialApp(
-            title: 'LanLink',
-            navigatorKey: _navigatorKey,
-            debugShowCheckedModeBanner: false,
-            themeMode: ThemeMode.system,
-            theme: _buildLight(),
-            darkTheme: _buildDark(),
-            home: const SplashGate(),
-          ),
+          builder: (context, _) {
+            final settings = context.watch<AppSettings>();
+            final themeMode = AppTheme.resolve(settings.themeModeRaw);
+            return MaterialApp(
+              title: 'LanLink',
+              navigatorKey: _navigatorKey,
+              debugShowCheckedModeBanner: false,
+              themeMode: themeMode,
+              theme: AppTheme.light(),
+              darkTheme: AppTheme.dark(),
+              home: const SplashGate(),
+            );
+          },
         );
       },
     );
   }
-}
-
-ThemeData _buildLight() {
-  final base = ColorScheme.fromSeed(seedColor: const Color(0xFF3D7BFF));
-  return ThemeData(
-    colorScheme: base,
-    useMaterial3: true,
-    appBarTheme: AppBarTheme(
-      backgroundColor: base.surface,
-      foregroundColor: base.onSurface,
-      elevation: 0,
-      centerTitle: false,
-    ),
-    cardTheme: const CardTheme(
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.all(Radius.circular(12)),
-      ),
-      clipBehavior: Clip.antiAlias,
-    ),
-  );
-}
-
-ThemeData _buildDark() {
-  final base = ColorScheme.fromSeed(
-    seedColor: const Color(0xFF3D7BFF),
-    brightness: Brightness.dark,
-  );
-  return ThemeData(
-    colorScheme: base,
-    useMaterial3: true,
-    appBarTheme: AppBarTheme(
-      backgroundColor: base.surface,
-      foregroundColor: base.onSurface,
-      elevation: 0,
-      centerTitle: false,
-    ),
-    cardTheme: const CardTheme(
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.all(Radius.circular(12)),
-      ),
-      clipBehavior: Clip.antiAlias,
-    ),
-  );
 }
