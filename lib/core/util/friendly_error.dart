@@ -60,8 +60,9 @@ String friendlyTransferError(Object error, {String? peerName}) {
 }
 
 /// Maps an HTTP status code from a failed transfer step to plain English.
-String friendlyHttpStatus(int? code, {String? peerName}) =>
-    _httpMessage(code, (peerName == null || peerName.trim().isEmpty)
+String friendlyHttpStatus(int? code, {String? peerName}) => _httpMessage(
+    code,
+    (peerName == null || peerName.trim().isEmpty)
         ? 'the other device'
         : peerName.trim());
 

@@ -110,8 +110,7 @@ class _HelpPageState extends State<HelpPage> {
               clipBehavior: Clip.antiAlias,
               child: ExpansionTile(
                 title: Text(qa.$1, style: theme.textTheme.titleSmall),
-                childrenPadding:
-                    const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                 children: [
                   Align(
                     alignment: Alignment.centerLeft,

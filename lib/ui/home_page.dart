@@ -710,9 +710,9 @@ class _HomePageState extends State<HomePage> {
       if (session.status != TransferStatus.completed) return;
       session.removeListener(listener);
       if (!mounted) return;
-      final peerName = context.read<AppState>().settings
-              .nicknameFor(peer.fingerprint) ??
-          (peer.alias.isEmpty ? 'device' : peer.alias);
+      final peerName =
+          context.read<AppState>().settings.nicknameFor(peer.fingerprint) ??
+              (peer.alias.isEmpty ? 'device' : peer.alias);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Sent to $peerName.'),

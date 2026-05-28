@@ -4,8 +4,7 @@ import 'package:lanlink/core/models/file_info.dart';
 import 'package:lanlink/core/models/session.dart';
 
 void main() {
-  test('send snapshot preserves localPath so a restored session can retry',
-      () {
+  test('send snapshot preserves localPath so a restored session can retry', () {
     final peer = Device(
       alias: 'Laptop',
       version: '2.0',
@@ -35,8 +34,7 @@ void main() {
       status: TransferStatus.failed,
     );
 
-    final restored =
-        TransferSession.fromJsonSnapshot(session.toJsonSnapshot());
+    final restored = TransferSession.fromJsonSnapshot(session.toJsonSnapshot());
 
     expect(restored.direction, TransferDirection.send);
     expect(restored.status, TransferStatus.failed);

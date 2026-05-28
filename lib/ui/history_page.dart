@@ -136,8 +136,8 @@ class HistoryPage extends StatelessWidget {
     if (session == null) {
       messenger.showSnackBar(
         const SnackBar(
-          content: Text(
-              "Can't retry — the original files are no longer available."),
+          content:
+              Text("Can't retry — the original files are no longer available."),
         ),
       );
       return;

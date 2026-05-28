@@ -121,7 +121,9 @@ PairingGuide resolvePairingGuide({
         );
       }
       return PairingGuide(
-        title: sending ? 'Send by joining their hotspot' : 'Receive on their hotspot',
+        title: sending
+            ? 'Send by joining their hotspot'
+            : 'Receive on their hotspot',
         steps: [
           'Ask the other person (the Android device) to turn on their '
               'hotspot.',
