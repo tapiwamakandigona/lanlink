@@ -18,6 +18,7 @@ class AppSettings extends ChangeNotifier {
   static const _connectivityModeKey = 'lanlink_connectivity_mode';
   static const _hotspotRoleKey = 'lanlink_hotspot_role';
   static const _autoUpdateKey = 'lanlink_auto_update_check';
+  static const _skippedUpdateKey = 'lanlink_skipped_update_version';
 
   final SharedPreferences _prefs;
 
@@ -47,6 +48,12 @@ class AppSettings extends ChangeNotifier {
   }
 
   bool get autoUpdateCheck => _prefs.getBool(_autoUpdateKey) ?? true;
+
+  /// The release tag the user explicitly dismissed via "Skip this version".
+  /// The update banner won't reappear for this tag, but the user can still
+  /// pull up release notes by tapping "Check for updates" in Settings.
+  /// Cleared automatically once a newer release supersedes it.
+  String? get skippedUpdateVersion => _prefs.getString(_skippedUpdateKey);
 
   Set<String> get trustedFingerprints {
     final raw = _prefs.getString(_trustedKey);
@@ -94,6 +101,15 @@ class AppSettings extends ChangeNotifier {
 
   Future<void> setAutoUpdateCheck(bool value) async {
     await _prefs.setBool(_autoUpdateKey, value);
+    notifyListeners();
+  }
+
+  Future<void> setSkippedUpdateVersion(String? value) async {
+    if (value == null) {
+      await _prefs.remove(_skippedUpdateKey);
+    } else {
+      await _prefs.setString(_skippedUpdateKey, value);
+    }
     notifyListeners();
   }
 

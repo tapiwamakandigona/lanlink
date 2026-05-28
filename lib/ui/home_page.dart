@@ -83,9 +83,14 @@ class _HomePageState extends State<HomePage> {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
               children: [
-                if (state.updateChecker.availableUpdate != null)
+                if (state.updateChecker.availableUpdate != null &&
+                    state.settings.skippedUpdateVersion !=
+                        state.updateChecker.availableUpdate!.tagName)
                   UpdateAvailableBanner(
                     release: state.updateChecker.availableUpdate!,
+                    onDismiss: () => state.settings.setSkippedUpdateVersion(
+                      state.updateChecker.availableUpdate!.tagName,
+                    ),
                   ),
                 _modePanel(context, state),
                 if (mode == ConnectivityMode.hotspot) ...[

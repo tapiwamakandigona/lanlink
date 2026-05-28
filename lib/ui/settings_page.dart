@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../state/app_state.dart';
+import 'widgets/check_for_updates_tile.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -152,6 +153,17 @@ class _SettingsPageState extends State<SettingsPage> {
               icon: const Icon(Icons.copy),
               label: const Text('Copy address'),
             ),
+          const Divider(height: 32),
+          Text('Updates', style: theme.textTheme.titleMedium),
+          const SizedBox(height: 4),
+          Text(
+            'LanLink checks GitHub for new releases. Updates are always optional and never installed automatically.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const CheckForUpdatesTile(),
           const Divider(height: 32),
           Text('Trusted devices', style: theme.textTheme.titleMedium),
           if (state.settings.trustedFingerprints.isEmpty)

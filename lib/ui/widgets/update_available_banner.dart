@@ -7,10 +7,23 @@ import '../../core/update/update_checker.dart';
 /// modal with release notes and a "Download" button that drops straight to
 /// the matching binary for the current platform (APK on Android, ZIP on
 /// Windows) — never the source-code links.
+///
+/// The banner is fully dismissible: the user can hit the close icon to skip
+/// the current release (it won't reappear until a newer one ships) or pick
+/// "Later" from the details sheet. Updates are never forced.
 class UpdateAvailableBanner extends StatelessWidget {
-  const UpdateAvailableBanner({super.key, required this.release});
+  const UpdateAvailableBanner({
+    super.key,
+    required this.release,
+    this.onDismiss,
+  });
 
   final ReleaseInfo release;
+
+  /// Called when the user explicitly dismisses the banner via the close
+  /// icon or the "Skip this version" button in the details sheet. Hosts
+  /// typically persist the tag so the banner doesn't reappear for it.
+  final VoidCallback? onDismiss;
 
   @override
   Widget build(BuildContext context) {
@@ -24,7 +37,7 @@ class UpdateAvailableBanner extends StatelessWidget {
           borderRadius: BorderRadius.circular(12),
           onTap: () => _showDetails(context),
           child: Padding(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.fromLTRB(12, 12, 4, 12),
             child: Row(
               children: [
                 Icon(
@@ -44,7 +57,7 @@ class UpdateAvailableBanner extends StatelessWidget {
                         ),
                       ),
                       Text(
-                        'Tap to see what\'s new and download the update.',
+                        'Tap to see what\'s new. Updates are optional.',
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: theme.colorScheme.onPrimaryContainer
                               .withOpacity(0.85),
@@ -53,10 +66,23 @@ class UpdateAvailableBanner extends StatelessWidget {
                     ],
                   ),
                 ),
-                Icon(
-                  Icons.chevron_right,
-                  color: theme.colorScheme.onPrimaryContainer,
-                ),
+                if (onDismiss != null)
+                  IconButton(
+                    tooltip: 'Skip this version',
+                    icon: Icon(
+                      Icons.close,
+                      color: theme.colorScheme.onPrimaryContainer,
+                    ),
+                    onPressed: onDismiss,
+                  )
+                else
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: Icon(
+                      Icons.chevron_right,
+                      color: theme.colorScheme.onPrimaryContainer,
+                    ),
+                  ),
               ],
             ),
           ),
@@ -111,14 +137,23 @@ class UpdateAvailableBanner extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 16),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
+                Wrap(
+                  alignment: WrapAlignment.end,
+                  spacing: 8,
+                  runSpacing: 8,
                   children: [
+                    if (onDismiss != null)
+                      TextButton(
+                        onPressed: () {
+                          onDismiss!();
+                          Navigator.of(sheetContext).pop();
+                        },
+                        child: const Text('Skip this version'),
+                      ),
                     TextButton(
                       onPressed: () => Navigator.of(sheetContext).pop(),
                       child: const Text('Later'),
                     ),
-                    const SizedBox(width: 8),
                     FilledButton.icon(
                       onPressed: downloadUrl == null
                           ? null

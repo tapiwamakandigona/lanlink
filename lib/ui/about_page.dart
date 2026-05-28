@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'widgets/check_for_updates_tile.dart';
+
 class AboutPage extends StatelessWidget {
   const AboutPage({super.key});
 
@@ -44,6 +46,8 @@ class AboutPage extends StatelessWidget {
               ),
             ),
           ),
+          const SizedBox(height: 12),
+          const CheckForUpdatesTile(),
           const SizedBox(height: 12),
           Card(
             child: ListTile(
