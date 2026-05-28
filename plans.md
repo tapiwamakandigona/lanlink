@@ -213,6 +213,47 @@ stay current as the UI changes.
 
 ---
 
+## Device-pairing wizard (Tapiwa's idea — locked in for v3.1.0)
+
+After splash, **before** any peer list, the app runs a 3-step wizard:
+
+**Step 1 — Direction.** "What do you want to do?"
+  - Send something
+  - Receive something
+
+**Step 2 — Other device.** "What kind of device is the other person using?"
+  - Android phone / Tablet
+  - iPhone / iPad
+  - Windows PC
+  - Mac
+  - Not sure
+
+The app already knows **its own** platform via `Platform.is*`. Combining
+self + direction + other resolves to one of 16 unique pairings.
+
+**Step 3 — Tailored instructions.** A single screen with the exact steps
+for that pairing, no edge cases shown to the user. Per pairing:
+
+| Sender → Receiver | Receiver action | Sender action |
+|---|---|---|
+| Android → Android | Turn on hotspot (deep-link). Show QR. | Join hotspot from Wi-Fi → scan QR. |
+| Android → iPhone | Join Android sender's hotspot from iPhone Wi-Fi settings. | Turn on hotspot (deep-link). Show QR after iPhone joins. |
+| Android → Mac/Win | Make sure Mac/PC is on same Wi-Fi. | Same Wi-Fi → auto-discovered, no QR. |
+| iPhone → Android | Turn on hotspot (deep-link). Show QR. | Join hotspot from iPhone Wi-Fi → scan QR. |
+| iPhone → iPhone | Manually enable Personal Hotspot from Control Center. Show QR. | Join hotspot manually → scan QR. |
+| iPhone → Mac/Win | Same Wi-Fi. | Same Wi-Fi → auto-discovered. |
+| Mac/Win → Android | Same Wi-Fi router. | Same Wi-Fi → auto-discovered. |
+| Mac/Win → iPhone | Same Wi-Fi router. | Same Wi-Fi → auto-discovered. |
+| Mac/Win → Mac/Win | Same Wi-Fi router. | Drag-and-drop window. |
+| Anything → "Not sure" | Show both options ("If they're on the same Wi-Fi as you, tap Auto-find. Otherwise, ask them to show their QR code"). | Same. |
+
+**Memory.** After a successful transfer, remember the pairing
+("last_pairing": `android_to_android_via_hotspot`). On next launch the
+wizard offers a "Same setup as last time" shortcut.
+
+**Power-user escape hatch.** A small "I know what I'm doing — skip
+wizard" link on Step 1 jumps straight to the legacy peer list home.
+
 ## User flows after v3.1.0 ships
 
 These are what we're building toward. Each flow assumes the v3.1.0
