@@ -6,12 +6,10 @@ import 'package:provider/provider.dart';
 
 import '../core/settings/app_settings.dart';
 import '../core/util/onboarding_gate.dart';
-import '../core/util/wizard_gate.dart';
 import 'home_page.dart';
 import 'onboarding_page.dart';
-import 'pairing/pairing_wizard_page.dart';
 
-enum _Stage { splash, onboarding, wizard, home }
+enum _Stage { splash, onboarding, home }
 
 class SplashGate extends StatefulWidget {
   const SplashGate({super.key});
@@ -48,25 +46,12 @@ class _SplashGateState extends State<SplashGate> {
       setState(() => _stage = _Stage.onboarding);
       return;
     }
-    _resolveWizardOrHome(settings);
-  }
-
-  void _resolveWizardOrHome(AppSettings settings) {
-    final showWizard = shouldShowPairingWizard(
-      wizardMode: settings.wizardMode,
-      hasLastPairing: settings.lastPairing != null,
-    );
-    setState(() => _stage = showWizard ? _Stage.wizard : _Stage.home);
+    setState(() => _stage = _Stage.home);
   }
 
   Future<void> _finishOnboarding() async {
     final settings = context.read<AppSettings>();
     await settings.setLastOnboardedVersion(_currentVersion);
-    if (!mounted) return;
-    _resolveWizardOrHome(settings);
-  }
-
-  void _finishWizard() {
     if (!mounted) return;
     setState(() => _stage = _Stage.home);
   }
@@ -78,8 +63,6 @@ class _SplashGateState extends State<SplashGate> {
         return const HomePage();
       case _Stage.onboarding:
         return OnboardingPage(onDone: _finishOnboarding);
-      case _Stage.wizard:
-        return PairingWizardPage(onDone: _finishWizard);
       case _Stage.splash:
         return _buildSplash(context);
     }

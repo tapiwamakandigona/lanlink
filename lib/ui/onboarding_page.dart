@@ -41,30 +41,16 @@ class _OnboardingPageState extends State<OnboardingPage> {
     _OnboardingSlide(
       icon: Icons.devices_other,
       title: 'Devices find each other',
-      body: 'Open LanLink on both devices and they appear in each other\'s '
-          '"Nearby devices" list automatically. On a hotspot, scan the pairing '
-          'QR code or tap "Add device by IP" if discovery is blocked.',
+      body: 'Open LanLink on both devices on the same network and they show up '
+          'in each other\'s list automatically. Stuck? The menu has a step-by-'
+          'step "How to connect" guide.',
     ),
     _OnboardingSlide(
-      icon: Icons.upload_file_outlined,
+      icon: Icons.send_outlined,
       title: 'Pick, tap, send',
-      body: 'Tap "Add" to choose files, then tap the device you want to send '
-          'to. The other person gets a prompt to accept — nobody can drop '
-          'files on you without your OK.',
-    ),
-    _OnboardingSlide(
-      icon: Icons.verified_user_outlined,
-      title: 'Trust your own devices',
-      body: 'When a transfer prompt appears, tick "Always accept from this '
-          'device" for gear you own so your own phone and laptop send '
-          'one-tap next time.',
-    ),
-    _OnboardingSlide(
-      icon: Icons.help_outline,
-      title: 'Stuck? Tap the ? button',
-      body: 'The "?" button on the home screen opens step-by-step help for '
-          'connecting any two devices, plus a quick FAQ. You can replay this '
-          'tour anytime from Settings.',
+      body: 'Tap "Send files" to choose what to share, then tap the device you '
+          'want. The other person accepts the transfer — nobody can drop files '
+          'on you without your OK.',
     ),
   ];
 
