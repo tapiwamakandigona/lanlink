@@ -13,16 +13,12 @@ import '../core/models/session.dart';
 import '../core/platform/android_apps.dart';
 import '../state/app_state.dart';
 import 'about_page.dart';
-import 'help_page.dart';
 import 'history_page.dart';
 import 'scan_qr_page.dart';
 import 'settings_page.dart';
 import '../core/platform/incoming_share.dart';
 import 'pairing/pairing_wizard_page.dart';
-import 'widgets/connection_quality_indicator.dart';
-import 'widgets/success_celebration.dart';
 import 'widgets/device_card.dart';
-import 'widgets/idle_nudge.dart';
 import 'widgets/pair_qr_sheet.dart';
 import 'widgets/peer_action_sheet.dart';
 import 'widgets/progress_card.dart';
@@ -40,7 +36,6 @@ class _HomePageState extends State<HomePage> {
   final _uuid = const Uuid();
   final Set<String> _selectedFingerprints = <String>{};
   bool _multiSelect = false;
-  bool _hasCelebratedThisSession = false;
 
   @override
   void initState() {
@@ -71,7 +66,7 @@ class _HomePageState extends State<HomePage> {
       MaterialPageRoute(
         builder: (_) => PairingWizardPage(
           onDone: () => Navigator.of(context).pop(),
-          canSkip: false,
+          canSkip: true,
         ),
       ),
     );
@@ -93,10 +88,6 @@ class _HomePageState extends State<HomePage> {
       appBar: AppBar(
         title: const Text('LanLink'),
         actions: [
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 4),
-            child: ConnectionQualityIndicator(),
-          ),
           IconButton(
             tooltip: state.isScanning ? 'Scanning…' : 'Rescan for devices',
             icon: state.isScanning
@@ -108,109 +99,113 @@ class _HomePageState extends State<HomePage> {
                 : const Icon(Icons.refresh),
             onPressed: state.isScanning ? null : () => state.refreshDiscovery(),
           ),
-          IconButton(
-            tooltip: 'Help & getting connected',
-            icon: const Icon(Icons.help_outline),
-            onPressed: () => showHelp(context),
-          ),
-          IconButton(
-            tooltip: 'About',
-            icon: const Icon(Icons.info_outline),
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const AboutPage()),
-            ),
-          ),
-          IconButton(
-            tooltip: 'History',
-            icon: const Icon(Icons.history),
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const HistoryPage()),
-            ),
-          ),
-          IconButton(
-            tooltip: 'Settings',
-            icon: const Icon(Icons.settings),
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const SettingsPage()),
-            ),
+          PopupMenuButton<_MenuAction>(
+            tooltip: 'More options',
+            onSelected: (a) => _onMenuAction(context, a),
+            itemBuilder: (context) => const [
+              PopupMenuItem(
+                value: _MenuAction.help,
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.help_outline),
+                  title: Text('How to connect'),
+                ),
+              ),
+              PopupMenuItem(
+                value: _MenuAction.history,
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.history),
+                  title: Text('History'),
+                ),
+              ),
+              PopupMenuItem(
+                value: _MenuAction.settings,
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.settings_outlined),
+                  title: Text('Settings'),
+                ),
+              ),
+              PopupMenuItem(
+                value: _MenuAction.about,
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.info_outline),
+                  title: Text('About'),
+                ),
+              ),
+            ],
           ),
         ],
       ),
-      body: Column(
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
         children: [
-          IdleNudge(
-            idle: const Duration(seconds: 30),
-            onTap: () => _openPairingWizard(context),
-            message:
-                "Stuck? We can walk you through connecting another device.",
-            actionLabel: 'Show me',
-          ),
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
-              children: [
-                if (state.updateChecker.availableUpdate != null &&
-                    state.settings.skippedUpdateVersion !=
-                        state.updateChecker.availableUpdate!.tagName)
-                  UpdateAvailableBanner(
-                    release: state.updateChecker.availableUpdate!,
-                    onDismiss: () => state.settings.setSkippedUpdateVersion(
-                      state.updateChecker.availableUpdate!.tagName,
-                    ),
-                  ),
-                _modePanel(context, state),
-                if (mode == ConnectivityMode.hotspot) ...[
-                  const SizedBox(height: 8),
-                  _hotspotPanel(context, state),
-                ],
-                const SizedBox(height: 16),
-                _stagedFilesPanel(context),
-                const SizedBox(height: 16),
-                _nearbyHeader(context, mode, peers.length),
-                if (mode == ConnectivityMode.bluetooth)
-                  _bluetoothPanel(context, state)
-                else if (peers.isEmpty)
-                  _emptyPeers(context, mode)
-                else
-                  ...peers.map(
-                    (p) => Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: DeviceCard(
-                        device: p,
-                        selected: _multiSelect &&
-                            _selectedFingerprints.contains(p.fingerprint),
-                        trailing: _multiSelect
-                            ? Icon(
-                                _selectedFingerprints.contains(p.fingerprint)
-                                    ? Icons.check_circle
-                                    : Icons.radio_button_unchecked,
-                                color: Theme.of(context).colorScheme.primary,
-                              )
-                            : null,
-                        onTap: () {
-                          if (_multiSelect) {
-                            _toggleSelection(p);
-                          } else {
-                            _sendStagedTo(p);
-                          }
-                        },
-                        onLongPress: () => showPeerActionSheet(context, p),
-                      ),
-                    ),
-                  ),
-                if (active.isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  Text('Active transfers',
-                      style: Theme.of(context).textTheme.titleMedium),
-                  const SizedBox(height: 8),
-                  ...active.map((s) => Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: ProgressCard(session: s),
-                      )),
-                ],
-              ],
+          if (state.updateChecker.availableUpdate != null &&
+              state.settings.skippedUpdateVersion !=
+                  state.updateChecker.availableUpdate!.tagName)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: UpdateAvailableBanner(
+                release: state.updateChecker.availableUpdate!,
+                onDismiss: () => state.settings.setSkippedUpdateVersion(
+                  state.updateChecker.availableUpdate!.tagName,
+                ),
+              ),
             ),
-          ),
+          _modeStatusBar(context, state),
+          if (mode == ConnectivityMode.hotspot) ...[
+            const SizedBox(height: 8),
+            _hotspotPanel(context, state),
+          ],
+          if (_staged.isNotEmpty || _isDesktop) ...[
+            const SizedBox(height: 16),
+            _stagedFilesPanel(context),
+          ],
+          const SizedBox(height: 16),
+          _nearbyHeader(context, mode, peers.length),
+          if (mode == ConnectivityMode.bluetooth)
+            _bluetoothPanel(context, state)
+          else if (peers.isEmpty)
+            _emptyPeers(context, mode)
+          else
+            ...peers.map(
+              (p) => Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: DeviceCard(
+                  device: p,
+                  selected: _multiSelect &&
+                      _selectedFingerprints.contains(p.fingerprint),
+                  trailing: _multiSelect
+                      ? Icon(
+                          _selectedFingerprints.contains(p.fingerprint)
+                              ? Icons.check_circle
+                              : Icons.radio_button_unchecked,
+                          color: Theme.of(context).colorScheme.primary,
+                        )
+                      : null,
+                  onTap: () {
+                    if (_multiSelect) {
+                      _toggleSelection(p);
+                    } else {
+                      _sendStagedTo(p);
+                    }
+                  },
+                  onLongPress: () => showPeerActionSheet(context, p),
+                ),
+              ),
+            ),
+          if (active.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            Text('Active transfers',
+                style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 8),
+            ...active.map((s) => Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: ProgressCard(session: s),
+                )),
+          ],
         ],
       ),
       floatingActionButton: _multiSelect
@@ -226,10 +221,97 @@ class _HomePageState extends State<HomePage> {
             )
           : FloatingActionButton.extended(
               onPressed: _showAddMenu,
-              icon: const Icon(Icons.add),
-              label: const Text('Add'),
+              icon: const Icon(Icons.send),
+              label: const Text('Send files'),
             ),
     );
+  }
+
+  bool get _isDesktop =>
+      Platform.isWindows || Platform.isLinux || Platform.isMacOS;
+
+  void _onMenuAction(BuildContext context, _MenuAction action) {
+    switch (action) {
+      case _MenuAction.help:
+        _openPairingWizard(context);
+        break;
+      case _MenuAction.history:
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const HistoryPage()),
+        );
+        break;
+      case _MenuAction.settings:
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const SettingsPage()),
+        );
+        break;
+      case _MenuAction.about:
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const AboutPage()),
+        );
+        break;
+    }
+  }
+
+  Widget _modeStatusBar(BuildContext context, AppState state) {
+    final theme = Theme.of(context);
+    final mode = state.settings.connectivityMode;
+    return Card(
+      child: ListTile(
+        leading: Icon(_modeIcon(mode), color: theme.colorScheme.primary),
+        title: Text(mode.label, style: theme.textTheme.titleSmall),
+        subtitle: Text(
+          mode.description,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        trailing: TextButton(
+          onPressed: () => _showModeSheet(context, state),
+          child: const Text('Change'),
+        ),
+        onTap: () => _showModeSheet(context, state),
+      ),
+    );
+  }
+
+  Future<void> _showModeSheet(BuildContext context, AppState state) async {
+    final selected = state.settings.connectivityMode;
+    final chosen = await showModalBottomSheet<ConnectivityMode>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'How are the devices connected?',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ),
+            ),
+            for (final m in ConnectivityMode.values)
+              RadioListTile<ConnectivityMode>(
+                value: m,
+                groupValue: selected,
+                onChanged:
+                    m.isAvailable ? (v) => Navigator.of(context).pop(v) : null,
+                secondary: Icon(_modeIcon(m)),
+                title: Text(m.label),
+                subtitle: Text(m.description),
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (chosen != null) {
+      await state.settings.setConnectivityMode(chosen);
+    }
   }
 
   Future<void> _showAddMenu() async {
@@ -333,45 +415,6 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _modePanel(BuildContext context, AppState state) {
-    final theme = Theme.of(context);
-    final selected = state.settings.connectivityMode;
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Transfer mode', style: theme.textTheme.titleMedium),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (final mode in ConnectivityMode.values)
-                  ChoiceChip(
-                    label: Text(mode.label),
-                    avatar: Icon(_modeIcon(mode), size: 18),
-                    selected: selected == mode,
-                    onSelected: mode.isAvailable
-                        ? (_) => state.settings.setConnectivityMode(mode)
-                        : null,
-                  ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(
-              selected.description,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   Widget _stagedFilesPanel(BuildContext context) {
     final theme = Theme.of(context);
     final isDesktop =
@@ -388,9 +431,9 @@ class _HomePageState extends State<HomePage> {
               Expanded(
                 child: Text(
                   isDesktop
-                      ? 'Drop files here, or tap "Add files" to pick what you '
+                      ? 'Drop files here, or tap "Send files" to pick what you '
                           'want to send. Then tap a nearby device to start.'
-                      : 'Tap "Add files" to pick what you want to send, '
+                      : 'Tap "Send files" to pick what you want to send, '
                           'then tap a nearby device to start the transfer.',
                   style: theme.textTheme.bodyMedium,
                 ),
@@ -527,34 +570,64 @@ class _HomePageState extends State<HomePage> {
             ),
           const Spacer(),
           if (mode.usesLanTransport && n > 1)
-            IconButton(
-              tooltip:
-                  _multiSelect ? 'Cancel multi-select' : 'Send to multiple',
-              icon: Icon(
-                  _multiSelect ? Icons.close : Icons.checklist_rtl_outlined),
+            TextButton.icon(
               onPressed: _toggleMultiSelect,
+              icon: Icon(
+                _multiSelect ? Icons.close : Icons.checklist_outlined,
+                size: 18,
+              ),
+              label: Text(_multiSelect ? 'Cancel' : 'Multi-send'),
             ),
           if (mode.usesLanTransport)
-            IconButton(
-              tooltip: 'Show pair QR',
-              icon: const Icon(Icons.qr_code_2),
-              onPressed: () => showPairQrSheet(context),
-            ),
-          if (mode.usesLanTransport && canScan)
-            IconButton(
-              tooltip: 'Scan pair QR',
-              icon: const Icon(Icons.qr_code_scanner),
-              onPressed: _scanQr,
-            ),
-          if (mode.usesLanTransport)
-            IconButton(
-              tooltip: 'Add device by IP',
-              icon: const Icon(Icons.add_circle_outline),
-              onPressed: _addManualPeer,
+            PopupMenuButton<_AddDeviceAction>(
+              tooltip: 'Add a device',
+              icon: const Icon(Icons.add),
+              onSelected: (a) => _onAddDevice(context, a),
+              itemBuilder: (context) => [
+                const PopupMenuItem(
+                  value: _AddDeviceAction.showQr,
+                  child: ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.qr_code_2),
+                    title: Text('Show pairing QR'),
+                  ),
+                ),
+                if (canScan)
+                  const PopupMenuItem(
+                    value: _AddDeviceAction.scanQr,
+                    child: ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(Icons.qr_code_scanner),
+                      title: Text('Scan a QR code'),
+                    ),
+                  ),
+                const PopupMenuItem(
+                  value: _AddDeviceAction.enterIp,
+                  child: ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.keyboard_outlined),
+                    title: Text('Enter IP address'),
+                  ),
+                ),
+              ],
             ),
         ],
       ),
     );
+  }
+
+  void _onAddDevice(BuildContext context, _AddDeviceAction action) {
+    switch (action) {
+      case _AddDeviceAction.showQr:
+        showPairQrSheet(context);
+        break;
+      case _AddDeviceAction.scanQr:
+        _scanQr();
+        break;
+      case _AddDeviceAction.enterIp:
+        _addManualPeer();
+        break;
+    }
   }
 
   void _toggleMultiSelect() {
@@ -792,8 +865,7 @@ class _HomePageState extends State<HomePage> {
   Future<void> _sendStagedTo(Device peer) async {
     if (_staged.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('Add files first with the "Add files" button.')),
+        const SnackBar(content: Text('Tap "Send files" to pick files first.')),
       );
       return;
     }
@@ -817,7 +889,6 @@ class _HomePageState extends State<HomePage> {
       final peerName =
           context.read<AppState>().settings.nicknameFor(peer.fingerprint) ??
               (peer.alias.isEmpty ? 'device' : peer.alias);
-      _maybeCelebrate(context);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Sent to $peerName.'),
@@ -830,24 +901,6 @@ class _HomePageState extends State<HomePage> {
     }
 
     session.addListener(listener);
-  }
-
-  /// Pops a brief, dismissible confetti animation the first time the
-  /// user completes a successful send in this app session. We don't
-  /// show it on every subsequent transfer — it's celebratory, not noisy.
-  void _maybeCelebrate(BuildContext context) {
-    if (_hasCelebratedThisSession) return;
-    _hasCelebratedThisSession = true;
-    showDialog<void>(
-      context: context,
-      barrierDismissible: true,
-      builder: (_) => const _CelebrationDialog(),
-    );
-    final navigator = Navigator.of(context, rootNavigator: true);
-    Future<void>.delayed(const Duration(milliseconds: 1600), () {
-      if (!mounted) return;
-      navigator.maybePop();
-    });
   }
 
   Future<void> _sendAnotherTo(Device peer) async {
@@ -920,6 +973,10 @@ String _safeApkName(String label) {
 
 enum _AddAction { files, apps }
 
+enum _MenuAction { help, history, settings, about }
+
+enum _AddDeviceAction { showQr, scanQr, enterIp }
+
 String _humanBytes(int bytes) {
   if (bytes < 1024) return '$bytes B';
   const units = ['KB', 'MB', 'GB', 'TB'];
@@ -937,43 +994,4 @@ String _humanBytes(int bytes) {
 /// unit tests later.
 class _IncomingShareAdapter {
   static Future<List<FileInfo>> consume() => IncomingShare.consume();
-}
-
-class _CelebrationDialog extends StatelessWidget {
-  const _CelebrationDialog();
-
-  @override
-  Widget build(BuildContext context) {
-    return Dialog(
-      backgroundColor: Colors.transparent,
-      elevation: 0,
-      child: Center(
-        child: Material(
-          color: Theme.of(context).colorScheme.surface,
-          borderRadius: BorderRadius.circular(16),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 24, 20, 20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const SuccessCelebration(),
-                const SizedBox(height: 12),
-                Text(
-                  'Sent!',
-                  style: Theme.of(context).textTheme.headlineSmall,
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Your first transfer landed safely.',
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
 }

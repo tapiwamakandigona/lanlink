@@ -233,25 +233,6 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
           ),
           const SizedBox(height: 8),
-          DropdownButtonFormField<String>(
-            value: state.settings.wizardMode,
-            decoration: const InputDecoration(
-              labelText: 'Show pairing wizard at launch',
-              border: OutlineInputBorder(),
-            ),
-            items: const [
-              DropdownMenuItem(
-                  value: 'auto',
-                  child: Text("Until I've paired once (default)")),
-              DropdownMenuItem(value: 'always', child: Text('Every launch')),
-              DropdownMenuItem(
-                  value: 'never', child: Text("Never — I know what I'm doing")),
-            ],
-            onChanged: (v) {
-              if (v != null) state.settings.setWizardMode(v);
-            },
-          ),
-          const SizedBox(height: 8),
           OutlinedButton.icon(
             icon: const Icon(Icons.copy_all_outlined),
             label: const Text('Copy diagnostics'),

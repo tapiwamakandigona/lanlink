@@ -33,8 +33,9 @@ LanLink speaks the [LocalSend v2 wire protocol](https://github.com/localsend/pro
 - **Per-transfer accept prompt** so random devices on your network can't dump files on you. Optionally mark senders as **trusted** for one-tap acceptance next time.
 - **Decline ≠ failure.** A peer that declines your send is reported as cancelled, not failed.
 - **Cross-platform UX** that follows platform conventions (Material 3 light/dark, system theme).
-- **First-run & post-update onboarding.** A Flutter-rendered welcome carousel (no bundled screenshots) introduces the app on first launch and again after an update bumps the version, then gets out of the way. Replay it anytime from Settings or the help screen.
-- **"?" help & "Get connected" guide.** A help button on the home screen answers two quick questions — what you want to do and what the other device is — and shows tailored, step-by-step pairing instructions for that exact combination, plus a short FAQ.
+- **Streamlined first-run.** A short, three-slide welcome carousel (no bundled screenshots) introduces the app, then drops you straight into the home screen — no forced setup wizard. Replay it anytime from Settings.
+- **"How to connect" guide.** The home screen's ⋮ menu opens a guided pairing helper: answer two quick questions — what you want to do and what the other device is — and get tailored, step-by-step instructions for that exact combination. Also reachable from Settings.
+- **Simpler home screen.** The app bar is just Refresh + a single ⋮ menu (How to connect / History / Settings / About). The current transfer mode shows as a one-line status with a "Change" sheet, one obvious **Send files** button stages files, and the empty state tells you what to do while it looks for devices.
 - **Plain-English error messages.** Transfer failures are translated from raw exceptions (`SocketException`, timeouts, HTTP codes) into short, actionable sentences like "Timed out reaching Tapiwa's phone. Make sure both devices are on the same Wi-Fi or hotspot and try again."
 - **One-tap retry.** Failed or cancelled sends show a **Retry** button in History that re-sends the same files to the same device — the source paths are persisted so retry survives an app restart.
 - **"Send another?" follow-up.** After a successful send, a snackbar offers to immediately pick more files for the same device.
