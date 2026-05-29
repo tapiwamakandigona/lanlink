@@ -1,21 +1,48 @@
 package com.lanlink.app
 
+import android.content.ComponentName
 import android.content.ContentValues
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.database.Cursor
 import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
+import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
+import android.provider.OpenableColumns
+import android.provider.Settings
 import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 import java.io.FileInputStream
+import java.io.FileOutputStream
 
 class MainActivity : FlutterActivity() {
+
+    /// Buffer of files handed to us by an incoming `ACTION_SEND` /
+    /// `ACTION_SEND_MULTIPLE` intent before the Flutter side asks for
+    /// them. The pairing wizard / home page polls this on startup and
+    /// when the activity comes back to the foreground.
+    private val pendingShares = mutableListOf<Map<String, Any>>()
+    private var shareChannel: MethodChannel? = null
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        capturePendingShare(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        capturePendingShare(intent)
+        // The Flutter side may already be listening; nudge it.
+        shareChannel?.invokeMethod("onShareReceived", null)
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
@@ -104,6 +131,30 @@ class MainActivity : FlutterActivity() {
                 }
             }
 
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "lanlink/system_settings")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "openHotspotSettings" -> result.success(openHotspotSettings())
+                    "openWifiSettings" -> result.success(openWifiSettings())
+                    else -> result.notImplemented()
+                }
+            }
+
+        shareChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "lanlink/incoming_share",
+        )
+        shareChannel?.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "consume" -> {
+                    val drained = ArrayList(pendingShares)
+                    pendingShares.clear()
+                    result.success(drained)
+                }
+                else -> result.notImplemented()
+            }
+        }
+
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "lanlink/received_files")
             .setMethodCallHandler { call, result ->
                 when (call.method) {
@@ -159,6 +210,142 @@ class MainActivity : FlutterActivity() {
                 "size" to apk.length(),
             )
         }.distinctBy { it["packageName"] as String }
+    }
+
+    /**
+     * Opens whichever Settings screen lets the user toggle the Wi-Fi
+     * hotspot. Exact location varies per OEM and Android version; we try
+     * the cleanest options first and fall back to the generic wireless
+     * page so something always opens.
+     */
+    private fun openHotspotSettings(): Boolean {
+        val attempts = mutableListOf<Intent>()
+        attempts += Intent().apply {
+            component = ComponentName(
+                "com.android.settings",
+                "com.android.settings.TetherSettings",
+            )
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        attempts += Intent("android.settings.TETHER_SETTINGS").apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            attempts += Intent(Settings.Panel.ACTION_INTERNET_CONNECTIVITY)
+        }
+        attempts += Intent(Settings.ACTION_WIRELESS_SETTINGS).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        for (intent in attempts) {
+            try {
+                if (intent.resolveActivity(packageManager) != null) {
+                    startActivity(intent)
+                    return true
+                }
+            } catch (_: Exception) {
+                continue
+            }
+        }
+        return false
+    }
+
+    /**
+     * Opens the OS Wi-Fi settings page so the user can join the other
+     * device's hotspot from the system UI.
+     */
+    private fun openWifiSettings(): Boolean {
+        val attempts = mutableListOf<Intent>()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            attempts += Intent(Settings.Panel.ACTION_WIFI)
+        }
+        attempts += Intent(Settings.ACTION_WIFI_SETTINGS).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        for (intent in attempts) {
+            try {
+                if (intent.resolveActivity(packageManager) != null) {
+                    startActivity(intent)
+                    return true
+                }
+            } catch (_: Exception) {
+                continue
+            }
+        }
+        return false
+    }
+
+    /**
+     * Drains any `EXTRA_STREAM`(s) on an incoming `ACTION_SEND` /
+     * `ACTION_SEND_MULTIPLE` intent into [pendingShares] as cached app-
+     * private files. The Flutter side will pick them up via the
+     * `consume` method on `lanlink/incoming_share` once it's ready.
+     */
+    private fun capturePendingShare(intent: Intent?) {
+        if (intent == null) return
+        val action = intent.action ?: return
+        if (action != Intent.ACTION_SEND && action != Intent.ACTION_SEND_MULTIPLE) return
+        val uris: List<Uri> = when (action) {
+            Intent.ACTION_SEND -> {
+                val u: Uri? = if (Build.VERSION.SDK_INT >= 33) {
+                    intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    intent.getParcelableExtra(Intent.EXTRA_STREAM)
+                }
+                if (u != null) listOf(u) else emptyList()
+            }
+            Intent.ACTION_SEND_MULTIPLE -> {
+                val list: List<Uri>? = if (Build.VERSION.SDK_INT >= 33) {
+                    intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM)
+                }
+                list ?: emptyList()
+            }
+            else -> emptyList()
+        }
+        for (uri in uris) {
+            val cached = copyIncomingUriToCache(uri) ?: continue
+            pendingShares += cached
+        }
+    }
+
+    private fun copyIncomingUriToCache(uri: Uri): Map<String, Any>? {
+        return try {
+            val resolver = contentResolver
+            var displayName = "shared-file"
+            var size: Long = -1L
+            resolver.query(uri, null, null, null, null)?.use { c: Cursor ->
+                val nameIx = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                val sizeIx = c.getColumnIndex(OpenableColumns.SIZE)
+                if (c.moveToFirst()) {
+                    if (nameIx >= 0) {
+                        val v = c.getString(nameIx)
+                        if (!v.isNullOrBlank()) displayName = v
+                    }
+                    if (sizeIx >= 0) {
+                        size = c.getLong(sizeIx)
+                    }
+                }
+            }
+            val outDir = File(cacheDir, "incoming_share").apply { mkdirs() }
+            val safeName = displayName.replace(File.separatorChar, '_')
+            val out = File(outDir, "${System.currentTimeMillis()}_$safeName")
+            resolver.openInputStream(uri)?.use { input ->
+                FileOutputStream(out).use { output ->
+                    input.copyTo(output)
+                }
+            } ?: return null
+            if (size < 0) size = out.length()
+            mapOf(
+                "path" to out.absolutePath,
+                "fileName" to displayName,
+                "size" to size,
+            )
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private fun shareFiles(paths: List<String>): Boolean {

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'widgets/need_help_footer.dart';
+
 class AboutPage extends StatefulWidget {
   const AboutPage({super.key});
 
@@ -89,6 +91,8 @@ class _AboutPageState extends State<AboutPage> {
                   launchUrl(_website, mode: LaunchMode.externalApplication),
             ),
           ),
+          const SizedBox(height: 24),
+          const NeedHelpFooter(),
         ],
       ),
     );

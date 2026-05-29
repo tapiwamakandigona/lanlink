@@ -1,7 +1,7 @@
 name: lanlink
 description: "LanLink — cross-platform LAN file sharing for Windows, macOS, Android, and iOS."
 publish_to: 'none'
-version: 3.1.0+8
+version: 3.2.0+9
 
 environment:
   sdk: ^3.5.4
@@ -40,6 +40,9 @@ dependencies:
   crypto: ^3.0.6
   provider: ^6.1.2
   pub_semver: ^2.1.4
+
+  # Drag-and-drop file targets on Windows, macOS and Linux desktop.
+  desktop_drop: ^0.4.4
 
 dev_dependencies:
   flutter_test:

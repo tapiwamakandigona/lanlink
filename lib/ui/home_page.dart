@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -14,7 +17,12 @@ import 'help_page.dart';
 import 'history_page.dart';
 import 'scan_qr_page.dart';
 import 'settings_page.dart';
+import '../core/platform/incoming_share.dart';
+import 'pairing/pairing_wizard_page.dart';
+import 'widgets/connection_quality_indicator.dart';
+import 'widgets/success_celebration.dart';
 import 'widgets/device_card.dart';
+import 'widgets/idle_nudge.dart';
 import 'widgets/pair_qr_sheet.dart';
 import 'widgets/peer_action_sheet.dart';
 import 'widgets/progress_card.dart';
@@ -32,6 +40,42 @@ class _HomePageState extends State<HomePage> {
   final _uuid = const Uuid();
   final Set<String> _selectedFingerprints = <String>{};
   bool _multiSelect = false;
+  bool _hasCelebratedThisSession = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance
+        .addPostFrameCallback((_) => _consumePendingShares());
+    IncomingShare.onShareReceived(_consumePendingShares);
+  }
+
+  Future<void> _consumePendingShares() async {
+    if (!mounted) return;
+    final shares = await _IncomingShareAdapter.consume();
+    if (!mounted || shares.isEmpty) return;
+    setState(() => _staged.addAll(shares));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          shares.length == 1
+              ? 'Added 1 shared file to send.'
+              : 'Added ${shares.length} shared files to send.',
+        ),
+      ),
+    );
+  }
+
+  void _openPairingWizard(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => PairingWizardPage(
+          onDone: () => Navigator.of(context).pop(),
+          canSkip: false,
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -49,6 +93,10 @@ class _HomePageState extends State<HomePage> {
       appBar: AppBar(
         title: const Text('LanLink'),
         actions: [
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 4),
+            child: ConnectionQualityIndicator(),
+          ),
           IconButton(
             tooltip: state.isScanning ? 'Scanning…' : 'Rescan for devices',
             icon: state.isScanning
@@ -90,9 +138,16 @@ class _HomePageState extends State<HomePage> {
       ),
       body: Column(
         children: [
+          IdleNudge(
+            idle: const Duration(seconds: 30),
+            onTap: () => _openPairingWizard(context),
+            message:
+                "Stuck? We can walk you through connecting another device.",
+            actionLabel: 'Show me',
+          ),
           Expanded(
             child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
               children: [
                 if (state.updateChecker.availableUpdate != null &&
                     state.settings.skippedUpdateVersion !=
@@ -319,8 +374,10 @@ class _HomePageState extends State<HomePage> {
 
   Widget _stagedFilesPanel(BuildContext context) {
     final theme = Theme.of(context);
+    final isDesktop =
+        Platform.isWindows || Platform.isLinux || Platform.isMacOS;
     if (_staged.isEmpty) {
-      return Card(
+      final body = Card(
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Row(
@@ -330,8 +387,11 @@ class _HomePageState extends State<HomePage> {
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
-                  'Tap "Add files" to pick what you want to send, '
-                  'then tap a nearby device to start the transfer.',
+                  isDesktop
+                      ? 'Drop files here, or tap "Add files" to pick what you '
+                          'want to send. Then tap a nearby device to start.'
+                      : 'Tap "Add files" to pick what you want to send, '
+                          'then tap a nearby device to start the transfer.',
                   style: theme.textTheme.bodyMedium,
                 ),
               ),
@@ -339,9 +399,10 @@ class _HomePageState extends State<HomePage> {
           ),
         ),
       );
+      return _maybeDroppable(body);
     }
     final total = _staged.fold<int>(0, (a, b) => a + b.size);
-    return Card(
+    final card = Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -395,6 +456,49 @@ class _HomePageState extends State<HomePage> {
           ],
         ),
       ),
+    );
+    return _maybeDroppable(card);
+  }
+
+  /// Wraps [child] in a [DropTarget] on desktop platforms so users can
+  /// drag files from Finder / Explorer / Nautilus onto the staged-files
+  /// panel. No-op on mobile platforms — there's no drag source there.
+  Widget _maybeDroppable(Widget child) {
+    if (!(Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+      return child;
+    }
+    return DropTarget(
+      onDragDone: (detail) {
+        final accepted = <FileInfo>[];
+        for (final f in detail.files) {
+          final p = f.path;
+          if (p.isEmpty) continue;
+          final file = File(p);
+          int size;
+          try {
+            size = file.lengthSync();
+          } catch (_) {
+            size = 0;
+          }
+          accepted.add(FileInfo(
+            id: _uuid.v4(),
+            fileName: p.split(Platform.pathSeparator).last,
+            size: size,
+            fileType: fileTypeForName(p),
+            localPath: p,
+          ));
+        }
+        if (accepted.isEmpty || !mounted) return;
+        setState(() => _staged.addAll(accepted));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(accepted.length == 1
+                ? 'Added 1 dropped file.'
+                : 'Added ${accepted.length} dropped files.'),
+          ),
+        );
+      },
+      child: child,
     );
   }
 
@@ -713,6 +817,7 @@ class _HomePageState extends State<HomePage> {
       final peerName =
           context.read<AppState>().settings.nicknameFor(peer.fingerprint) ??
               (peer.alias.isEmpty ? 'device' : peer.alias);
+      _maybeCelebrate(context);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Sent to $peerName.'),
@@ -725,6 +830,24 @@ class _HomePageState extends State<HomePage> {
     }
 
     session.addListener(listener);
+  }
+
+  /// Pops a brief, dismissible confetti animation the first time the
+  /// user completes a successful send in this app session. We don't
+  /// show it on every subsequent transfer — it's celebratory, not noisy.
+  void _maybeCelebrate(BuildContext context) {
+    if (_hasCelebratedThisSession) return;
+    _hasCelebratedThisSession = true;
+    showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      builder: (_) => const _CelebrationDialog(),
+    );
+    final navigator = Navigator.of(context, rootNavigator: true);
+    Future<void>.delayed(const Duration(milliseconds: 1600), () {
+      if (!mounted) return;
+      navigator.maybePop();
+    });
   }
 
   Future<void> _sendAnotherTo(Device peer) async {
@@ -807,4 +930,50 @@ String _humanBytes(int bytes) {
     i++;
   }
   return '${size.toStringAsFixed(1)} ${units[i]}';
+}
+
+/// Local alias so the [HomePage] state class doesn't need to depend on
+/// the platform-channel name. Lets us swap the implementation out in
+/// unit tests later.
+class _IncomingShareAdapter {
+  static Future<List<FileInfo>> consume() => IncomingShare.consume();
+}
+
+class _CelebrationDialog extends StatelessWidget {
+  const _CelebrationDialog();
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      child: Center(
+        child: Material(
+          color: Theme.of(context).colorScheme.surface,
+          borderRadius: BorderRadius.circular(16),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 24, 20, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SuccessCelebration(),
+                const SizedBox(height: 12),
+                Text(
+                  'Sent!',
+                  style: Theme.of(context).textTheme.headlineSmall,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Your first transfer landed safely.',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

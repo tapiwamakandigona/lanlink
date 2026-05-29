@@ -83,6 +83,9 @@ class AppState extends ChangeNotifier {
   /// the HTTP server, and starts UDP discovery.
   static Future<AppState> bootstrap() async {
     final settings = await AppSettings.load();
+    // Materialise the platform-aware connectivity default (Hotspot on
+    // Android, LAN elsewhere) once per install before any UI reads it.
+    await settings.ensureConnectivityDefault();
     final fingerprint = await loadOrCreateFingerprint();
     final ips = await listLocalIPv4Addresses();
     final state = AppState._(

@@ -8,7 +8,10 @@ import 'package:provider/provider.dart';
 import '../core/util/event_log.dart';
 import '../state/app_state.dart';
 import 'onboarding_page.dart';
+import 'pairing/pairing_wizard_page.dart';
 import 'widgets/check_for_updates_tile.dart';
+import 'widgets/glossary_tooltip.dart';
+import 'widgets/need_help_footer.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -159,8 +162,24 @@ class _SettingsPageState extends State<SettingsPage> {
               'Listening on',
               '${state.localIps.isEmpty ? "no LAN interface" : state.localIps.join(", ")}'
                   ' : ${state.port ?? "?"}'),
-          _kv(context, 'Fingerprint',
-              state.fingerprint.isEmpty ? '(generating…)' : state.fingerprint),
+          Row(
+            children: [
+              Expanded(
+                child: _kv(
+                    context,
+                    'Device code',
+                    state.fingerprint.isEmpty
+                        ? '(generating…)'
+                        : state.fingerprint),
+              ),
+              const SizedBox(width: 6),
+              const GlossaryTooltip(
+                message: 'A short random ID used to recognise this device on '
+                    'the local network. Other devices remember it so you can '
+                    'mark them as trusted. Safe to share.',
+              ),
+            ],
+          ),
           const SizedBox(height: 8),
           if (state.localIps.isNotEmpty)
             FilledButton.tonalIcon(
@@ -198,6 +217,39 @@ class _SettingsPageState extends State<SettingsPage> {
                     OnboardingPage(onDone: () => Navigator.of(ctx).pop()),
               ),
             ),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            icon: const Icon(Icons.handshake_outlined),
+            label: const Text('Run the pairing wizard'),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (ctx) => PairingWizardPage(
+                  canSkip: false,
+                  onDone: () => Navigator.of(ctx).pop(),
+                  initial: state.settings.lastPairing,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          DropdownButtonFormField<String>(
+            value: state.settings.wizardMode,
+            decoration: const InputDecoration(
+              labelText: 'Show pairing wizard at launch',
+              border: OutlineInputBorder(),
+            ),
+            items: const [
+              DropdownMenuItem(
+                  value: 'auto',
+                  child: Text("Until I've paired once (default)")),
+              DropdownMenuItem(value: 'always', child: Text('Every launch')),
+              DropdownMenuItem(
+                  value: 'never', child: Text("Never — I know what I'm doing")),
+            ],
+            onChanged: (v) {
+              if (v != null) state.settings.setWizardMode(v);
+            },
           ),
           const SizedBox(height: 8),
           OutlinedButton.icon(
@@ -245,6 +297,8 @@ class _SettingsPageState extends State<SettingsPage> {
                     onPressed: () => state.settings.untrust(fp),
                   ),
                 )),
+          const SizedBox(height: 24),
+          const NeedHelpFooter(),
         ],
       ),
     );

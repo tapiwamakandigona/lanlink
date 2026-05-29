@@ -1,9 +1,11 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../connectivity/connectivity_mode.dart';
+import '../onboarding/pairing_choice.dart';
 import '../protocol/constants.dart';
 
 /// Persistent user-facing settings.
@@ -22,6 +24,11 @@ class AppSettings extends ChangeNotifier {
   static const _skippedUpdateKey = 'lanlink_skipped_update_version';
   static const _peerNicknamesKey = 'lanlink_peer_nicknames';
   static const _lastOnboardedVersionKey = 'lanlink_last_onboarded_version';
+  static const _lastPairingKey = 'lanlink_last_pairing_v1';
+  static const _wizardModeKey = 'lanlink_wizard_mode_v1';
+  static const _connectivityDefaultAppliedKey =
+      'lanlink_connectivity_default_applied_v1';
+  static const _hapticsKey = 'lanlink_haptics_enabled';
 
   final SharedPreferences _prefs;
 
@@ -36,10 +43,38 @@ class AppSettings extends ChangeNotifier {
   bool get quickSave => _prefs.getBool(_quickSaveKey) ?? false;
   ConnectivityMode get connectivityMode {
     final name = _prefs.getString(_connectivityModeKey);
-    return ConnectivityMode.values.firstWhere(
-      (mode) => mode.name == name,
-      orElse: () => ConnectivityMode.lan,
-    );
+    if (name != null && name.isNotEmpty) {
+      return ConnectivityMode.values.firstWhere(
+        (mode) => mode.name == name,
+        orElse: () => _platformDefaultConnectivity(),
+      );
+    }
+    return _platformDefaultConnectivity();
+  }
+
+  /// Platform-aware default: phones with their own hotspot (Android) get
+  /// the Hotspot mode out of the box because that's the headline real-world
+  /// use case; everything else (desktop, iOS) defaults to LAN auto-discovery.
+  static ConnectivityMode _platformDefaultConnectivity() {
+    if (Platform.isAndroid) return ConnectivityMode.hotspot;
+    return ConnectivityMode.lan;
+  }
+
+  /// Ensures the platform-aware connectivity default is materialised once
+  /// per install. Called at startup so the chip on the home screen reflects
+  /// the real default we now ship with, instead of the old LAN-everywhere
+  /// behaviour that pre-3.2.0 builds wrote into shared_preferences.
+  Future<void> ensureConnectivityDefault() async {
+    if (_prefs.getBool(_connectivityDefaultAppliedKey) == true) return;
+    final existing = _prefs.getString(_connectivityModeKey);
+    if (existing == null || existing.isEmpty) {
+      await _prefs.setString(
+        _connectivityModeKey,
+        _platformDefaultConnectivity().name,
+      );
+    }
+    await _prefs.setBool(_connectivityDefaultAppliedKey, true);
+    notifyListeners();
   }
 
   HotspotRole get hotspotRole {
@@ -180,6 +215,43 @@ class AppSettings extends ChangeNotifier {
   /// Wired to the "Replay tutorial" button in Settings.
   Future<void> resetOnboarding() async {
     await _prefs.remove(_lastOnboardedVersionKey);
+    notifyListeners();
+  }
+
+  /// User-recorded last pairing pick from the wizard. Used to offer a
+  /// "Same as last time" shortcut on the next launch so returning users
+  /// don't have to re-answer the same two questions.
+  PairingChoice? get lastPairing =>
+      PairingChoice.decode(_prefs.getString(_lastPairingKey));
+
+  Future<void> setLastPairing(PairingChoice? value) async {
+    if (value == null) {
+      await _prefs.remove(_lastPairingKey);
+    } else {
+      await _prefs.setString(_lastPairingKey, value.encode());
+    }
+    notifyListeners();
+  }
+
+  /// Whether the launch-time pairing wizard should be shown. Three modes:
+  ///   * `auto`  — show the wizard until the user has paired once, then
+  ///               offer a "Same as last time" card. (Default.)
+  ///   * `always`— always show the wizard at launch.
+  ///   * `never` — power-user mode; skip straight to the home screen.
+  String get wizardMode => _prefs.getString(_wizardModeKey) ?? 'auto';
+
+  Future<void> setWizardMode(String value) async {
+    await _prefs.setString(_wizardModeKey, value);
+    notifyListeners();
+  }
+
+  /// Whether to play a soft vibration / chime on transfer completion.
+  /// Defaults to true on phones, false on desktop where it'd be weird.
+  bool get hapticsEnabled =>
+      _prefs.getBool(_hapticsKey) ?? (Platform.isAndroid || Platform.isIOS);
+
+  Future<void> setHapticsEnabled(bool value) async {
+    await _prefs.setBool(_hapticsKey, value);
     notifyListeners();
   }
 
