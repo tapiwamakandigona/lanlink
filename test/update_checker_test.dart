@@ -83,6 +83,16 @@ void main() {
             'browser_download_url':
                 'https://example.test/r/v2.5.0/lanlink-2.5.0-windows.zip',
           },
+          {
+            'name': 'lanlink-2.5.0-linux-x64.tar.gz',
+            'browser_download_url':
+                'https://example.test/r/v2.5.0/lanlink-2.5.0-linux-x64.tar.gz',
+          },
+          {
+            'name': 'LanLink-2.5.0-x86_64.AppImage',
+            'browser_download_url':
+                'https://example.test/r/v2.5.0/LanLink-2.5.0-x86_64.AppImage',
+          },
         ],
       },
       {
@@ -120,6 +130,8 @@ void main() {
     expect(update!.tagName, 'v2.5.0');
     expect(update.androidAssetUrl, contains('android.apk'));
     expect(update.windowsAssetUrl, contains('windows.zip'));
+    expect(update.linuxAssetUrl, contains('.AppImage'),
+        reason: 'the AppImage should win over the tar.gz when both exist');
   });
 
   test('UpdateChecker stays quiet when the newest tag is the current version',

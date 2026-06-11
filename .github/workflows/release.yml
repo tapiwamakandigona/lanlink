@@ -351,3 +351,29 @@ jobs:
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish-downloads:
+    name: Publish binaries to tapiwa.me downloads
+    runs-on: ubuntu-latest
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Appwrite SDK
+        run: pip install "appwrite>=20,<21"
+
+      # Replaces the fixed-ID files behind tapiwa.me/lanlink/downloads.html
+      # so the site always serves this release. See scripts/publish_downloads.py.
+      - name: Publish to Appwrite downloads bucket
+        env:
+          APPWRITE_API_KEY: ${{ secrets.APPWRITE_API_KEY }}
+        run: python scripts/publish_downloads.py artifacts

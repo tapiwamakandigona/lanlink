@@ -17,6 +17,7 @@ class ReleaseInfo {
     required this.androidAssetUrl,
     required this.windowsAssetUrl,
     required this.macosAssetUrl,
+    required this.linuxAssetUrl,
     required this.iosAssetUrl,
     required this.publishedAt,
     required this.isPrerelease,
@@ -29,6 +30,7 @@ class ReleaseInfo {
   final String? androidAssetUrl;
   final String? windowsAssetUrl;
   final String? macosAssetUrl;
+  final String? linuxAssetUrl;
   final String? iosAssetUrl;
   final DateTime publishedAt;
   final bool isPrerelease;
@@ -39,6 +41,7 @@ class ReleaseInfo {
     if (Platform.isAndroid) return androidAssetUrl;
     if (Platform.isWindows) return windowsAssetUrl;
     if (Platform.isMacOS) return macosAssetUrl;
+    if (Platform.isLinux) return linuxAssetUrl;
     if (Platform.isIOS) return iosAssetUrl;
     return null;
   }
@@ -155,7 +158,7 @@ class UpdateChecker extends ChangeNotifier {
       final version = _parseVersion(tag);
       if (version == null) continue;
       final assets = (entry['assets'] as List?) ?? const [];
-      String? android, windows, macos, ios;
+      String? android, windows, macos, linux, ios;
       for (final raw in assets) {
         if (raw is! Map<String, dynamic>) continue;
         final name = (raw['name'] as String? ?? '').toLowerCase();
@@ -168,6 +171,14 @@ class UpdateChecker extends ChangeNotifier {
         if (name.endsWith('.dmg') ||
             (name.contains('macos') && name.endsWith('.zip'))) {
           macos ??= url;
+        }
+        // Prefer the AppImage (single-file, double-clickable); fall back to
+        // the tar.gz bundle.
+        if (name.endsWith('.appimage')) linux = url;
+        if (name.contains('linux') &&
+            name.endsWith('.tar.gz') &&
+            linux == null) {
+          linux = url;
         }
         if (name.endsWith('.ipa') ||
             (name.contains('ios') && name.endsWith('.zip'))) {
@@ -182,6 +193,7 @@ class UpdateChecker extends ChangeNotifier {
         androidAssetUrl: android,
         windowsAssetUrl: windows,
         macosAssetUrl: macos,
+        linuxAssetUrl: linux,
         iosAssetUrl: ios,
         publishedAt:
             DateTime.tryParse(entry['published_at'] as String? ?? '') ??
