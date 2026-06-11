@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 import 'package:uuid/uuid.dart';
 
 import '../core/connectivity/connectivity_mode.dart';
+import '../core/util/folder_files.dart';
 import '../core/models/device.dart';
 import '../core/models/file_info.dart';
 import '../core/models/session.dart';
@@ -331,6 +332,12 @@ class _HomePageState extends State<HomePage> {
               onTap: () => Navigator.of(context).pop(_AddAction.files),
             ),
             ListTile(
+              leading: const Icon(Icons.folder_outlined),
+              title: const Text('Add a whole folder'),
+              subtitle: const Text('Sends every file inside, structure kept'),
+              onTap: () => Navigator.of(context).pop(_AddAction.folder),
+            ),
+            ListTile(
               leading: const Icon(Icons.android),
               title: const Text('Add installed apps as APKs'),
               subtitle: const Text('Android only'),
@@ -344,6 +351,9 @@ class _HomePageState extends State<HomePage> {
     switch (action) {
       case _AddAction.files:
         await _pickFiles();
+        break;
+      case _AddAction.folder:
+        await _pickFolder();
         break;
       case _AddAction.apps:
         await _pickApps();
@@ -782,6 +792,35 @@ class _HomePageState extends State<HomePage> {
     setState(() => _staged.addAll(picked));
   }
 
+  /// Stages every file inside a user-picked folder, keeping its structure
+  /// (the receiver recreates the subfolders).
+  Future<void> _pickFolder() async {
+    String? dirPath;
+    try {
+      dirPath = await FilePicker.platform.getDirectoryPath();
+    } catch (_) {
+      dirPath = null;
+    }
+    if (dirPath == null) return;
+    final picked = await fileInfosForFolder(dirPath);
+    if (!mounted) return;
+    if (picked.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('That folder has no files in it.')),
+      );
+      return;
+    }
+    setState(() => _staged.addAll(picked));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Added ${picked.length} file${picked.length == 1 ? '' : 's'} '
+          'from the folder.',
+        ),
+      ),
+    );
+  }
+
   /// Opens the system file picker and maps the selection to [FileInfo]s.
   /// Returns an empty list if the user cancels.
   Future<List<FileInfo>> _pickFileInfos() async {
@@ -1060,7 +1099,7 @@ String _safeApkName(String label) {
   return cleaned.isEmpty ? 'app' : cleaned;
 }
 
-enum _AddAction { files, apps }
+enum _AddAction { files, apps, folder }
 
 enum _MenuAction { help, history, settings, about }
 

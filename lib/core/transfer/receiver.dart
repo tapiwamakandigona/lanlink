@@ -15,6 +15,7 @@ import '../models/device.dart';
 import '../models/file_info.dart';
 import '../models/session.dart';
 import '../protocol/constants.dart';
+import '../util/safe_paths.dart';
 
 /// Outcome the UI returns when asked to approve an incoming transfer.
 class AcceptDecision {
@@ -323,7 +324,18 @@ class Receiver {
       }
       await sink.flush();
       await sink.close();
-      finalPath = await _uniqueOutputPath(saveDir, info.fileName);
+      // Folder transfers carry a relative path in fileName; recreate the
+      // structure under the save dir (sanitized, traversal-proof).
+      final segments = splitSafeRelativePath(info.fileName);
+      var targetDir = saveDir;
+      if (segments.length > 1) {
+        targetDir = Directory(
+          p.joinAll(
+              [saveDir.path, ...segments.sublist(0, segments.length - 1)]),
+        );
+        await targetDir.create(recursive: true);
+      }
+      finalPath = await _uniqueOutputPath(targetDir, segments.last);
       await partFile.rename(finalPath);
     } catch (e) {
       // Keep the part file: whatever made it to disk is the head start for
@@ -341,9 +353,13 @@ class Receiver {
     // writes to /storage/emulated/0/Download from API 30+). Publish a copy to
     // MediaStore.Downloads so the file is visible to the user in the Files /
     // Downloads app exactly like ShareIt / LocalSend.
+    final pubSegments = splitSafeRelativePath(info.fileName);
     final publicLocation = await _publishToPublicDownloads(
       sourcePath: finalPath,
-      fileName: info.fileName,
+      fileName: pubSegments.last,
+      subDir: pubSegments.length > 1
+          ? pubSegments.sublist(0, pubSegments.length - 1).join('/')
+          : null,
     );
     final visiblePath = publicLocation ?? finalPath;
     ps.session
@@ -370,12 +386,17 @@ class Receiver {
   Future<String?> _publishToPublicDownloads({
     required String sourcePath,
     required String fileName,
+    String? subDir,
   }) async {
     if (!Platform.isAndroid) return null;
     try {
       final publicPath = await _platform.invokeMethod<String>(
         'publishToDownloads',
-        {'sourcePath': sourcePath, 'fileName': fileName},
+        {
+          'sourcePath': sourcePath,
+          'fileName': fileName,
+          if (subDir != null) 'subDir': subDir,
+        },
       );
       if (publicPath != null && publicPath.isNotEmpty) {
         // Source has been copied to public storage. Delete the temp copy so

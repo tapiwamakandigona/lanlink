@@ -211,6 +211,7 @@ class MainActivity : FlutterActivity() {
                     "publishToDownloads" -> {
                         val sourcePath = call.argument<String>("sourcePath")
                         val fileName = call.argument<String>("fileName")
+                        val subDir = call.argument<String>("subDir")
                         if (sourcePath.isNullOrBlank() || fileName.isNullOrBlank()) {
                             result.error(
                                 "ARGS",
@@ -220,7 +221,7 @@ class MainActivity : FlutterActivity() {
                             return@setMethodCallHandler
                         }
                         try {
-                            val published = publishToDownloads(sourcePath, fileName)
+                            val published = publishToDownloads(sourcePath, fileName, subDir)
                             result.success(published)
                         } catch (e: Exception) {
                             result.error("PUBLISH_FAILED", e.message, null)
@@ -581,26 +582,42 @@ class MainActivity : FlutterActivity() {
      * user (e.g. `Download/LanLink/photo.jpg`) on success, or null on
      * failure.
      */
-    private fun publishToDownloads(sourcePath: String, fileName: String): String? {
+    private fun publishToDownloads(sourcePath: String, fileName: String, subDir: String?): String? {
         val source = File(sourcePath)
         if (!source.exists()) return null
+        val safeSub = sanitizeSubDir(subDir)
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            publishViaMediaStore(source, fileName)
+            publishViaMediaStore(source, fileName, safeSub)
         } else {
-            publishViaLegacyPath(source, fileName)
+            publishViaLegacyPath(source, fileName, safeSub)
         }
     }
 
-    private fun publishViaMediaStore(source: File, fileName: String): String? {
+    // Re-sanitizes a folder-transfer relative dir on the platform side so a
+    // malicious peer can never steer the copy outside Downloads/LanLink.
+    private fun sanitizeSubDir(subDir: String?): String? {
+        if (subDir.isNullOrBlank()) return null
+        val parts = subDir.split('/', '\\')
+            .map { it.trim().replace(Regex("[\\\\/:*?\"<>|]"), "_") }
+            .filter { it.isNotEmpty() && it != "." && it != ".." }
+        return if (parts.isEmpty()) null else parts.joinToString("/")
+    }
+
+    private fun publishViaMediaStore(source: File, fileName: String, subDir: String?): String? {
         val resolver = contentResolver
         val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+        val relativeDir = if (subDir == null) {
+            "${Environment.DIRECTORY_DOWNLOADS}/LanLink"
+        } else {
+            "${Environment.DIRECTORY_DOWNLOADS}/LanLink/$subDir"
+        }
         val displayName = uniqueDisplayName(fileName) { candidate ->
             isDisplayNameTaken(resolver, candidate)
         }
         val values = ContentValues().apply {
             put(MediaStore.Downloads.DISPLAY_NAME, displayName)
             put(MediaStore.Downloads.MIME_TYPE, mimeTypeFor(displayName))
-            put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/LanLink")
+            put(MediaStore.Downloads.RELATIVE_PATH, relativeDir)
             put(MediaStore.Downloads.IS_PENDING, 1)
         }
         val itemUri = resolver.insert(collection, values) ?: return null
@@ -613,7 +630,7 @@ class MainActivity : FlutterActivity() {
             }
             val finalize = ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }
             resolver.update(itemUri, finalize, null, null)
-            return "${Environment.DIRECTORY_DOWNLOADS}/LanLink/$displayName"
+            return "$relativeDir/$displayName"
         } catch (e: Exception) {
             try {
                 resolver.delete(itemUri, null, null)
@@ -623,10 +640,11 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun publishViaLegacyPath(source: File, fileName: String): String? {
+    private fun publishViaLegacyPath(source: File, fileName: String, subDir: String?): String? {
         @Suppress("DEPRECATION")
         val downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-        val targetDir = File(downloads, "LanLink")
+        val targetDir =
+            if (subDir == null) File(downloads, "LanLink") else File(File(downloads, "LanLink"), subDir)
         if (!targetDir.exists() && !targetDir.mkdirs()) return null
         val target = uniqueFile(targetDir, fileName)
         source.inputStream().use { input ->
