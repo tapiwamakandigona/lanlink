@@ -3,6 +3,7 @@
 // screen, live progress, and the finished state. These double as visual
 // regression tests in CI.
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -10,13 +11,16 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:lanlink/core/models/device.dart';
 import 'package:lanlink/core/models/file_info.dart';
 import 'package:lanlink/core/models/session.dart';
+import 'package:lanlink/core/platform/android_apps.dart';
 import 'package:lanlink/core/platform/local_hotspot.dart';
+import 'package:lanlink/core/platform/media_library.dart';
 import 'package:lanlink/core/settings/app_settings.dart';
 import 'package:lanlink/core/theme/app_theme.dart';
 import 'package:lanlink/state/app_state.dart';
 import 'package:lanlink/ui/history_page.dart';
 import 'package:lanlink/ui/home_page.dart';
 import 'package:lanlink/ui/hotspot/direct_link_page.dart';
+import 'package:lanlink/ui/picker/share_picker_page.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -167,6 +171,14 @@ void main() {
 
   testWidgets('phone: add-files sheet with folder option', (tester) async {
     phone(tester);
+    // Render the sheet the way a real Android phone shows it (photos,
+    // apps and Move-my-photos entries included).
+    MediaLibrary.debugForceSupported = true;
+    AndroidApps.debugForceSupported = true;
+    addTearDown(() {
+      MediaLibrary.debugForceSupported = false;
+      AndroidApps.debugForceSupported = false;
+    });
     final state = await stateWithPeers(tester);
     await tester.pumpWidget(_app(state, const HomePage()));
     await tester.pump(const Duration(milliseconds: 300));
@@ -212,6 +224,72 @@ void main() {
     await tester.pumpWidget(_app(state, const HistoryPage()));
     await tester.pump(const Duration(milliseconds: 300));
     await shoot(tester, 'walk_phone_done');
+  });
+
+  testWidgets('phone: share picker with photo grid', (tester) async {
+    phone(tester);
+    await tester.runAsync(_loadFonts);
+
+    Future<Uint8List> swatch(Color color) async {
+      final recorder = ui.PictureRecorder();
+      final canvas = Canvas(recorder);
+      canvas.drawRect(
+        const Rect.fromLTWH(0, 0, 64, 64),
+        Paint()..color = color,
+      );
+      final image = await recorder.endRecording().toImage(64, 64);
+      final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+      return bytes!.buffer.asUint8List();
+    }
+
+    late List<Uint8List> swatches;
+    await tester.runAsync(() async {
+      swatches = await Future.wait([
+        swatch(const Color(0xFF7FB3FF)),
+        swatch(const Color(0xFFFFC857)),
+        swatch(const Color(0xFF8BC34A)),
+        swatch(const Color(0xFFB39DDB)),
+        swatch(const Color(0xFF80CBC4)),
+        swatch(const Color(0xFFEF9A9A)),
+      ]);
+    });
+
+    final items = [
+      for (var i = 0; i < 6; i++)
+        MediaItem(
+          id: i,
+          name: i == 2 ? 'beach_day.mp4' : 'IMG_20${40 + i}.jpg',
+          path: '/dcim/$i',
+          size: 2400000 + i * 700000,
+          isVideo: i == 2,
+          dateModified: 100 - i,
+          bucket: 'Camera',
+        ),
+    ];
+
+    await tester.pumpWidget(MaterialApp(
+      debugShowCheckedModeBanner: false,
+      theme: AppTheme.light(),
+      home: SharePickerPage(
+        loadMedia: () async => items,
+        loadApps: () async => const [
+          AndroidAppInfo(
+            label: 'LanLink',
+            packageName: 'com.lanlink.app',
+            apkPath: '/apk',
+            size: 24000000,
+          ),
+        ],
+        thumbnailLoader: (item) async => swatches[item.id],
+      ),
+    ));
+    await tester.pump(const Duration(milliseconds: 300));
+    // Select a couple of items so the running total shows.
+    await tester.tap(find.byKey(const Key('media-0')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('media-2')));
+    await tester.pump(const Duration(milliseconds: 200));
+    await shoot(tester, 'walk_phone_picker');
   });
 
   testWidgets('desktop: home with devices', (tester) async {

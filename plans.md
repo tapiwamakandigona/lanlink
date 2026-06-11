@@ -17,8 +17,12 @@ session. New assistants should read this top-to-bottom before doing anything.
 | v2.0.4  | Polished dark mode + animated transfer outcome chip. |
 | v2.0.5  | Android system notifications with progress. |
 | **v3.0.0** | macOS + iOS apps, Android background transfers (foreground service), persistent transfer history, APK shrink (R8 + per-ABI splits), UX moves ("Made by..." → Settings, "Check for updates" off About). |
+| v3.1.0  | Onboarding slides, help/pairing guide, friendly errors, retry on failed transfers, diagnostics log, update checker pointed at the public lanlink-downloads mirror. |
+| v3.2.0  | Pairing wizard, plain-English ETA, slow-network warning, share-sheet target, drag-and-drop, idle nudge, success celebration, glossary tooltips, help footer, file thumbnails, connection-quality indicator. |
+| v3.3.0  | Simpler home UI (menu app bar, one-line mode status, single Send button, no forced wizard); Linux release builds (AppImage + tar.gz); release mirroring to lanlink-downloads + tapiwa.me downloads. |
+| **v3.4.0** | The "one big update": Simple mode for non-technical users, new LL circuit-monogram app icon (option D), one-tap Direct Link (auto hotspot + Wi-Fi QR on Android), resumable transfers (mid-file), whole-folder sending with structure preserved, SHAREit-style share picker (photo/video grid with thumbnails + apps-as-APK tab with icons & search), one-tap "Move my photos" camera-roll migration, real release signing (uninstall/reinstall once coming from ≤v3.3.0). |
 
-Latest release: https://github.com/tapiwamakandigona/lanlink/releases/tag/v3.0.0
+Latest release: https://github.com/tapiwamakandigona/lanlink/releases/tag/v3.4.0
 
 ---
 
@@ -88,7 +92,38 @@ Key invariants worth not breaking:
 
 ---
 
-## Active asks from Tapiwa (v3.1.0 candidates)
+## v3.4.0 decisions (locked, shipped this session)
+
+- **One big update** — Tapiwa asked to hold the release until all the
+  planned features landed, instead of splitting v3.4/v3.5. Done.
+- **Icon: option D** (LL circuit monogram) across all platforms.
+- **Auto-hotspot + QR ("Direct Link")** approved as the best-approach for
+  phone-to-phone connectivity on Android (localonly hotspot API, QR embeds
+  SSID + password + host IP).
+- **Share picker**: tabs Photos & videos · Apps, thumbnail grid, search,
+  multi-select with a running "N items • X MB" total. APKs of installed
+  apps can be sent; **OBB expansion files are mostly impossible on
+  Android 11+ and app private data is impossible without root** — not
+  shipped, by design.
+- **"Move my photos"**: one-tap camera-roll migration — stages every
+  photo/video from the camera roll under `My photos/` after a single
+  confirmation dialog showing counts + total size.
+- **Simple mode** has a "Full version" escape button; can be hidden by a
+  caregiver from Settings.
+- **Resume transfers**: receiver advertises byte offset, sender continues
+  mid-file; stale offsets get 409 and a clean restart.
+- **Folder sending**: relative paths preserved end-to-end.
+- **Release signing**: real RSA-4096 keystore (secrets in GitHub Actions,
+  backup in Tapiwa's Google Drive "LanLink Release Keys"). Users on
+  ≤v3.3.0 must uninstall/reinstall once (CI keystore → real keystore).
+- **No iOS dev account** — unsigned .ipa stays sideload-only.
+- Golden walkthrough tests (`test/walkthrough_screenshots_test.dart` +
+  `test/goldens/`) double as release screenshots; regenerate with
+  `flutter test --update-goldens` on Linux when UI changes.
+
+---
+
+## Active asks from Tapiwa (v3.1.0 candidates — all shipped in v3.1.0/v3.2.0)
 
 Surface order = priority order. Tick when done. Locked design decisions in
 **bold**.

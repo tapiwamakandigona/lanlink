@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 class AndroidAppInfo {
@@ -9,12 +10,16 @@ class AndroidAppInfo {
     required this.packageName,
     required this.apkPath,
     required this.size,
+    this.icon,
   });
 
   final String label;
   final String packageName;
   final String apkPath;
   final int size;
+
+  /// Launcher icon as a small PNG, when the platform side could draw it.
+  final Uint8List? icon;
 
   factory AndroidAppInfo.fromMap(Map<dynamic, dynamic> map) {
     return AndroidAppInfo(
@@ -24,6 +29,7 @@ class AndroidAppInfo {
       packageName: map['packageName'] as String,
       apkPath: map['apkPath'] as String,
       size: (map['size'] as num).toInt(),
+      icon: map['icon'] as Uint8List?,
     );
   }
 }
@@ -31,7 +37,12 @@ class AndroidAppInfo {
 class AndroidApps {
   static const _channel = MethodChannel('lanlink/android_apps');
 
-  static bool get isSupported => Platform.isAndroid;
+  /// Test-only override so widget tests and goldens can render the
+  /// Android experience on any host platform.
+  @visibleForTesting
+  static bool debugForceSupported = false;
+
+  static bool get isSupported => debugForceSupported || Platform.isAndroid;
 
   static Future<List<AndroidAppInfo>> listLaunchableApps() async {
     if (!isSupported) return const [];

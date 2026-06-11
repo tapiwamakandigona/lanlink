@@ -13,6 +13,8 @@ import '../core/models/device.dart';
 import '../core/models/file_info.dart';
 import '../core/models/session.dart';
 import '../core/platform/android_apps.dart';
+import '../core/platform/media_library.dart';
+import '../core/util/picker_filter.dart';
 import '../state/app_state.dart';
 import 'about_page.dart';
 import 'history_page.dart';
@@ -25,6 +27,7 @@ import 'widgets/device_card.dart';
 import 'widgets/pair_qr_sheet.dart';
 import 'widgets/peer_action_sheet.dart';
 import 'widgets/progress_card.dart';
+import 'picker/share_picker_page.dart';
 import 'widgets/update_available_banner.dart';
 
 class HomePage extends StatefulWidget {
@@ -337,12 +340,27 @@ class _HomePageState extends State<HomePage> {
               subtitle: const Text('Sends every file inside, structure kept'),
               onTap: () => Navigator.of(context).pop(_AddAction.folder),
             ),
-            ListTile(
-              leading: const Icon(Icons.android),
-              title: const Text('Add installed apps as APKs'),
-              subtitle: const Text('Android only'),
-              onTap: () => Navigator.of(context).pop(_AddAction.apps),
-            ),
+            if (MediaLibrary.isSupported)
+              ListTile(
+                leading: const Icon(Icons.photo_library_outlined),
+                title: const Text('Photos & videos'),
+                subtitle: const Text('Browse your gallery with thumbnails'),
+                onTap: () => Navigator.of(context).pop(_AddAction.photos),
+              ),
+            if (AndroidApps.isSupported)
+              ListTile(
+                leading: const Icon(Icons.android),
+                title: const Text('Installed apps as APKs'),
+                subtitle: const Text('Pick apps by icon, searchable'),
+                onTap: () => Navigator.of(context).pop(_AddAction.apps),
+              ),
+            if (MediaLibrary.isSupported)
+              ListTile(
+                leading: const Icon(Icons.switch_access_shortcut_add),
+                title: const Text('Move my photos'),
+                subtitle: const Text('Send your whole camera roll in one tap'),
+                onTap: () => Navigator.of(context).pop(_AddAction.migrate),
+              ),
           ],
         ),
       ),
@@ -355,10 +373,115 @@ class _HomePageState extends State<HomePage> {
       case _AddAction.folder:
         await _pickFolder();
         break;
+      case _AddAction.photos:
+        await _openPicker(SharePickerTab.photos);
+        break;
       case _AddAction.apps:
-        await _pickApps();
+        await _openPicker(SharePickerTab.apps);
+        break;
+      case _AddAction.migrate:
+        await _moveMyPhotos();
         break;
     }
+  }
+
+  /// Opens the tabbed share picker (photos/videos/apps) and stages
+  /// whatever the user selected.
+  Future<void> _openPicker(SharePickerTab tab) async {
+    if (tab == SharePickerTab.photos || tab == SharePickerTab.apps) {
+      final allowed = tab == SharePickerTab.apps
+          ? true
+          : await MediaLibrary.ensurePermission();
+      if (!allowed) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'LanLink needs the photos permission to show your gallery.',
+            ),
+          ),
+        );
+        return;
+      }
+    }
+    if (!mounted) return;
+    final picked = await SharePickerPage.open(context, initialTab: tab);
+    if (picked == null || picked.isEmpty || !mounted) return;
+    setState(() => _staged.addAll(picked));
+  }
+
+  /// One-tap photo migration: stages the entire camera roll (every photo
+  /// and video shot with the camera) after a single confirmation.
+  Future<void> _moveMyPhotos() async {
+    final allowed = await MediaLibrary.ensurePermission();
+    if (!allowed) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'LanLink needs the photos permission to read your camera roll.',
+          ),
+        ),
+      );
+      return;
+    }
+    final all = await MediaLibrary.listMedia();
+    final roll = cameraRoll(all);
+    if (!mounted) return;
+    if (roll.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No photos or videos found.')),
+      );
+      return;
+    }
+    final photos = roll.where((m) => !m.isVideo).length;
+    final videos = roll.length - photos;
+    final total = mediaTotalSize(roll);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Move my photos'),
+        content: Text(
+          'This stages your whole camera roll for sending:\n\n'
+          '• $photos photo${photos == 1 ? '' : 's'}'
+          '${videos > 0 ? '\n• $videos video${videos == 1 ? '' : 's'}' : ''}\n'
+          '• ${_humanBytes(total)} in total\n\n'
+          'Then just tap the device you want to move them to. '
+          'Big libraries can take a while — keep both devices plugged in.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Stage everything'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    setState(() {
+      _staged.addAll([
+        for (final item in roll)
+          FileInfo(
+            id: _uuid.v4(),
+            fileName: 'My photos/${item.name}',
+            size: item.size,
+            fileType: fileTypeForName(item.name),
+            localPath: item.path,
+          ),
+      ]);
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Camera roll staged (${roll.length} items). '
+          'Now tap the device to send to.',
+        ),
+      ),
+    );
   }
 
   Widget _hotspotPanel(BuildContext context, AppState state) {
@@ -916,80 +1039,6 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Future<void> _pickApps() async {
-    if (!AndroidApps.isSupported) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('APK app sharing is available on Android.')),
-      );
-      return;
-    }
-    final apps = await AndroidApps.listLaunchableApps();
-    if (!mounted) return;
-    if (apps.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No shareable installed apps found.')),
-      );
-      return;
-    }
-    final selected = <AndroidAppInfo>{};
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (_) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Share apps as APKs'),
-          content: SizedBox(
-            width: 420,
-            child: ListView.builder(
-              shrinkWrap: true,
-              itemCount: apps.length,
-              itemBuilder: (context, i) {
-                final app = apps[i];
-                return CheckboxListTile(
-                  value: selected.contains(app),
-                  onChanged: (checked) => setDialogState(() {
-                    if (checked == true) {
-                      selected.add(app);
-                    } else {
-                      selected.remove(app);
-                    }
-                  }),
-                  title: Text(app.label, overflow: TextOverflow.ellipsis),
-                  subtitle:
-                      Text('${app.packageName} • ${_humanBytes(app.size)}'),
-                );
-              },
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: selected.isEmpty
-                  ? null
-                  : () => Navigator.of(context).pop(true),
-              child: const Text('Add APKs'),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (ok != true) return;
-    setState(() {
-      for (final app in selected) {
-        _staged.add(FileInfo(
-          id: _uuid.v4(),
-          fileName: '${_safeApkName(app.label)}.apk',
-          size: app.size,
-          fileType: 'app',
-          localPath: app.apkPath,
-        ));
-      }
-    });
-  }
-
   Future<void> _sendStagedTo(Device peer) async {
     if (_staged.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1094,12 +1143,7 @@ IconData _modeIcon(ConnectivityMode mode) {
   }
 }
 
-String _safeApkName(String label) {
-  final cleaned = label.replaceAll(RegExp(r'[\\/:*?"<>|]+'), '_').trim();
-  return cleaned.isEmpty ? 'app' : cleaned;
-}
-
-enum _AddAction { files, apps, folder }
+enum _AddAction { files, folder, photos, apps, migrate }
 
 enum _MenuAction { help, history, settings, about }
 

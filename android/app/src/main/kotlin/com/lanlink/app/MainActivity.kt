@@ -1,10 +1,15 @@
 package com.lanlink.app
 
 import android.content.ComponentName
+import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.database.Cursor
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.drawable.BitmapDrawable
+import android.graphics.drawable.Drawable
 import android.media.MediaScannerConnection
 import android.net.Uri
 import android.net.wifi.WifiManager
@@ -16,12 +21,14 @@ import android.os.Looper
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.provider.Settings
+import android.util.Size
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -76,7 +83,50 @@ class MainActivity : FlutterActivity() {
                     result.notImplemented()
                     return@setMethodCallHandler
                 }
-                result.success(listLaunchableApps())
+                // App listing + icon rasterising touches the package manager
+                // for every installed app; keep it off the UI thread.
+                Thread {
+                    val apps = try {
+                        listLaunchableApps()
+                    } catch (_: Exception) {
+                        emptyList<Map<String, Any>>()
+                    }
+                    runOnUiThread { result.success(apps) }
+                }.start()
+            }
+
+        // Media library (photos + videos) for the share picker and the
+        // one-tap "Move my photos" migration. MediaStore queries and
+        // thumbnail decoding are I/O heavy, so both run off the UI thread.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "lanlink/media")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "listMedia" -> Thread {
+                        val items = try {
+                            listMediaItems()
+                        } catch (_: Exception) {
+                            emptyList<Map<String, Any>>()
+                        }
+                        runOnUiThread { result.success(items) }
+                    }.start()
+                    "thumbnail" -> {
+                        val id = (call.argument<Number>("id"))?.toLong()
+                        val isVideo = call.argument<Boolean>("isVideo") ?: false
+                        if (id == null) {
+                            result.success(null)
+                            return@setMethodCallHandler
+                        }
+                        Thread {
+                            val bytes = try {
+                                mediaThumbnail(id, isVideo)
+                            } catch (_: Exception) {
+                                null
+                            }
+                            runOnUiThread { result.success(bytes) }
+                        }.start()
+                    }
+                    else -> result.notImplemented()
+                }
             }
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "lanlink/share")
@@ -245,13 +295,131 @@ class MainActivity : FlutterActivity() {
             val source = appInfo.publicSourceDir ?: appInfo.sourceDir ?: return@mapNotNull null
             val apk = File(source)
             if (!apk.exists()) return@mapNotNull null
-            mapOf(
+            val map = mutableMapOf<String, Any>(
                 "label" to pm.getApplicationLabel(appInfo).toString(),
                 "packageName" to packageName,
                 "apkPath" to apk.absolutePath,
                 "size" to apk.length(),
             )
+            appIconPng(packageName)?.let { map["icon"] = it }
+            map
         }.distinctBy { it["packageName"] as String }
+    }
+
+    /// Rasterises an app's launcher icon to a small PNG so Flutter can show
+    /// it in the share picker. Returns null when the icon can't be drawn.
+    private fun appIconPng(packageName: String, sizePx: Int = 96): ByteArray? {
+        return try {
+            val drawable: Drawable = packageManager.getApplicationIcon(packageName)
+            val bitmap = if (drawable is BitmapDrawable && drawable.bitmap != null) {
+                Bitmap.createScaledBitmap(drawable.bitmap, sizePx, sizePx, true)
+            } else {
+                val b = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+                val canvas = Canvas(b)
+                drawable.setBounds(0, 0, sizePx, sizePx)
+                drawable.draw(canvas)
+                b
+            }
+            val out = ByteArrayOutputStream()
+            bitmap.compress(Bitmap.CompressFormat.PNG, 90, out)
+            out.toByteArray()
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    // ----- Media library (photos + videos) for the share picker -----
+
+    /// Lists every image and video in MediaStore, newest first. Only items
+    /// whose backing file is directly readable are returned (the sender
+    /// streams from the file path), which is the normal case for the
+    /// primary external volume once the media permission is granted.
+    private fun listMediaItems(): List<Map<String, Any>> {
+        val out = mutableListOf<Map<String, Any>>()
+        out += queryMedia(
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            isVideo = false,
+        )
+        out += queryMedia(
+            MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+            isVideo = true,
+        )
+        out.sortByDescending { it["dateModified"] as Long }
+        return out
+    }
+
+    private fun queryMedia(collection: Uri, isVideo: Boolean): List<Map<String, Any>> {
+        val projection = arrayOf(
+            MediaStore.MediaColumns._ID,
+            MediaStore.MediaColumns.DISPLAY_NAME,
+            MediaStore.MediaColumns.SIZE,
+            MediaStore.MediaColumns.DATA,
+            MediaStore.MediaColumns.DATE_MODIFIED,
+            MediaStore.MediaColumns.BUCKET_DISPLAY_NAME,
+        )
+        val items = mutableListOf<Map<String, Any>>()
+        contentResolver.query(collection, projection, null, null, null)?.use { cursor ->
+            val idCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
+            val nameCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
+            val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
+            val dataCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATA)
+            val dateCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_MODIFIED)
+            val bucketCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.BUCKET_DISPLAY_NAME)
+            while (cursor.moveToNext()) {
+                val path = cursor.getString(dataCol) ?: continue
+                val file = File(path)
+                if (!file.exists() || !file.canRead()) continue
+                val size = cursor.getLong(sizeCol).takeIf { it > 0 } ?: file.length()
+                if (size <= 0) continue
+                items += mapOf(
+                    "id" to cursor.getLong(idCol),
+                    "name" to (cursor.getString(nameCol) ?: file.name),
+                    "path" to path,
+                    "size" to size,
+                    "isVideo" to isVideo,
+                    "dateModified" to cursor.getLong(dateCol),
+                    "bucket" to (cursor.getString(bucketCol) ?: ""),
+                )
+            }
+        }
+        return items
+    }
+
+    /// Decodes a small JPEG thumbnail for a MediaStore item. Uses the
+    /// modern loadThumbnail API on Android 10+, the legacy thumbnail
+    /// providers before that.
+    private fun mediaThumbnail(id: Long, isVideo: Boolean): ByteArray? {
+        val collection = if (isVideo) {
+            MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+        } else {
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+        }
+        val bitmap: Bitmap? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                contentResolver.loadThumbnail(
+                    ContentUris.withAppendedId(collection, id),
+                    Size(256, 256),
+                    null,
+                )
+            } catch (_: Exception) {
+                null
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            if (isVideo) {
+                MediaStore.Video.Thumbnails.getThumbnail(
+                    contentResolver, id, MediaStore.Video.Thumbnails.MINI_KIND, null,
+                )
+            } else {
+                MediaStore.Images.Thumbnails.getThumbnail(
+                    contentResolver, id, MediaStore.Images.Thumbnails.MINI_KIND, null,
+                )
+            }
+        }
+        if (bitmap == null) return null
+        val out = ByteArrayOutputStream()
+        bitmap.compress(Bitmap.CompressFormat.JPEG, 78, out)
+        return out.toByteArray()
     }
 
     /**
