@@ -101,6 +101,7 @@ class AppState extends ChangeNotifier {
       saveDirProvider: state._resolveSaveDir,
       onAccept: state._handleIncomingPrompt,
       onSessionStarted: state._handleNewReceiveSession,
+      onPeerSeen: state._onPeerSeen,
     );
     state._sender = Sender(localDeviceProvider: state._buildSelfDevice);
     state._discovery = MulticastDiscovery(
@@ -116,10 +117,16 @@ class AppState extends ChangeNotifier {
 
     settings.addListener(state._onSettingsChanged);
 
-    await state._receiver.start();
-    EventLog.instance.add(
-      'Receiver listening on ${ips.join(", ")}:${state._receiver.port}',
-    );
+    try {
+      await state._receiver.start();
+      EventLog.instance.add(
+        'Receiver listening on ${ips.join(", ")}:${state._receiver.port}',
+      );
+    } catch (e) {
+      // Receiving is unavailable (e.g. every candidate port is taken), but
+      // the app must still come up so the user can send files and see why.
+      EventLog.instance.add('Could not start receiver: $e');
+    }
     await state._discovery.start();
     if (settings.connectivityMode == ConnectivityMode.hotspot) {
       unawaited(state._kickSubnetScan());
@@ -158,6 +165,14 @@ class AppState extends ChangeNotifier {
   /// changing modes immediately rediscovers peers.
   Future<void> refreshDiscovery() async {
     _discovery.poke();
+    // Re-probe peers we already know about (including manually-added ones)
+    // so renamed devices show their current alias instead of a stale one.
+    final known = _peers.values.toList();
+    for (final peer in known) {
+      unawaited(_sender.probe(peer).then((fresh) {
+        if (fresh != null) _onPeerSeen(fresh);
+      }));
+    }
     final ips = await listLocalIPv4Addresses();
     _localIps
       ..clear()

@@ -46,6 +46,7 @@ class Receiver {
     required this.saveDirProvider,
     required this.onAccept,
     required this.onSessionStarted,
+    this.onPeerSeen,
   });
 
   /// Returns the current local-device info (alias, port, fingerprint, etc.).
@@ -58,6 +59,10 @@ class Receiver {
 
   final AcceptHandler onAccept;
   final SessionStartedHandler onSessionStarted;
+
+  /// Called when a peer reveals itself through a `/register` call so the
+  /// receiving side can learn (or refresh) the sender's alias and details.
+  final void Function(Device peer)? onPeerSeen;
 
   HttpServer? _httpServer;
   final _uuid = const Uuid();
@@ -84,8 +89,33 @@ class Receiver {
         const Pipeline().addMiddleware(_logging()).addHandler(router.call);
 
     final desired = localDeviceProvider().port;
-    _httpServer =
-        await shelf_io.serve(handler, InternetAddress.anyIPv4, desired);
+    _httpServer = await _bindWithFallback(handler, desired);
+  }
+
+  /// Binds the HTTP server on [desired], falling back to nearby ports and
+  /// finally an OS-assigned ephemeral port. Another LanLink (or LocalSend)
+  /// instance on the same machine must not take the whole app down.
+  Future<HttpServer> _bindWithFallback(Handler handler, int desired) async {
+    final candidates = <int>[
+      desired,
+      for (var i = 1; i <= 9; i++) desired + i,
+      0,
+    ];
+    Object? lastError;
+    for (final port in candidates) {
+      try {
+        final server =
+            await shelf_io.serve(handler, InternetAddress.anyIPv4, port);
+        if (port != desired) {
+          debugPrint('[server] port $desired unavailable, '
+              'listening on ${server.port} instead');
+        }
+        return server;
+      } on SocketException catch (e) {
+        lastError = e;
+      }
+    }
+    throw lastError ?? const SocketException('could not bind any port');
   }
 
   Future<void> stop() async {
@@ -116,10 +146,25 @@ class Receiver {
   }
 
   Future<Response> _handleRegister(Request req) async {
-    // Drain the body for protocol compliance; we don't currently use it.
+    // The register body carries the sender's own device info. Use it so the
+    // receiving side learns (and refreshes) the sender's alias instead of
+    // showing a stale cached name.
     try {
-      await req.readAsString();
-    } catch (_) {}
+      final body = await req.readAsString();
+      if (body.isNotEmpty) {
+        final decoded = json.decode(body);
+        if (decoded is Map<String, dynamic>) {
+          final connInfo =
+              req.context['shelf.io.connection_info'] as HttpConnectionInfo?;
+          final ip = connInfo?.remoteAddress.address;
+          if (ip != null && ip.isNotEmpty) {
+            onPeerSeen?.call(Device.fromJson(decoded, ip: ip));
+          }
+        }
+      }
+    } catch (_) {
+      // Malformed register payloads are not fatal; just ignore them.
+    }
     final me = localDeviceProvider();
     return Response.ok(
       json.encode(me.toJson()),

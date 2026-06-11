@@ -82,10 +82,28 @@ class TransferSession extends ChangeNotifier {
   double get fraction => totalBytes == 0 ? 1.0 : transferredBytes / totalBytes;
 
   /// Update a file's byte counter and recompute speed; notifies listeners.
+  DateTime _lastProgressNotify = DateTime.fromMillisecondsSinceEpoch(0);
+
   void updateBytes(String fileId, int newBytes) {
     final p = _files[fileId];
     if (p == null) return;
+    final done = newBytes >= p.file.size;
+    final firstBytes = p.bytes == 0 && newBytes > 0;
     p.bytes = newBytes;
+    // Streaming transfers call this for every network chunk (tens of
+    // thousands of times for a large file). Recomputing speed and rebuilding
+    // the UI per chunk burns CPU that should go to disk/network I/O, so
+    // throttle the observable side to ~10 updates per second. The first
+    // chunk and the final byte count always notify so the UI reacts
+    // immediately to a transfer starting or finishing.
+    final now = DateTime.now();
+    if (!done &&
+        !firstBytes &&
+        now.difference(_lastProgressNotify) <
+            const Duration(milliseconds: 100)) {
+      return;
+    }
+    _lastProgressNotify = now;
     _recomputeSpeed();
     notifyListeners();
   }
