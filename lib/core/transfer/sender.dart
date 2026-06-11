@@ -118,6 +118,15 @@ class Sender {
     // Track the receiver-assigned id so a future cancel can target it.
     session.sessionId = sessionId;
 
+    // LanLink extension: byte offsets the receiver already holds from an
+    // interrupted earlier attempt. Absent when talking to plain LocalSend.
+    final resume = <String, int>{
+      for (final e
+          in ((prepData['resume'] as Map<String, dynamic>?) ?? const {})
+              .entries)
+        e.key: (e.value as num).toInt(),
+    };
+
     // Files the receiver chose not to accept (e.g. user un-ticked them).
     for (final f in files) {
       if (!tokens.containsKey(f.id)) {
@@ -147,24 +156,31 @@ class Sender {
       );
       try {
         final length = await file.length();
-        // Reset to 0 in case it was set by an earlier attempt.
-        session.updateBytes(fileId, 0);
-        final stream = file.openRead();
-        int sent = 0;
-        await _dio.postUri<dynamic>(
-          uri,
-          data: stream.map((chunk) {
-            sent += chunk.length;
-            session.updateBytes(fileId, sent);
-            return chunk;
-          }),
-          options: Options(
-            contentType: 'application/octet-stream',
-            headers: {HttpHeaders.contentLengthHeader: length.toString()},
-            // Don't decode the response body — we just need the status code.
-            responseType: ResponseType.plain,
-          ),
-        );
+        var startAt = resume[fileId] ?? 0;
+        if (startAt < 0 || startAt >= length) startAt = 0;
+
+        // First attempt resumes at the receiver's offset; if the receiver
+        // disagrees (409 — its part changed under us) retry once from zero.
+        for (var attempt = 0;; attempt++) {
+          try {
+            await _uploadFrom(
+              session: session,
+              fileId: fileId,
+              file: file,
+              length: length,
+              startAt: startAt,
+              uri: uri,
+            );
+            break;
+          } on DioException catch (e) {
+            final conflict = e.response?.statusCode == 409;
+            if (attempt == 0 && startAt > 0 && conflict) {
+              startAt = 0;
+              continue;
+            }
+            rethrow;
+          }
+        }
         // Make sure the per-file byte counter is exactly the file size so
         // fraction == 1.0 cleanly (in case the source stream reported a
         // shorter count for any reason).
@@ -180,6 +196,42 @@ class Sender {
     }
 
     session.markStatus(TransferStatus.completed);
+  }
+
+  /// Streams [file] to [uri] starting at byte [startAt], updating the
+  /// session's live byte counter as chunks go out.
+  Future<void> _uploadFrom({
+    required TransferSession session,
+    required String fileId,
+    required File file,
+    required int length,
+    required int startAt,
+    required Uri uri,
+  }) async {
+    session.updateBytes(fileId, startAt);
+    final stream = file.openRead(startAt);
+    int sent = startAt;
+    await _dio.postUri<dynamic>(
+      startAt > 0
+          ? uri.replace(queryParameters: {
+              ...uri.queryParameters,
+              'offset': '$startAt',
+            })
+          : uri,
+      data: stream.map((chunk) {
+        sent += chunk.length;
+        session.updateBytes(fileId, sent);
+        return chunk;
+      }),
+      options: Options(
+        contentType: 'application/octet-stream',
+        headers: {
+          HttpHeaders.contentLengthHeader: (length - startAt).toString(),
+        },
+        // Don't decode the response body — we just need the status code.
+        responseType: ResponseType.plain,
+      ),
+    );
   }
 
   void _failAll(TransferSession session, List<FileInfo> files, String message) {

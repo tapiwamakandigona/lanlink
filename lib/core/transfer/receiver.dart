@@ -228,8 +228,36 @@ class Receiver {
     );
     onSessionStarted(session);
 
+    // LanLink extension: report how much of each file we already hold from
+    // an interrupted earlier attempt so the sender can resume mid-file.
+    // LocalSend clients simply ignore the extra key.
+    final resume = <String, int>{};
+    try {
+      final saveDir = await saveDirProvider();
+      for (final f in accepted) {
+        final part = await _partFileFor(saveDir, f);
+        if (!await part.exists()) continue;
+        final len = await part.length();
+        if (len > 0 && len < f.size) {
+          resume[f.id] = len;
+        } else if (len >= f.size) {
+          // A part at least as big as the announced file can't be trusted
+          // (size changed or the rename was interrupted) — start over.
+          try {
+            await part.delete();
+          } catch (_) {}
+        }
+      }
+    } catch (_) {
+      // Resume is best-effort; never block the transfer over it.
+    }
+
     return Response.ok(
-      json.encode({'sessionId': sessionId, 'files': tokens}),
+      json.encode({
+        'sessionId': sessionId,
+        'files': tokens,
+        if (resume.isNotEmpty) 'resume': resume,
+      }),
       headers: {'Content-Type': 'application/json; charset=utf-8'},
     );
   }
@@ -257,20 +285,36 @@ class Receiver {
       return Response.internalServerError(
           body: 'cannot create save folder: $e');
     }
-    final finalPath = await _uniqueOutputPath(saveDir, info.fileName);
-    final tmpPath = '$finalPath.lanlink-part';
-    final tmpFile = File(tmpPath);
+
+    // Resume support: the sender may continue an interrupted upload at the
+    // byte offset we advertised in prepare-upload. The offset must match
+    // the part file exactly — otherwise the sender restarts from zero.
+    final offset = int.tryParse(req.url.queryParameters['offset'] ?? '0') ?? 0;
+    final partFile = await _partFileFor(saveDir, info);
+    if (offset > 0) {
+      final have = await partFile.exists() ? await partFile.length() : 0;
+      if (have != offset) {
+        return Response(
+          409,
+          body: 'offset mismatch: receiver has $have bytes',
+        );
+      }
+    }
+
     IOSink? sink;
     try {
-      sink = tmpFile.openWrite();
+      sink = partFile.openWrite(
+        mode: offset > 0 ? FileMode.append : FileMode.write,
+      );
     } catch (e) {
       ps.session.markFile(fileId, TransferStatus.failed,
-          error: 'Cannot open ${tmpFile.path}: $e');
+          error: 'Cannot open ${partFile.path}: $e');
       ps.session.markStatus(TransferStatus.failed);
       return Response.internalServerError(body: 'cannot open temp file: $e');
     }
 
-    int received = 0;
+    int received = offset;
+    String finalPath;
     try {
       await for (final chunk in req.read()) {
         sink.add(chunk);
@@ -279,13 +323,13 @@ class Receiver {
       }
       await sink.flush();
       await sink.close();
-      await tmpFile.rename(finalPath);
+      finalPath = await _uniqueOutputPath(saveDir, info.fileName);
+      await partFile.rename(finalPath);
     } catch (e) {
+      // Keep the part file: whatever made it to disk is the head start for
+      // the next attempt.
       try {
         await sink.close();
-      } catch (_) {}
-      try {
-        if (await tmpFile.exists()) await tmpFile.delete();
       } catch (_) {}
       ps.session.markFile(fileId, TransferStatus.failed, error: '$e');
       ps.session.markStatus(TransferStatus.failed);
@@ -361,6 +405,16 @@ class Receiver {
     final ps = _pending.remove(sessionId);
     if (ps != null) ps.session.markStatus(TransferStatus.cancelled);
     return Response.ok('ok');
+  }
+
+  /// Where partial data for [info] accumulates between attempts. Keyed by
+  /// sanitized file name + size inside a hidden subfolder of the save dir,
+  /// so a fresh session for the same file finds the earlier bytes.
+  Future<File> _partFileFor(Directory saveDir, FileInfo info) async {
+    final partsDir = Directory(p.join(saveDir.path, '.lanlink_parts'));
+    await partsDir.create(recursive: true);
+    final safe = info.fileName.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+    return File(p.join(partsDir.path, '$safe.${info.size}.part'));
   }
 
   Future<String> _uniqueOutputPath(Directory dir, String fileName) async {
