@@ -284,6 +284,15 @@ void main() {
       ),
     ));
     await tester.pump(const Duration(milliseconds: 300));
+    // Image.memory decodes asynchronously; precache the swatches inside
+    // runAsync so the thumbnails actually paint in the golden.
+    final pickerContext = tester.element(find.byType(SharePickerPage));
+    await tester.runAsync(() async {
+      for (final bytes in swatches) {
+        await precacheImage(MemoryImage(bytes), pickerContext);
+      }
+    });
+    await tester.pump(const Duration(milliseconds: 100));
     // Select a couple of items so the running total shows.
     await tester.tap(find.byKey(const Key('media-0')));
     await tester.pump();
