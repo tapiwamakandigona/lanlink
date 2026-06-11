@@ -21,7 +21,12 @@ import '../../state/app_state.dart';
 /// manual taps. macOS can't host at all — the page says to let the phone
 /// host instead.
 class DirectLinkPage extends StatefulWidget {
-  const DirectLinkPage({super.key});
+  const DirectLinkPage({super.key, this.debugInfo});
+
+  /// Screenshot/golden-test hook: when set, the page skips the platform
+  /// calls entirely and renders the running-hotspot UI with this info.
+  @visibleForTesting
+  final HotspotInfo? debugInfo;
 
   @override
   State<DirectLinkPage> createState() => _DirectLinkPageState();
@@ -38,11 +43,17 @@ class _DirectLinkPageState extends State<DirectLinkPage> {
   /// banner as soon as somebody new appears.
   int _peersAtStart = 0;
 
-  bool get _isAndroid => Platform.isAndroid;
+  bool get _isAndroid => widget.debugInfo != null || Platform.isAndroid;
 
   @override
   void initState() {
     super.initState();
+    final debugInfo = widget.debugInfo;
+    if (debugInfo != null) {
+      _phase = _Phase.running;
+      _info = debugInfo;
+      return;
+    }
     if (_isAndroid) _bootstrap();
   }
 

@@ -48,7 +48,11 @@ class AppState extends ChangeNotifier {
   @visibleForTesting
   AppState.forScreenshots({required this.settings})
       : _fingerprint = 'test-fingerprint',
-        _localIps = const ['192.168.1.10'];
+        _localIps = const ['192.168.1.10'] {
+    // Late fields the UI reads during build; never started, so they stay
+    // network-silent in tests.
+    _updateChecker = UpdateChecker();
+  }
 
   final AppSettings settings;
   final String _fingerprint;
@@ -69,6 +73,20 @@ class AppState extends ChangeNotifier {
 
   /// UI hook installed by main.dart once the navigator is alive.
   IncomingTransferPrompt? _incomingPrompt;
+
+  /// Test/screenshot hook: seeds peers and sessions without touching any
+  /// sockets. Only meaningful on instances built with [forScreenshots].
+  @visibleForTesting
+  void seedForScreenshots({
+    List<Device> peers = const [],
+    List<TransferSession> sessions = const [],
+  }) {
+    for (final d in peers) {
+      _peers[d.fingerprint] = d;
+    }
+    _sessions.insertAll(0, sessions);
+    notifyListeners();
+  }
 
   /// Map of peer fingerprint -> Device. Latest announcement wins.
   final Map<String, Device> _peers = {};
