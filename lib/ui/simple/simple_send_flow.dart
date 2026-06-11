@@ -126,8 +126,8 @@ class _SimpleDevicePickerPageState extends State<SimpleDevicePickerPage> {
         Text(
           'Looking for nearby devices…',
           textAlign: TextAlign.center,
-          style: theme.textTheme.titleLarge
-              ?.copyWith(fontWeight: FontWeight.w700),
+          style:
+              theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: 10),
         Text(
@@ -225,8 +225,7 @@ class SimpleSendProgressPage extends StatelessWidget {
                 case TransferStatus.awaitingAccept:
                   return _Waiting(peerName: peerDisplayName);
                 case TransferStatus.transferring:
-                  return _Sending(
-                      session: session, peerName: peerDisplayName);
+                  return _Sending(session: session, peerName: peerDisplayName);
                 case TransferStatus.completed:
                   return _Sent(session: session, peerName: peerDisplayName);
                 case TransferStatus.failed:
@@ -274,27 +273,27 @@ class _Waiting extends StatelessWidget {
     final theme = Theme.of(context);
     return _Centered(
       children: [
-      const Center(
-        child: SizedBox(
-          width: 56,
-          height: 56,
-          child: CircularProgressIndicator(strokeWidth: 5),
+        const Center(
+          child: SizedBox(
+            width: 56,
+            height: 56,
+            child: CircularProgressIndicator(strokeWidth: 5),
+          ),
         ),
-      ),
-      const SizedBox(height: 24),
-      Text(
-        'Waiting for $peerName…',
-        textAlign: TextAlign.center,
-        style:
-            theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
-      ),
-      const SizedBox(height: 10),
-      Text(
-        'They just need to tap "Yes" on their screen.',
-        textAlign: TextAlign.center,
-        style: theme.textTheme.titleMedium
-            ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-      ),
+        const SizedBox(height: 24),
+        Text(
+          'Waiting for $peerName…',
+          textAlign: TextAlign.center,
+          style: theme.textTheme.headlineSmall
+              ?.copyWith(fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 10),
+        Text(
+          'They just need to tap "Yes" on their screen.',
+          textAlign: TextAlign.center,
+          style: theme.textTheme.titleMedium
+              ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+        ),
       ],
     );
   }

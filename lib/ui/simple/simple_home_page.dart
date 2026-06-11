@@ -61,8 +61,7 @@ class _SimpleHomePageState extends State<SimpleHomePage> {
       if (_celebrated.contains(session)) continue;
       _celebrated.add(session);
       _savedPageOpen = true;
-      final nickname =
-          _state.settings.nicknameFor(session.peer.fingerprint);
+      final nickname = _state.settings.nicknameFor(session.peer.fingerprint);
       Navigator.of(context)
           .push(
             MaterialPageRoute(
@@ -177,8 +176,8 @@ class _SimpleHomePageState extends State<SimpleHomePage> {
           'The full version shows every option and setting. '
           'You can come back to Simple mode any time from Settings.',
         ),
-        titleTextStyle: theme.textTheme.titleLarge
-            ?.copyWith(fontWeight: FontWeight.w700, color: theme.colorScheme.onSurface),
+        titleTextStyle: theme.textTheme.titleLarge?.copyWith(
+            fontWeight: FontWeight.w700, color: theme.colorScheme.onSurface),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
@@ -323,7 +322,8 @@ class _BigActionButton extends StatelessWidget {
     final scheme = theme.colorScheme;
     final bg = filled ? scheme.primary : scheme.surfaceContainerLowest;
     final fg = filled ? scheme.onPrimary : scheme.onSurface;
-    final sub = filled ? scheme.onPrimary.withOpacity(0.85) : scheme.onSurfaceVariant;
+    final sub =
+        filled ? scheme.onPrimary.withOpacity(0.85) : scheme.onSurfaceVariant;
     return Material(
       color: bg,
       borderRadius: BorderRadius.circular(28),
@@ -333,8 +333,7 @@ class _BigActionButton extends StatelessWidget {
         child: Container(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(28),
-            border:
-                filled ? null : Border.all(color: scheme.primary, width: 3),
+            border: filled ? null : Border.all(color: scheme.primary, width: 3),
           ),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
