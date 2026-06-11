@@ -18,6 +18,7 @@ import 'history_page.dart';
 import 'scan_qr_page.dart';
 import 'settings_page.dart';
 import '../core/platform/incoming_share.dart';
+import 'hotspot/direct_link_page.dart';
 import 'pairing/pairing_wizard_page.dart';
 import 'widgets/device_card.dart';
 import 'widgets/pair_qr_sheet.dart';
@@ -610,6 +611,14 @@ class _HomePageState extends State<HomePage> {
                     title: Text('Enter IP address'),
                   ),
                 ),
+                const PopupMenuItem(
+                  value: _AddDeviceAction.directLink,
+                  child: ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.bolt),
+                    title: Text('Direct link (no Wi-Fi)'),
+                  ),
+                ),
               ],
             ),
         ],
@@ -627,6 +636,11 @@ class _HomePageState extends State<HomePage> {
         break;
       case _AddDeviceAction.enterIp:
         _addManualPeer();
+        break;
+      case _AddDeviceAction.directLink:
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const DirectLinkPage()),
+        );
         break;
     }
   }
@@ -1050,7 +1064,7 @@ enum _AddAction { files, apps }
 
 enum _MenuAction { help, history, settings, about }
 
-enum _AddDeviceAction { showQr, scanQr, enterIp }
+enum _AddDeviceAction { showQr, scanQr, enterIp, directLink }
 
 String _humanBytes(int bytes) {
   if (bytes < 1024) return '$bytes B';

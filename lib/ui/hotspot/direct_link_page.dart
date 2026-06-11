@@ -181,16 +181,15 @@ class _DirectLinkPageState extends State<DirectLinkPage> {
             ),
           )
         else
-          Card(
+          const Card(
             child: ListTile(
-              leading: const SizedBox(
+              leading: SizedBox(
                 width: 24,
                 height: 24,
                 child: CircularProgressIndicator(strokeWidth: 2.5),
               ),
-              title: const Text('Hotspot is on — waiting for the other '
-                  'device'),
-              subtitle: const Text('It joins, opens LanLink, and appears '
+              title: Text('Hotspot is on — waiting for the other device'),
+              subtitle: Text('It joins, opens LanLink, and appears '
                   'here automatically.'),
             ),
           ),

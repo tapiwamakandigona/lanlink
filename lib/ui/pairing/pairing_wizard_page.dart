@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../hotspot/direct_link_page.dart';
+
 import '../../core/connectivity/connectivity_mode.dart';
 import '../../core/models/session.dart';
 import '../../core/onboarding/pairing_choice.dart';
@@ -632,6 +634,11 @@ class _InstructionsStepState extends State<_InstructionsStep> {
 
   Future<void> _runAction(_ActionId id) async {
     switch (id) {
+      case _ActionId.directLink:
+        await Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const DirectLinkPage()),
+        );
+        break;
       case _ActionId.openHotspot:
         await _openHotspot();
         await _switchConnectivity(ConnectivityMode.hotspot);
@@ -679,6 +686,11 @@ class _InstructionsStepState extends State<_InstructionsStep> {
       final iShouldHost =
           !(otherIsAndroid && direction == TransferDirection.send);
       if (iShouldHost) {
+        out.add(const _Action(
+          id: _ActionId.directLink,
+          icon: Icons.bolt,
+          label: 'Create direct link (auto)',
+        ));
         out.add(const _Action(
           id: _ActionId.openHotspot,
           icon: Icons.wifi_tethering,
@@ -739,7 +751,7 @@ class _InstructionsStepState extends State<_InstructionsStep> {
   }
 }
 
-enum _ActionId { openHotspot, openWifi, scanQr, showQr, useLan }
+enum _ActionId { directLink, openHotspot, openWifi, scanQr, showQr, useLan }
 
 class _Action {
   const _Action({required this.id, required this.icon, required this.label});
