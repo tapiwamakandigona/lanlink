@@ -7,12 +7,17 @@ import android.content.pm.PackageManager
 import android.database.Cursor
 import android.media.MediaScannerConnection
 import android.net.Uri
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.os.Handler
+import android.os.Looper
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.provider.Settings
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -20,6 +25,8 @@ import io.flutter.plugin.common.MethodChannel
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.net.Inet4Address
+import java.net.NetworkInterface
 
 class MainActivity : FlutterActivity() {
 
@@ -28,11 +35,28 @@ class MainActivity : FlutterActivity() {
     /// them. The pairing wizard / home page polls this on startup and
     /// when the activity comes back to the foreground.
     private val pendingShares = mutableListOf<Map<String, Any>>()
+
+    /// Live LocalOnlyHotspot reservation. Non-null while LanLink is
+    /// hosting a direct link. Closing it tears the hotspot down.
+    private var hotspotReservation: WifiManager.LocalOnlyHotspotReservation? = null
+
+    /// Result waiting for the runtime-permission dialog that gates
+    /// startLocalOnlyHotspot (location / nearby-devices).
+    private var hotspotPermissionResult: MethodChannel.Result? = null
+
+    companion object {
+        private const val HOTSPOT_PERMISSION_REQUEST = 7431
+    }
     private var shareChannel: MethodChannel? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         capturePendingShare(intent)
+    }
+
+    override fun onDestroy() {
+        stopLocalHotspot()
+        super.onDestroy()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -140,6 +164,23 @@ class MainActivity : FlutterActivity() {
                 }
             }
 
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "lanlink/hotspot")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "isSupported" ->
+                        result.success(Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                    "hasPermission" -> result.success(hasHotspotPermission())
+                    "requestPermission" -> requestHotspotPermission(result)
+                    "start" -> startLocalHotspot(result)
+                    "stop" -> {
+                        stopLocalHotspot()
+                        result.success(true)
+                    }
+                    "isRunning" -> result.success(hotspotReservation != null)
+                    else -> result.notImplemented()
+                }
+            }
+
         shareChannel = MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             "lanlink/incoming_share",
@@ -218,6 +259,168 @@ class MainActivity : FlutterActivity() {
      * the cleanest options first and fall back to the generic wireless
      * page so something always opens.
      */
+    // ----- LocalOnlyHotspot (direct link without a shared Wi-Fi) -----
+
+    /// The runtime permission required by startLocalOnlyHotspot:
+    /// NEARBY_WIFI_DEVICES on Android 13+, fine location before that.
+    private fun hotspotPermission(): String =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            android.Manifest.permission.NEARBY_WIFI_DEVICES
+        } else {
+            android.Manifest.permission.ACCESS_FINE_LOCATION
+        }
+
+    private fun hasHotspotPermission(): Boolean =
+        ContextCompat.checkSelfPermission(this, hotspotPermission()) ==
+            PackageManager.PERMISSION_GRANTED
+
+    private fun requestHotspotPermission(result: MethodChannel.Result) {
+        if (hasHotspotPermission()) {
+            result.success(true)
+            return
+        }
+        if (hotspotPermissionResult != null) {
+            result.error("busy", "Permission request already in flight", null)
+            return
+        }
+        hotspotPermissionResult = result
+        ActivityCompat.requestPermissions(
+            this,
+            arrayOf(hotspotPermission()),
+            HOTSPOT_PERMISSION_REQUEST,
+        )
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == HOTSPOT_PERMISSION_REQUEST) {
+            val granted = grantResults.isNotEmpty() &&
+                grantResults[0] == PackageManager.PERMISSION_GRANTED
+            hotspotPermissionResult?.success(granted)
+            hotspotPermissionResult = null
+        }
+    }
+
+    private fun startLocalHotspot(result: MethodChannel.Result) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            result.error("unsupported", "LocalOnlyHotspot needs Android 8+", null)
+            return
+        }
+        if (hotspotReservation != null) {
+            // Already running — report the live credentials again.
+            val info = describeReservation(hotspotReservation!!)
+            if (info != null) result.success(info)
+            else result.error("state", "Hotspot running but unreadable", null)
+            return
+        }
+        if (!hasHotspotPermission()) {
+            result.error("permission", "Missing ${hotspotPermission()}", null)
+            return
+        }
+        val wifi = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
+        var replied = false
+        try {
+            wifi.startLocalOnlyHotspot(
+                object : WifiManager.LocalOnlyHotspotCallback() {
+                    override fun onStarted(
+                        reservation: WifiManager.LocalOnlyHotspotReservation,
+                    ) {
+                        hotspotReservation = reservation
+                        val info = describeReservation(reservation)
+                        if (replied) return
+                        replied = true
+                        if (info != null) {
+                            result.success(info)
+                        } else {
+                            reservation.close()
+                            hotspotReservation = null
+                            result.error("state", "Could not read hotspot config", null)
+                        }
+                    }
+
+                    override fun onFailed(reason: Int) {
+                        if (replied) return
+                        replied = true
+                        result.error("failed", "LocalOnlyHotspot failed: $reason", null)
+                    }
+
+                    override fun onStopped() {
+                        hotspotReservation = null
+                    }
+                },
+                Handler(Looper.getMainLooper()),
+            )
+        } catch (e: Exception) {
+            // SecurityException when location services are off, or
+            // IllegalStateException when tethering is already active.
+            if (!replied) {
+                replied = true
+                result.error("failed", e.message ?: e.javaClass.simpleName, null)
+            }
+        }
+    }
+
+    /// Extracts SSID, passphrase and our own IPv4 addresses on the
+    /// freshly created hotspot interface.
+    private fun describeReservation(
+        reservation: WifiManager.LocalOnlyHotspotReservation,
+    ): Map<String, Any>? {
+        var ssid: String? = null
+        var passphrase: String? = null
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val config = reservation.softApConfiguration
+            ssid = config.ssid
+            passphrase = config.passphrase
+        } else {
+            @Suppress("DEPRECATION")
+            val config = reservation.wifiConfiguration
+            ssid = config?.SSID
+            @Suppress("DEPRECATION")
+            passphrase = config?.preSharedKey
+        }
+        if (ssid.isNullOrEmpty() || passphrase.isNullOrEmpty()) return null
+        return mapOf(
+            "ssid" to ssid.removeSurrounding("\""),
+            "password" to passphrase,
+            "hostIps" to localIpv4Addresses(),
+        )
+    }
+
+    /// All site-local IPv4 addresses, hotspot interface first
+    /// (ap0 / swlan0 / wlan1-style names or the classic 192.168.43/49 nets).
+    private fun localIpv4Addresses(): List<String> {
+        val preferred = mutableListOf<String>()
+        val others = mutableListOf<String>()
+        try {
+            for (nif in NetworkInterface.getNetworkInterfaces()) {
+                if (!nif.isUp || nif.isLoopback) continue
+                val name = nif.name.lowercase()
+                for (addr in nif.inetAddresses) {
+                    if (addr !is Inet4Address || addr.isLoopbackAddress) continue
+                    val ip = addr.hostAddress ?: continue
+                    val apLike = name.startsWith("ap") || name.contains("swlan") ||
+                        ip.startsWith("192.168.43.") || ip.startsWith("192.168.49.")
+                    if (apLike) preferred += ip else others += ip
+                }
+            }
+        } catch (_: Exception) {
+            // best effort
+        }
+        return preferred + others
+    }
+
+    private fun stopLocalHotspot() {
+        try {
+            hotspotReservation?.close()
+        } catch (_: Exception) {
+        }
+        hotspotReservation = null
+    }
+
     private fun openHotspotSettings(): Boolean {
         val attempts = mutableListOf<Intent>()
         attempts += Intent().apply {
