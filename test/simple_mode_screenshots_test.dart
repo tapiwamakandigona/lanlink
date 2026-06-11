@@ -17,12 +17,23 @@ import 'package:lanlink/ui/simple/simple_send_flow.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-const _fontDir =
-    '/work/temp/flutter/bin/cache/artifacts/material_fonts';
+/// Material fonts shipped inside the Flutter SDK cache — resolved via
+/// FLUTTER_ROOT so the goldens render identically on any machine/CI.
+final String _fontDir = () {
+  final root = Platform.environment['FLUTTER_ROOT'];
+  if (root == null || root.isEmpty) {
+    fail('FLUTTER_ROOT is not set; run via `flutter test`.');
+  }
+  return '$root/bin/cache/artifacts/material_fonts';
+}();
 
 Future<void> _loadFonts() async {
   final roboto = FontLoader('Roboto');
-  for (final f in ['Roboto-Regular.ttf', 'Roboto-Medium.ttf', 'Roboto-Bold.ttf']) {
+  for (final f in [
+    'Roboto-Regular.ttf',
+    'Roboto-Medium.ttf',
+    'Roboto-Bold.ttf'
+  ]) {
     roboto.addFont(
       File('$_fontDir/$f').readAsBytes().then((b) => b.buffer.asByteData()),
     );
