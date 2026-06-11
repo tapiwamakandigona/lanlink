@@ -29,6 +29,8 @@ class AppSettings extends ChangeNotifier {
   static const _connectivityDefaultAppliedKey =
       'lanlink_connectivity_default_applied_v1';
   static const _hapticsKey = 'lanlink_haptics_enabled';
+  static const _simpleModeKey = 'lanlink_simple_mode_v1';
+  static const _simpleModeExitButtonKey = 'lanlink_simple_exit_button_v1';
 
   final SharedPreferences _prefs;
 
@@ -252,6 +254,27 @@ class AppSettings extends ChangeNotifier {
 
   Future<void> setHapticsEnabled(bool value) async {
     await _prefs.setBool(_hapticsKey, value);
+    notifyListeners();
+  }
+
+  /// Whether the pared-down "Simple mode" UI is active. Designed for
+  /// non-technical users (grandparents, kids): two giant buttons, plain
+  /// language, no jargon, transport details hidden entirely.
+  bool get simpleMode => _prefs.getBool(_simpleModeKey) ?? false;
+
+  Future<void> setSimpleMode(bool value) async {
+    await _prefs.setBool(_simpleModeKey, value);
+    notifyListeners();
+  }
+
+  /// Whether the Simple-mode home screen shows the "Full version" exit
+  /// button. A caregiver can hide it from Settings so a relative can't
+  /// accidentally tap into the full UI and get lost.
+  bool get simpleModeExitButton =>
+      _prefs.getBool(_simpleModeExitButtonKey) ?? true;
+
+  Future<void> setSimpleModeExitButton(bool value) async {
+    await _prefs.setBool(_simpleModeExitButtonKey, value);
     notifyListeners();
   }
 

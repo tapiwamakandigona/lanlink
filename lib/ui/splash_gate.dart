@@ -8,6 +8,7 @@ import '../core/settings/app_settings.dart';
 import '../core/util/onboarding_gate.dart';
 import 'home_page.dart';
 import 'onboarding_page.dart';
+import 'simple/simple_home_page.dart';
 
 enum _Stage { splash, onboarding, home }
 
@@ -60,7 +61,10 @@ class _SplashGateState extends State<SplashGate> {
   Widget build(BuildContext context) {
     switch (_stage) {
       case _Stage.home:
-        return const HomePage();
+        // Watching here means flipping the Simple-mode toggle swaps the
+        // home screen immediately, without an app restart.
+        final simple = context.watch<AppSettings>().simpleMode;
+        return simple ? const SimpleHomePage() : const HomePage();
       case _Stage.onboarding:
         return OnboardingPage(onDone: _finishOnboarding);
       case _Stage.splash:

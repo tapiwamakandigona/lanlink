@@ -135,6 +135,33 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
           ),
           const Divider(height: 32),
+          Text('Simple mode', style: theme.textTheme.titleMedium),
+          const SizedBox(height: 8),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            value: state.settings.simpleMode,
+            onChanged: (v) => state.settings.setSimpleMode(v),
+            title: const Text('Use Simple mode'),
+            subtitle: const Text(
+              'A pared-down home screen with two big buttons and plain '
+              'language. Great for family members who just want to send '
+              'and receive photos.',
+            ),
+          ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            value: state.settings.simpleModeExitButton,
+            onChanged: state.settings.simpleMode
+                ? (v) => state.settings.setSimpleModeExitButton(v)
+                : null,
+            title: const Text('Show "Full version" button'),
+            subtitle: const Text(
+              'Turn this off to hide the exit button on the Simple home '
+              'screen, so it can\'t be tapped by accident. You can always '
+              'come back here to switch modes.',
+            ),
+          ),
+          const Divider(height: 32),
           Text('Appearance', style: theme.textTheme.titleMedium),
           const SizedBox(height: 8),
           Wrap(

@@ -5,6 +5,7 @@ import 'core/settings/app_settings.dart';
 import 'core/theme/app_theme.dart';
 import 'core/transfer/receiver.dart';
 import 'state/app_state.dart';
+import 'ui/simple/simple_receive_dialog.dart';
 import 'ui/splash_gate.dart';
 import 'ui/widgets/receive_dialog.dart';
 
@@ -28,13 +29,25 @@ class _LanLinkAppState extends State<LanLinkApp> {
       if (nav == null) {
         return AcceptDecision.reject();
       }
-      final result = await showReceivePrompt(
-        context: nav.context,
-        peer: peer,
-        files: files,
-        canTrust: !widget.state.settings.trustedFingerprints
-            .contains(peer.fingerprint),
-      );
+      // Simple mode swaps the technical prompt for a plain-language one
+      // ("Rudo's phone wants to send you 3 photos") with two huge buttons.
+      final ({AcceptDecision decision, bool trust}) result;
+      if (widget.state.settings.simpleMode) {
+        result = await showSimpleReceivePrompt(
+          context: nav.context,
+          peer: peer,
+          files: files,
+          nickname: widget.state.settings.nicknameFor(peer.fingerprint),
+        );
+      } else {
+        result = await showReceivePrompt(
+          context: nav.context,
+          peer: peer,
+          files: files,
+          canTrust: !widget.state.settings.trustedFingerprints
+              .contains(peer.fingerprint),
+        );
+      }
       if (result.trust) {
         await widget.state.settings.trust(peer.fingerprint);
       }
