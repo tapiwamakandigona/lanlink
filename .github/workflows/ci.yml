@@ -67,10 +67,12 @@ jobs:
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
+        continue-on-error: true  # artifact storage quota must never fail CI
         with:
           name: lanlink-android-debug
           path: build/app/outputs/flutter-apk/app-debug.apk
           if-no-files-found: error
+          retention-days: 3
 
   build-windows:
     name: Build Windows app
@@ -100,10 +102,12 @@ jobs:
 
       - name: Upload Windows build
         uses: actions/upload-artifact@v4
+        continue-on-error: true  # artifact storage quota must never fail CI
         with:
           name: lanlink-windows
           path: build/lanlink-windows.zip
           if-no-files-found: error
+          retention-days: 3
 
   build-macos:
     name: Build macOS app
@@ -132,10 +136,12 @@ jobs:
 
       - name: Upload macOS build
         uses: actions/upload-artifact@v4
+        continue-on-error: true  # artifact storage quota must never fail CI
         with:
           name: lanlink-macos
           path: build/dist/lanlink-macos.zip
           if-no-files-found: error
+          retention-days: 3
 
   build-ios:
     name: Build iOS app (unsigned)
@@ -164,7 +170,9 @@ jobs:
 
       - name: Upload iOS build
         uses: actions/upload-artifact@v4
+        continue-on-error: true  # artifact storage quota must never fail CI
         with:
           name: lanlink-ios-unsigned
           path: build/dist/lanlink-ios-unsigned.zip
           if-no-files-found: error
+          retention-days: 3

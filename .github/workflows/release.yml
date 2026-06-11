@@ -88,6 +88,7 @@ jobs:
       - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
+          retention-days: 1
           name: lanlink-android-release
           path: build/app/outputs/flutter-apk/lanlink-*.apk
           if-no-files-found: error
@@ -158,6 +159,7 @@ jobs:
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:
+          retention-days: 1
           name: lanlink-windows-installer
           path: build/lanlink-windows-setup.exe
           if-no-files-found: error
@@ -198,6 +200,7 @@ jobs:
       - name: Upload macOS build
         uses: actions/upload-artifact@v4
         with:
+          retention-days: 1
           name: lanlink-macos-release
           path: |
             build/dist/lanlink-macos-*.dmg
@@ -233,6 +236,7 @@ jobs:
       - name: Upload iOS build
         uses: actions/upload-artifact@v4
         with:
+          retention-days: 1
           name: lanlink-ios-release
           path: build/dist/lanlink-ios-*-unsigned.ipa
           if-no-files-found: error
@@ -307,6 +311,7 @@ jobs:
       - name: Upload Linux build
         uses: actions/upload-artifact@v4
         with:
+          retention-days: 1
           name: lanlink-linux-release
           path: |
             build/dist/LanLink-*-x86_64.AppImage
