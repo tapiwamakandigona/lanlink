@@ -273,13 +273,23 @@ class _SimpleHomePageState extends State<SimpleHomePage> {
                     ),
                   ),
                   const SizedBox(height: 14),
-                  Text(
-                    '● Ready — visible as “$_deviceName”',
-                    textAlign: TextAlign.center,
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      color: const Color(0xFF2C9A4B),
-                      fontWeight: FontWeight.w600,
-                    ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.circle,
+                          size: 10, color: Color(0xFF2C9A4B)),
+                      const SizedBox(width: 6),
+                      Flexible(
+                        child: Text(
+                          'Ready — visible as “$_deviceName”',
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            color: const Color(0xFF2C9A4B),
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                   if (settings.simpleModeExitButton) ...[
                     const SizedBox(height: 4),

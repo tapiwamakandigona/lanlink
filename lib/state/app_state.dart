@@ -43,6 +43,13 @@ class AppState extends ChangeNotifier {
   })  : _fingerprint = fingerprint,
         _localIps = localIps;
 
+  /// Test-only: a minimal AppState for widget screenshots/goldens.
+  /// Does not start any network services.
+  @visibleForTesting
+  AppState.forScreenshots({required this.settings})
+      : _fingerprint = 'test-fingerprint',
+        _localIps = const ['192.168.1.10'];
+
   final AppSettings settings;
   final String _fingerprint;
   final List<String> _localIps;
