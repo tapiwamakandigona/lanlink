@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:path/path.dart' as p;
 import 'package:provider/provider.dart';
 import 'package:uuid/uuid.dart';
 
@@ -770,10 +771,20 @@ class _HomePageState extends State<HomePage> {
   /// Opens the system file picker and maps the selection to [FileInfo]s.
   /// Returns an empty list if the user cancels.
   Future<List<FileInfo>> _pickFileInfos() async {
-    final result = await FilePicker.platform.pickFiles(
-      allowMultiple: true,
-      withData: false,
-    );
+    FilePickerResult? result;
+    try {
+      result = await FilePicker.platform.pickFiles(
+        allowMultiple: true,
+        withData: false,
+      );
+    } catch (e) {
+      // On Linux the picker shells out to zenity/kdialog/qarma; on a system
+      // without any of them it throws and previously failed silently. Fall
+      // back to a manual path prompt so the user is never stuck.
+      if (!mounted) return const [];
+      final manual = await _promptManualFilePath(e);
+      return manual == null ? const [] : [manual];
+    }
     if (result == null) return const [];
     return [
       for (final f in result.files)
@@ -786,6 +797,70 @@ class _HomePageState extends State<HomePage> {
             localPath: f.path,
           ),
     ];
+  }
+
+  /// Fallback when the system file picker is unavailable (e.g. no zenity on
+  /// Linux): explain the problem and let the user type a file path directly.
+  Future<FileInfo?> _promptManualFilePath(Object error) async {
+    final controller = TextEditingController();
+    final path = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('File picker unavailable'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              Platform.isLinux
+                  ? 'LanLink could not open the system file dialog. '
+                      'Installing zenity usually fixes this '
+                      '(e.g. sudo apt install zenity).\n\n'
+                      'You can also type the full path of a file to send:'
+                  : 'LanLink could not open the system file dialog.\n\n'
+                      'You can type the full path of a file to send:',
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              decoration: const InputDecoration(
+                hintText: '/home/you/Videos/movie.mkv',
+                border: OutlineInputBorder(),
+              ),
+              onSubmitted: (v) => Navigator.of(ctx).pop(v.trim()),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(controller.text.trim()),
+            child: const Text('Add file'),
+          ),
+        ],
+      ),
+    );
+    if (path == null || path.isEmpty) return null;
+    final file = File(path);
+    if (!await file.exists()) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('File not found: $path')),
+        );
+      }
+      return null;
+    }
+    return FileInfo(
+      id: _uuid.v4(),
+      fileName: p.basename(path),
+      size: await file.length(),
+      fileType: fileTypeForName(p.basename(path)),
+      localPath: path,
+    );
   }
 
   Future<void> _pickApps() async {
