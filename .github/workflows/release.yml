@@ -352,6 +352,28 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # The app's update checker and all public download links point at the
+      # public mirror repo (source stays private). Publish the same assets
+      # there under the same tag.
+      - name: Mirror release to lanlink-downloads (public)
+        uses: softprops/action-gh-release@v2
+        with:
+          repository: tapiwamakandigona/lanlink-downloads
+          token: ${{ secrets.RELEASE_MIRROR_TOKEN }}
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          body: |
+            LanLink ${{ github.ref_name }} — downloads for Android, Windows, macOS, Linux and iOS.
+            Website: https://tapiwa.me/lanlink
+          files: |
+            artifacts/lanlink-android-release/*.apk
+            artifacts/lanlink-windows-installer/*.exe
+            artifacts/lanlink-macos-release/*.dmg
+            artifacts/lanlink-macos-release/*.zip
+            artifacts/lanlink-ios-release/*.ipa
+            artifacts/lanlink-linux-release/*.AppImage
+            artifacts/lanlink-linux-release/*.tar.gz
+
   publish-downloads:
     name: Publish binaries to tapiwa.me downloads
     runs-on: ubuntu-latest
