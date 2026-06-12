@@ -11,6 +11,7 @@ import '../../core/models/file_info.dart';
 import '../../core/models/session.dart';
 import '../../core/settings/app_settings.dart';
 import '../../state/app_state.dart';
+import '../hotspot/direct_link_page.dart';
 import 'simple_saved_page.dart';
 import 'simple_send_flow.dart';
 
@@ -165,6 +166,14 @@ class _SimpleHomePageState extends State<SimpleHomePage> {
     );
   }
 
+  /// "We're not on the same Wi-Fi" escape hatch — same Direct Link page the
+  /// full UI offers, one tap away instead of hidden behind a menu.
+  void _onDirectLinkTap() {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const DirectLinkPage()),
+    );
+  }
+
   Future<void> _onExitSimpleMode() async {
     final settings = context.read<AppSettings>();
     final theme = Theme.of(context);
@@ -272,7 +281,18 @@ class _SimpleHomePageState extends State<SimpleHomePage> {
                       onTap: _onReceiveTap,
                     ),
                   ),
-                  const SizedBox(height: 14),
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: _onDirectLinkTap,
+                    icon: const Icon(Icons.bolt),
+                    label: const Text('No Wi-Fi? Connect directly'),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(48),
+                      textStyle: theme.textTheme.titleSmall
+                          ?.copyWith(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [

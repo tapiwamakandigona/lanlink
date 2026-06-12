@@ -7,10 +7,11 @@ import 'package:provider/provider.dart';
 import '../core/settings/app_settings.dart';
 import '../core/util/onboarding_gate.dart';
 import 'home_page.dart';
+import 'mode_choice_page.dart';
 import 'onboarding_page.dart';
 import 'simple/simple_home_page.dart';
 
-enum _Stage { splash, onboarding, home }
+enum _Stage { splash, onboarding, modeChoice, home }
 
 class SplashGate extends StatefulWidget {
   const SplashGate({super.key});
@@ -22,6 +23,7 @@ class SplashGate extends StatefulWidget {
 class _SplashGateState extends State<SplashGate> {
   _Stage _stage = _Stage.splash;
   String _currentVersion = '';
+  bool _firstRun = false;
 
   @override
   void initState() {
@@ -42,6 +44,9 @@ class _SplashGateState extends State<SplashGate> {
       lastOnboardedVersion: settings.lastOnboardedVersion,
       currentVersion: _currentVersion,
     );
+    _firstRun = isFirstRun(
+      lastOnboardedVersion: settings.lastOnboardedVersion,
+    );
     if (!mounted) return;
     if (showOnboarding) {
       setState(() => _stage = _Stage.onboarding);
@@ -53,6 +58,15 @@ class _SplashGateState extends State<SplashGate> {
   Future<void> _finishOnboarding() async {
     final settings = context.read<AppSettings>();
     await settings.setLastOnboardedVersion(_currentVersion);
+    if (!mounted) return;
+    // Genuine first install: let the user pick Simple vs Full before
+    // dropping them into a home screen they didn't choose.
+    setState(() => _stage = _firstRun ? _Stage.modeChoice : _Stage.home);
+  }
+
+  Future<void> _finishModeChoice(bool simple) async {
+    final settings = context.read<AppSettings>();
+    await settings.setSimpleMode(simple);
     if (!mounted) return;
     setState(() => _stage = _Stage.home);
   }
@@ -67,6 +81,8 @@ class _SplashGateState extends State<SplashGate> {
         return simple ? const SimpleHomePage() : const HomePage();
       case _Stage.onboarding:
         return OnboardingPage(onDone: _finishOnboarding);
+      case _Stage.modeChoice:
+        return ModeChoicePage(onChosen: _finishModeChoice);
       case _Stage.splash:
         return _buildSplash(context);
     }

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:desktop_drop/desktop_drop.dart';
@@ -425,7 +426,36 @@ class _HomePageState extends State<HomePage> {
       );
       return;
     }
-    final all = await MediaLibrary.listMedia();
+    if (!mounted) return;
+    // Reading a big camera roll takes a few seconds — show progress
+    // immediately instead of appearing to do nothing.
+    unawaited(showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Dialog(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: 28,
+                height: 28,
+                child: CircularProgressIndicator(strokeWidth: 3),
+              ),
+              SizedBox(width: 16),
+              Flexible(child: Text('Counting your photos…')),
+            ],
+          ),
+        ),
+      ),
+    ));
+    List<MediaItem> all;
+    try {
+      all = await MediaLibrary.listMedia();
+    } finally {
+      if (mounted) Navigator.of(context, rootNavigator: true).pop();
+    }
     final roll = cameraRoll(all);
     if (!mounted) return;
     if (roll.isEmpty) {

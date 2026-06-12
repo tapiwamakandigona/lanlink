@@ -34,4 +34,18 @@ void main() {
       );
     });
   });
+
+  group('isFirstRun', () {
+    test('empty marker is a first run', () {
+      expect(isFirstRun(lastOnboardedVersion: ''), isTrue);
+    });
+
+    test('whitespace-only marker is a first run', () {
+      expect(isFirstRun(lastOnboardedVersion: '   '), isTrue);
+    });
+
+    test('any recorded version means not a first run', () {
+      expect(isFirstRun(lastOnboardedVersion: '3.4.0'), isFalse);
+    });
+  });
 }

@@ -372,3 +372,7 @@ Awkward case. Neither can host a hotspot programmatically. Two options:
   this file before opening a PR. Don't silently drop entries from the
   "Active asks" list — strike them through with `~~text~~` once a PR is
   merged that addresses them.
+
+
+## v3.4.1
+- Simple-mode Direct Link, first-run mode chooser, fast picker, move-photos progress.

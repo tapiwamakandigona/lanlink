@@ -79,20 +79,37 @@ class MainActivity : FlutterActivity() {
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "lanlink/android_apps")
             .setMethodCallHandler { call, result ->
-                if (call.method != "listApps") {
-                    result.notImplemented()
-                    return@setMethodCallHandler
-                }
-                // App listing + icon rasterising touches the package manager
-                // for every installed app; keep it off the UI thread.
-                Thread {
-                    val apps = try {
-                        listLaunchableApps()
-                    } catch (_: Exception) {
-                        emptyList<Map<String, Any>>()
+                when (call.method) {
+                    // App listing touches the package manager for every
+                    // installed app; keep it off the UI thread. Icons are
+                    // deliberately not included — they load lazily below.
+                    "listApps" -> Thread {
+                        val apps = try {
+                            listLaunchableApps()
+                        } catch (_: Exception) {
+                            emptyList<Map<String, Any>>()
+                        }
+                        runOnUiThread { result.success(apps) }
+                    }.start()
+                    // One launcher icon at a time, fetched as rows become
+                    // visible — keeps the Apps tab paint instant.
+                    "appIcon" -> {
+                        val pkg = call.argument<String>("packageName")
+                        if (pkg == null) {
+                            result.success(null)
+                            return@setMethodCallHandler
+                        }
+                        Thread {
+                            val bytes = try {
+                                appIconPng(pkg)
+                            } catch (_: Exception) {
+                                null
+                            }
+                            runOnUiThread { result.success(bytes) }
+                        }.start()
                     }
-                    runOnUiThread { result.success(apps) }
-                }.start()
+                    else -> result.notImplemented()
+                }
             }
 
         // Media library (photos + videos) for the share picker and the
@@ -301,7 +318,6 @@ class MainActivity : FlutterActivity() {
                 "apkPath" to apk.absolutePath,
                 "size" to apk.length(),
             )
-            appIconPng(packageName)?.let { map["icon"] = it }
             map
         }.distinctBy { it["packageName"] as String }
     }

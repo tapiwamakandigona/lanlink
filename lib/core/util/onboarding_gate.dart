@@ -11,3 +11,9 @@ bool shouldShowOnboarding({
   if (seen.isEmpty) return true; // never onboarded
   return seen != currentVersion.trim(); // onboarded on an older build
 }
+
+/// True when the app has never completed onboarding — i.e. a genuine first
+/// install rather than an update. Used to decide whether to ask the user to
+/// pick Simple vs Full mode during setup.
+bool isFirstRun({required String lastOnboardedVersion}) =>
+    lastOnboardedVersion.trim().isEmpty;

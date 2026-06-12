@@ -53,4 +53,17 @@ class AndroidApps {
         .toList()
       ..sort((a, b) => a.label.toLowerCase().compareTo(b.label.toLowerCase()));
   }
+
+  /// Fetches one app's launcher icon as a small PNG. Returns null when the
+  /// platform can't draw it. Kept separate from [listLaunchableApps] so the
+  /// list itself stays instant; callers cache per package name.
+  static Future<Uint8List?> appIcon(String packageName) async {
+    if (!isSupported) return null;
+    try {
+      return await _channel
+          .invokeMethod<Uint8List>('appIcon', {'packageName': packageName});
+    } catch (_) {
+      return null;
+    }
+  }
 }

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -28,12 +29,18 @@ class SharePickerPage extends StatefulWidget {
     this.loadMedia = MediaLibrary.listMedia,
     this.loadApps = AndroidApps.listLaunchableApps,
     this.thumbnailLoader = _defaultThumbnail,
+    this.appIconLoader = AndroidApps.appIcon,
   });
 
   final SharePickerTab initialTab;
   final Future<List<MediaItem>> Function() loadMedia;
   final Future<List<AndroidAppInfo>> Function() loadApps;
   final Future<Uint8List?> Function(MediaItem item) thumbnailLoader;
+
+  /// Lazily fetches one app's launcher icon. Icons are deliberately not
+  /// part of [loadApps] any more: rasterising hundreds of icons up front
+  /// was what made the Apps tab feel slow.
+  final Future<Uint8List?> Function(String packageName) appIconLoader;
 
   static Future<Uint8List?> _defaultThumbnail(MediaItem item) =>
       MediaLibrary.thumbnail(item.id, isVideo: item.isVideo);
@@ -59,10 +66,12 @@ class _SharePickerPageState extends State<SharePickerPage>
   late final TabController _tabs;
   final _searchController = TextEditingController();
   final _thumbCache = <int, Future<Uint8List?>>{};
+  final _iconCache = <String, Future<Uint8List?>>{};
 
   List<MediaItem>? _media;
   List<AndroidAppInfo>? _apps;
-  bool _loadFailed = false;
+  bool _mediaFailed = false;
+  bool _appsFailed = false;
 
   final _selectedMedia = <int, MediaItem>{};
   final _selectedApps = <String, AndroidAppInfo>{};
@@ -78,19 +87,29 @@ class _SharePickerPageState extends State<SharePickerPage>
     _load();
   }
 
-  Future<void> _load() async {
-    try {
-      final results =
-          await Future.wait([widget.loadMedia(), widget.loadApps()]);
-      if (!mounted) return;
-      setState(() {
-        _media = results[0] as List<MediaItem>;
-        _apps = results[1] as List<AndroidAppInfo>;
-      });
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => _loadFailed = true);
-    }
+  /// Photos and apps load independently so the faster tab paints as soon
+  /// as its data arrives instead of waiting for the slower one.
+  void _load() {
+    unawaited(() async {
+      try {
+        final media = await widget.loadMedia();
+        if (!mounted) return;
+        setState(() => _media = media);
+      } catch (_) {
+        if (!mounted) return;
+        setState(() => _mediaFailed = true);
+      }
+    }());
+    unawaited(() async {
+      try {
+        final apps = await widget.loadApps();
+        if (!mounted) return;
+        setState(() => _apps = apps);
+      } catch (_) {
+        if (!mounted) return;
+        setState(() => _appsFailed = true);
+      }
+    }());
   }
 
   @override
@@ -216,8 +235,9 @@ class _SharePickerPageState extends State<SharePickerPage>
     );
   }
 
-  Widget _emptyState(ThemeData theme, IconData icon, String message) {
-    if (_loadFailed) {
+  Widget _emptyState(ThemeData theme, IconData icon, String message,
+      {bool failed = false}) {
+    if (failed) {
       return Center(
         child: Text(
           'Could not read the library.\nCheck the media permission in '
@@ -242,7 +262,7 @@ class _SharePickerPageState extends State<SharePickerPage>
   // ----- Photos & videos -----
 
   Widget _photosTab(ThemeData theme, List<MediaItem> media) {
-    if (_media == null && !_loadFailed) {
+    if (_media == null && !_mediaFailed) {
       return const Center(child: CircularProgressIndicator());
     }
     if (media.isEmpty) {
@@ -250,6 +270,7 @@ class _SharePickerPageState extends State<SharePickerPage>
         theme,
         Icons.photo_library_outlined,
         'No photos or videos found.',
+        failed: _mediaFailed,
       );
     }
     final allSelected = media.isNotEmpty &&
@@ -385,11 +406,12 @@ class _SharePickerPageState extends State<SharePickerPage>
   // ----- Apps -----
 
   Widget _appsTab(ThemeData theme, List<AndroidAppInfo> apps) {
-    if (_apps == null && !_loadFailed) {
+    if (_apps == null && !_appsFailed) {
       return const Center(child: CircularProgressIndicator());
     }
     if (apps.isEmpty) {
-      return _emptyState(theme, Icons.apps, 'No shareable apps found.');
+      return _emptyState(theme, Icons.apps, 'No shareable apps found.',
+          failed: _appsFailed);
     }
     return ListView.builder(
       padding: const EdgeInsets.fromLTRB(8, 4, 8, 16),
@@ -407,15 +429,7 @@ class _SharePickerPageState extends State<SharePickerPage>
               _selectedApps.remove(app.packageName);
             }
           }),
-          secondary: app.icon != null
-              ? ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: Image.memory(app.icon!, width: 40, height: 40),
-                )
-              : CircleAvatar(
-                  backgroundColor: theme.colorScheme.surfaceContainerHighest,
-                  child: const Icon(Icons.android),
-                ),
+          secondary: _appIcon(theme, app),
           title: Text(app.label, overflow: TextOverflow.ellipsis),
           subtitle: Text(
             '${app.packageName} • ${formatBytes(app.size)}',
@@ -423,6 +437,40 @@ class _SharePickerPageState extends State<SharePickerPage>
           ),
         );
       },
+    );
+  }
+
+  /// Lazily loaded launcher icon: the list paints instantly and icons
+  /// stream in as rows become visible (same pattern as photo thumbnails).
+  Widget _appIcon(ThemeData theme, AndroidAppInfo app) {
+    final placeholder = CircleAvatar(
+      backgroundColor: theme.colorScheme.surfaceContainerHighest,
+      child: const Icon(Icons.android),
+    );
+    if (app.icon != null) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Image.memory(app.icon!, width: 40, height: 40),
+      );
+    }
+    final future = _iconCache.putIfAbsent(
+      app.packageName,
+      () => widget.appIconLoader(app.packageName),
+    );
+    return SizedBox(
+      width: 40,
+      height: 40,
+      child: FutureBuilder<Uint8List?>(
+        future: future,
+        builder: (context, snapshot) {
+          final bytes = snapshot.data;
+          if (bytes == null) return placeholder;
+          return ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Image.memory(bytes, width: 40, height: 40),
+          );
+        },
+      ),
     );
   }
 }
