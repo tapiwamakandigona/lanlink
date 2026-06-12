@@ -376,3 +376,19 @@ Awkward case. Neither can host a hotspot programmatically. Two options:
 
 ## v3.4.1
 - Simple-mode Direct Link, first-run mode chooser, fast picker, move-photos progress.
+
+## v3.5.0
+- Connect-first Simple mode (Nicole's design): Receive shows an instant QR
+  (auto-starts a LocalOnlyHotspot with creds baked into the QR when there's
+  no Wi-Fi); Send opens a camera scanner + nearby-device list; one scan
+  joins the hotspot programmatically on Android 10+ (WifiNetworkSpecifier)
+  and lands both devices on a "Connected to X" session screen with
+  two-way send (photos & apps / files) and per-transfer progress.
+- "Connect to a computer" button on the Simple home (PC shows the QR,
+  phone scans). "No Wi-Fi here? Host a hotspot" page shows SSID+password
+  big for laptops to join manually; auto-advances to the session when the
+  peer appears. Laptop↔laptop offline remains Windows Mobile Hotspot
+  guidance — no portable Wi-Fi Direct API exists.
+- New: lanlink://connect payload (back-compat with lanlink://pair),
+  lanlink/wifi platform channel. AppState.forScreenshots is now
+  network-silent so widget tests can pump pages that trigger discovery.

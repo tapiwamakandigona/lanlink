@@ -41,14 +41,16 @@ class AppState extends ChangeNotifier {
     required String fingerprint,
     required List<String> localIps,
   })  : _fingerprint = fingerprint,
-        _localIps = localIps;
+        _localIps = localIps,
+        _networkSilent = false;
 
   /// Test-only: a minimal AppState for widget screenshots/goldens.
   /// Does not start any network services.
   @visibleForTesting
   AppState.forScreenshots({required this.settings})
       : _fingerprint = 'test-fingerprint',
-        _localIps = const ['192.168.1.10'] {
+        _localIps = const ['192.168.1.10'],
+        _networkSilent = true {
     // Late fields the UI reads during build; never started, so they stay
     // network-silent in tests.
     _updateChecker = UpdateChecker();
@@ -57,6 +59,10 @@ class AppState extends ChangeNotifier {
   final AppSettings settings;
   final String _fingerprint;
   final List<String> _localIps;
+
+  /// True on [forScreenshots] instances: network-touching calls become
+  /// no-ops so widget tests can exercise pages that kick off discovery.
+  final bool _networkSilent;
 
   late Receiver _receiver;
   late Sender _sender;
@@ -189,6 +195,7 @@ class AppState extends ChangeNotifier {
   /// the refresh button in the home page and the mode-switch handler so
   /// changing modes immediately rediscovers peers.
   Future<void> refreshDiscovery() async {
+    if (_networkSilent) return;
     _discovery.poke();
     // Re-probe peers we already know about (including manually-added ones)
     // so renamed devices show their current alias instead of a stale one.

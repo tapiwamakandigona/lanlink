@@ -3,7 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:lanlink/core/settings/app_settings.dart';
 import 'package:lanlink/core/theme/app_theme.dart';
 import 'package:lanlink/state/app_state.dart';
-import 'package:lanlink/ui/hotspot/direct_link_page.dart';
+import 'package:lanlink/ui/simple/connect/send_connect_page.dart';
 import 'package:lanlink/ui/simple/simple_home_page.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -19,7 +19,7 @@ void main() {
     });
   });
 
-  testWidgets('Simple mode offers Direct Link and opens the page',
+  testWidgets('Simple mode offers Connect to a computer and opens the page',
       (tester) async {
     late AppState state;
     await tester.runAsync(() async {
@@ -39,11 +39,12 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 100));
 
-    final button = find.text('No Wi-Fi? Connect directly');
+    final button = find.text('Connect to a computer');
     expect(button, findsOneWidget);
 
     await tester.tap(button);
-    await tester.pumpAndSettle();
-    expect(find.byType(DirectLinkPage), findsOneWidget);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byType(SendConnectPage), findsOneWidget);
   });
 }

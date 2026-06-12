@@ -47,6 +47,75 @@ class MainActivity : FlutterActivity() {
     /// hosting a direct link. Closing it tears the hotspot down.
     private var hotspotReservation: WifiManager.LocalOnlyHotspotReservation? = null
 
+    // ----- Programmatic hotspot join (Simple-mode one-scan connect) -----
+
+    private var wifiNetworkCallback: android.net.ConnectivityManager.NetworkCallback? = null
+
+    /**
+     * Joins the given WPA2 hotspot with WifiNetworkSpecifier (API 29+) and
+     * binds the process to that network so the app's sockets route over it.
+     * Resolves the Flutter result exactly once: true when connected, false
+     * on unavailability or after a 30 s timeout.
+     */
+    private fun joinHotspotNetwork(ssid: String, password: String, result: MethodChannel.Result) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            result.success(false)
+            return
+        }
+        leaveHotspotNetwork()
+        val cm = getSystemService(android.net.ConnectivityManager::class.java)
+        val specifier = android.net.wifi.WifiNetworkSpecifier.Builder()
+            .setSsid(ssid)
+            .apply { if (password.isNotEmpty()) setWpa2Passphrase(password) }
+            .build()
+        val request = android.net.NetworkRequest.Builder()
+            .addTransportType(android.net.NetworkCapabilities.TRANSPORT_WIFI)
+            .removeCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .setNetworkSpecifier(specifier)
+            .build()
+        val handler = Handler(Looper.getMainLooper())
+        var settled = false
+        fun settle(ok: Boolean) {
+            if (settled) return
+            settled = true
+            result.success(ok)
+        }
+        val callback = object : android.net.ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: android.net.Network) {
+                cm.bindProcessToNetwork(network)
+                handler.post { settle(true) }
+            }
+
+            override fun onUnavailable() {
+                handler.post { settle(false) }
+            }
+        }
+        wifiNetworkCallback = callback
+        try {
+            cm.requestNetwork(request, callback)
+        } catch (e: Exception) {
+            wifiNetworkCallback = null
+            settle(false)
+            return
+        }
+        // Belt-and-braces timeout in case neither callback fires.
+        handler.postDelayed({ settle(false) }, 30_000)
+    }
+
+    /** Unbinds the process and releases any pending hotspot-join request. */
+    private fun leaveHotspotNetwork() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+        val cm = getSystemService(android.net.ConnectivityManager::class.java)
+        cm.bindProcessToNetwork(null)
+        wifiNetworkCallback?.let {
+            try {
+                cm.unregisterNetworkCallback(it)
+            } catch (_: Exception) {
+            }
+        }
+        wifiNetworkCallback = null
+    }
+
     /// Result waiting for the runtime-permission dialog that gates
     /// startLocalOnlyHotspot (location / nearby-devices).
     private var hotspotPermissionResult: MethodChannel.Result? = null
@@ -244,6 +313,30 @@ class MainActivity : FlutterActivity() {
                         result.success(true)
                     }
                     "isRunning" -> result.success(hotspotReservation != null)
+                    else -> result.notImplemented()
+                }
+            }
+
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "lanlink/wifi")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "isSupported" ->
+                        result.success(Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
+                    "join" -> {
+                        val ssid = call.argument<String>("ssid")
+                        val pass = call.argument<String>("password") ?: ""
+                        if (ssid.isNullOrEmpty() ||
+                            Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
+                        ) {
+                            result.success(false)
+                        } else {
+                            joinHotspotNetwork(ssid, pass, result)
+                        }
+                    }
+                    "leave" -> {
+                        leaveHotspotNetwork()
+                        result.success(true)
+                    }
                     else -> result.notImplemented()
                 }
             }
