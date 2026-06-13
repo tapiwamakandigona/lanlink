@@ -1,8 +1,8 @@
 # LanLink
 
-> Fast, reliable local file sharing between Windows, macOS, Android and iOS. Same Wi-Fi, same hotspot, no internet, no account, no cloud.
+> Fast, reliable local file sharing between Windows, macOS, Linux, Android and iOS. Same Wi-Fi, same hotspot, no internet, no account, no cloud.
 
-LanLink is a single Flutter codebase that runs on **Android 8+**, **iOS 12+**, **Windows 10/11** and **macOS 10.15+**. Every running instance hosts its own HTTP server and announces itself on the local network, so transfers are peer-to-peer — PC ↔ phone, phone ↔ phone, phone ↔ Mac, Mac ↔ PC all work the same way.
+LanLink is a single Flutter codebase that runs on **Android 8+**, **iOS 12+**, **Windows 10/11**, **macOS 10.15+** and **Linux**. Every running instance hosts its own HTTP server and announces itself on the local network, so transfers are peer-to-peer — PC ↔ phone, phone ↔ phone, phone ↔ Mac, Mac ↔ PC all work the same way.
 
 LanLink speaks the [LocalSend v2 wire protocol](https://github.com/localsend/protocol), so it can also interoperate with LocalSend out of the box.
 
@@ -42,7 +42,7 @@ LanLink speaks the [LocalSend v2 wire protocol](https://github.com/localsend/pro
 - **Copyable diagnostics.** Settings → Help & diagnostics → **Copy diagnostics** puts a short, local-only activity log on your clipboard for bug reports. Nothing is ever sent anywhere.
 - **Optional in-app update checker.** Polls the GitHub Releases API in the background and surfaces a dismissible "Update available" banner. Tap the banner (or **Settings → Updates → Check now**) to see the release notes and download the binary for your platform directly — never a link to the source code, and never a forced install.
 - **Smaller Android downloads.** R8 + resource shrinking and per-ABI APK splits cut the typical Android install size by roughly 60% versus a fat universal APK. CI publishes per-architecture APKs alongside the universal one — installing `lanlink-vX.Y.Z-arm64-v8a.apk` on a modern phone gives you a ~25 MB download instead of ~65 MB.
-- **Reproducible CI builds:** every PR produces a downloadable debug APK + Windows zip + macOS .app + unsigned iOS .app, and tags produce signed release APKs (per-ABI + universal) + NSIS Windows installer + macOS .dmg / .zip + unsigned iOS .ipa.
+- **Reproducible CI builds:** every PR produces a downloadable debug APK + Windows zip + macOS .app + unsigned iOS .app, and tags produce signed release APKs (per-ABI + universal) + NSIS Windows installer + macOS .dmg / .zip + unsigned iOS .ipa + Linux AppImage / tar.gz.
 
 ---
 

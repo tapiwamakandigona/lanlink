@@ -12,7 +12,7 @@ LanLink v1 was an Electron + Capacitor app that relied on WebSocket message-pass
 
 ## Goals for v2
 
-- **Cross-platform from one codebase**: Android 8+ and Windows 10/11.
+- **Cross-platform from one codebase**: Android 8+, iOS 12+, Windows 10/11, macOS 10.15+, and Linux.
 - **Symmetric peers**: every device is both sender and receiver.
 - **Streaming I/O**: constant memory regardless of file size.
 - **No internet required**: pure LAN, no relays, no accounts.
@@ -86,12 +86,12 @@ We considered `riverpod`, `bloc`, and `flutter_redux`. All would work, but for a
 
 Settings (alias, save folder, trusted fingerprints, quick-save toggle, port override) live in `SharedPreferences`. The data is small (a handful of keys), and the plugin is supported on every Flutter target. We avoided pulling in a full SQLite layer (`drift`, `sqflite`) until we have a feature that needs it (e.g. a persistent transfer history).
 
-In-app transfer history is currently in-memory; the History page reads `AppState.sessions`. Persisting it across restarts is a follow-up — the data model already separates session metadata from per-file progress, so the migration to `drift` will be small when we want it.
+In-app transfer history is now persisted across restarts via `TransferHistoryStore`, which serialises terminal-state sessions to `SharedPreferences` (debounced, capped at 200 entries). The `AppState` reloads them on startup. A future migration to `drift` would mainly add query flexibility and relational indexing — not needed yet.
 
 ### Build + CI
 
-- **CI (`.github/workflows/ci.yml`)** runs on every pull request and push to `main`. Three jobs: `analyze-and-test` (formatting + static analysis + unit tests), `build-android` (debug APK), and `build-windows` (release zip). Artifacts are uploaded so reviewers can sideload them without a local toolchain.
-- **Release (`.github/workflows/release.yml`)** runs on tags matching `v*`. It produces a signed release APK (using either repository-secret keystore values or a CI-generated keystore as a fallback) and a Windows NSIS installer, then attaches both to a GitHub Release.
+- **CI (`.github/workflows/ci.yml`)** runs on every pull request and push to `main`. Five jobs: `analyze-and-test` (formatting + static analysis + unit tests), `build-android` (debug APK), `build-windows` (release zip), `build-macos` (release zip), and `build-ios` (unsigned .app). Artifacts are uploaded so reviewers can sideload them without a local toolchain.
+- **Release (`.github/workflows/release.yml`)** runs on tags matching `v*`. It produces signed release APKs (per-ABI splits + universal, using either repository-secret keystore values or a CI-generated keystore as a fallback), a Windows NSIS installer, a macOS .dmg, a Linux AppImage + tar.gz, and an unsigned iOS .ipa. All assets are attached to a GitHub Release and mirrored to the public `lanlink-downloads` repo.
 - Flutter is pinned to **3.24.5 (channel stable)** in both workflows for reproducibility; bump it in both files when upgrading.
 
 The release APK keystore handling deserves a note: we prefer real signing keys (`SIGNING_KEY_BASE64`, `SIGNING_STORE_PASSWORD`, `SIGNING_KEY_ALIAS`, `SIGNING_KEY_PASSWORD` repo secrets), but fall back to a fresh CI-generated keystore if those secrets aren't configured. This keeps the workflow green out of the box, at the cost of stable upgrades (Android will refuse to upgrade an APK whose signer changed). Production-quality releases should set the secrets.
@@ -102,7 +102,7 @@ These are deliberately deferred from v2.0; they are tracked here so they aren't 
 
 1. **TLS + fingerprint pinning.** LocalSend v2 supports HTTPS with self-signed certificates and trust-on-first-use. We ship HTTP-only for v2.0 to keep cert generation out of the critical path; the Sender/Receiver classes already speak the URL-scheme abstraction, so adding TLS is a self-contained change.
 2. **mDNS** as a second discovery layer for networks that allow mDNS but block link-local multicast.
-3. **Background receiving on Android.** The current build keeps the HTTP server alive only while the app is foregrounded; a foreground service with notification channel is required for "receive while the screen is off". Android 14 makes this stricter (`foregroundServiceType="dataSync"`), which needs explicit declaration in the manifest.
-4. **Persistent history** via `drift`.
+3. ~~**Background receiving on Android.**~~ ✅ Resolved — `TransferForegroundService` (Kotlin) keeps the process alive during transfers with `foregroundServiceType="dataSync"` declared in the manifest. Per-session progress notifications are posted by `TransferNotifier`.
+4. ~~**Persistent history**~~ ✅ Resolved — `TransferHistoryStore` persists sessions to `SharedPreferences` (see Persistence section above).
 5. **Real production code-signing certs** on both platforms (Play Store upload key for Android, EV cert for Windows). v2.0 ships unsigned installers and CI-keystore APKs to unblock sideload testing.
-6. **App icon and branding.** The Flutter default placeholder icon is in place; design assets are a follow-up.
+6. ~~**App icon and branding.**~~ ✅ Resolved — custom LanLink icons are in place across all platforms.
