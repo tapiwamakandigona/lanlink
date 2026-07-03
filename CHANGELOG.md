@@ -1,5 +1,32 @@
 # Changelog
 
+## 4.1.0 (+15) — "Seamless Direct"
+
+### Direct Connect — works without shared Wi-Fi
+- Receive screen gains a **Same Wi-Fi / No shared Wi-Fi** switch. In Direct link mode the app hosts a LocalOnlyHotspot itself (no trip to system Settings) and bakes the credentials into the QR.
+- Sender scan flow: probe the peer on the current network (~1.5 s) → if unreachable and the QR carries hotspot credentials, auto-join via WifiNetworkSpecifier (Android 10+) and continue the normal token + fingerprint pairing. Android 9 and below, iOS, and desktop guests get the SSID/password shown under the QR for manual join.
+- Fixed stale pairing-guide copy referencing the removed v3 hotspot button.
+
+### Media picker fixed + any-file sending
+- Root cause of the empty media grid: the runtime permission request was never invoked. First open now shows the OS permission sheet, then the grid loads; a twice-denied state gets an inline explainer with an "Open settings" deep link.
+- New **All files** tab: system document picker (any type, multi-select) — zips, APKs, PDFs, anything.
+
+### Bidirectional sessions + disconnect
+- Sessions are now symmetric: after pairing, the receiver sees the peer on the home screen with a **Send files** button — no re-scan needed. Pinned fingerprint + token trust applies in both directions.
+- **Disconnect / Unpair** on the connected-peer card: notifies the peer over a bounded control route, clears session tokens on both sides, tears down the hotspot if hosting, and returns both devices to idle. Disconnect also clears the verified badge; the peer must re-pair to reconnect. The post-disconnect block is in-memory — after an app restart the peer still faces the normal consent prompt.
+
+### Invite a friend (Android)
+- Settings entry that shares the app's own APK (version-stamped) via the system share sheet — Bluetooth/Nearby/Quick Share. Falls back to a download link on split-APK installs. Receiver must allow "install unknown apps" (OS rule).
+
+### Performance
+- Eliminated rebuild storms: transfer progress ticks no longer rebuild whole pages; tighter setState scopes and selector-based listening.
+- QR and theme caching, RepaintBoundary around continuously animating surfaces, builder-virtualized lists, display-size image decoding, high-refresh-rate mode on capable devices, subnet sweep throttled during active transfers.
+
+### Known limitations (deliberate for 4.1.0)
+- Hotspot SSID/password are OS-randomized per session and the guest has no internet while joined (Android platform rule for all non-system apps).
+- The auto-join "Connect to device?" dialog is OS-owned and cannot be suppressed.
+- Protocol security remains app-layer token + fingerprint pinning over plain HTTP; TLS is a future item.
+
 ## 4.0.0 (+14)
 
 Complete rethink of the app on top of the v3.5 engine. One app, two verbs, hardened protocol.

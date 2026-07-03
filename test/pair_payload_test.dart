@@ -56,6 +56,39 @@ void main() {
       );
     });
 
+    test('round-trips hotspot credentials for the Direct link flow', () {
+      const original = PairPayload(
+        ip: '192.168.49.1',
+        port: 53317,
+        alias: 'Pixel',
+        fingerprint: 'fp',
+        ssid: 'AndroidShare_1234',
+        password: 'p4ss w0rd&=',
+      );
+      final parsed = PairPayload.tryParse(original.toQrString());
+      expect(parsed, isNotNull);
+      expect(parsed!.ssid, original.ssid);
+      expect(parsed.password, original.password);
+      expect(parsed.needsHotspotJoin, isTrue);
+    });
+
+    test('backward compat: QRs without creds parse and need no join', () {
+      // Exactly the pre-v4.1 wire shape.
+      final parsed = PairPayload.tryParse(
+        'lanlink://pair?ip=192.168.1.42&port=53317&alias=Pixel&fp=abcd',
+      );
+      expect(parsed, isNotNull);
+      expect(parsed!.ssid, isNull);
+      expect(parsed.password, isNull);
+      expect(parsed.needsHotspotJoin, isFalse);
+    });
+
+    test('omits ssid/pass params when no credentials are set', () {
+      const p = PairPayload(ip: '10.0.0.5', port: 1234, alias: 'pc');
+      expect(p.toQrString().contains('ssid='), isFalse);
+      expect(p.toQrString().contains('pass='), isFalse);
+    });
+
     test('hostPort joins ip and port for legacy probe paths', () {
       const p = PairPayload(ip: '1.2.3.4', port: 1234, alias: 'x');
       expect(p.hostPort, '1.2.3.4:1234');

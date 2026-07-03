@@ -390,6 +390,8 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+
+        AppInvite.register(this, flutterEngine.dartExecutor.binaryMessenger)
     }
 
     private fun listLaunchableApps(): List<Map<String, Any>> {

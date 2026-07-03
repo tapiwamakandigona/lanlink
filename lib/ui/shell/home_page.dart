@@ -4,12 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/models/file_info.dart';
-import '../../core/models/session.dart';
 import '../../core/platform/incoming_share.dart';
 import '../../state/app_state.dart';
 import '../v4/v4.dart';
+import '../widgets/connected_peer_card.dart';
+import '../widgets/live_session_card.dart';
 import '../widgets/update_available_banner.dart';
-import 'saved_location.dart';
 import 'send_page.dart';
 import 'session_display.dart';
 
@@ -99,6 +99,24 @@ class _HomePageState extends State<HomePage> {
                   onSend: () => Navigator.of(context).pushNamed('/send'),
                   onReceive: () => Navigator.of(context).pushNamed('/receive'),
                 ),
+                // Symmetric sessions (F3): every linked peer gets a strip
+                // with "Send files" (no re-scan needed) and Disconnect.
+                if (state.linkedPeers.isNotEmpty) ...[
+                  const SizedBox(height: VSpace.x6),
+                  for (final peer in state.linkedPeers) ...[
+                    ConnectedPeerCard(
+                      peerName: displayPeerName(state.settings, peer),
+                      verified: state.settings.isPinned(peer.fingerprint),
+                      onSendFiles: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => SendPage(targetPeer: peer),
+                        ),
+                      ),
+                      onDisconnect: () => unawaited(state.disconnectPeer(peer)),
+                    ),
+                    const SizedBox(height: VSpace.x3),
+                  ],
+                ],
                 if (clusters.isNotEmpty) ...[
                   const SizedBox(height: VSpace.x6),
                   Row(
@@ -144,7 +162,10 @@ class _ClusterView extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     if (cluster.sessions.length == 1) {
-      return _card(context, cluster.sessions.first);
+      return LiveSessionCard(
+        session: cluster.sessions.first,
+        state: state,
+      );
     }
     final peer = cluster.sessions.first.peer;
     return Container(
@@ -168,37 +189,13 @@ class _ClusterView extends StatelessWidget {
           ),
           for (final (i, s) in cluster.sessions.indexed) ...[
             if (i > 0) const SizedBox(height: VSpace.x2),
-            _card(context, s),
+            LiveSessionCard(session: s, state: state),
           ],
         ],
       ),
     );
   }
 
-  Widget _card(BuildContext context, TransferSession session) {
-    final card = SessionCard(
-      data: sessionCardData(
-        session,
-        peerName: displayPeerName(state.settings, session.peer),
-      ),
-      onStop: () => unawaited(state.cancelSession(session)),
-      // Only offer "Try again" when a retry can actually do something
-      // (outgoing send whose source files still exist on disk).
-      onRetry: AppState.canRetry(session)
-          ? () => unawaited(state.retrySession(session))
-          : null,
-      onDismiss: () => state.dismissSession(session),
-      onLocate: session.direction == TransferDirection.receive &&
-              session.status == TransferStatus.completed
-          ? () => showSavedLocationDialog(context, session)
-          : null,
-    );
-    if (!session.isTerminal) return card;
-    // Terminal cards can also be swiped away.
-    return Dismissible(
-      key: ObjectKey(session),
-      onDismissed: (_) => state.dismissSession(session),
-      child: card,
-    );
-  }
+  // Each card subscribes to its own TransferSession inside LiveSessionCard,
+  // so 10 Hz progress ticks repaint one card — not this whole page.
 }

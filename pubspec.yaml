@@ -1,7 +1,7 @@
 name: lanlink
 description: "LanLink — cross-platform LAN file sharing for Windows, macOS, Android, and iOS."
 publish_to: 'none'
-version: 4.0.0+14
+version: 4.1.0+15
 
 environment:
   sdk: ^3.5.4
@@ -43,6 +43,9 @@ dependencies:
 
   # Drag-and-drop file targets on Windows, macOS and Linux desktop.
   desktop_drop: ^0.4.4
+
+  # Unlock 90/120 Hz on Android OEMs that cap Flutter at 60 Hz.
+  flutter_displaymode: ^0.6.0
 
 dev_dependencies:
   flutter_test:

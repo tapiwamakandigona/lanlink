@@ -3,6 +3,32 @@ import 'package:qr_flutter/qr_flutter.dart';
 
 import '../theme/tokens.dart';
 
+/// Encodes [payload] into a [QrCode] exactly once per distinct string.
+///
+/// qr_flutter's plain `QrImageView` re-runs the full QR encode inside
+/// `build()` on every rebuild; on the receive screen that build fires on
+/// every AppState notify (10 Hz during transfers), which drops frames.
+/// A tiny keyed cache keeps the panel cheap no matter how often the
+/// parent rebuilds.
+QrCode qrCodeForPayload(String payload) {
+  final cached = _qrCache[payload];
+  if (cached != null) return cached;
+  // The receive surface only ever shows a handful of payloads per run
+  // (payload changes on token rotation); keep the cache tiny.
+  if (_qrCache.length >= _qrCacheCap) {
+    _qrCache.remove(_qrCache.keys.first);
+  }
+  final code = QrCode.fromData(
+    data: payload,
+    errorCorrectLevel: QrErrorCorrectLevel.L,
+  );
+  _qrCache[payload] = code;
+  return code;
+}
+
+const _qrCacheCap = 4;
+final _qrCache = <String, QrCode>{};
+
 /// Receive side: shows this device's pairing QR on a paper card with a
 /// friendly caption. The [payload] is opaque to this component.
 class QrDisplayPanel extends StatelessWidget {
@@ -43,9 +69,8 @@ class QrDisplayPanel extends StatelessWidget {
               color: VQr.plate,
               borderRadius: VRadius.smAll,
             ),
-            child: QrImageView(
-              data: payload,
-              version: QrVersions.auto,
+            child: QrImageView.withQr(
+              qr: qrCodeForPayload(payload),
               size: size,
               gapless: true,
               eyeStyle: const QrEyeStyle(

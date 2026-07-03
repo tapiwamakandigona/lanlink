@@ -3,7 +3,8 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:permission_handler/permission_handler.dart';
+
+import 'media_permissions.dart';
 
 /// One photo or video from the device's media library (Android MediaStore).
 class MediaItem {
@@ -58,23 +59,11 @@ class MediaLibrary {
   static bool get isSupported => debugForceSupported || Platform.isAndroid;
 
   /// Asks for whichever runtime permission the OS needs to read the media
-  /// library (READ_MEDIA_IMAGES/VIDEO on Android 13+, storage before).
-  /// Returns true when reading is allowed.
-  static Future<bool> ensurePermission() async {
-    if (!isSupported) return false;
-    try {
-      // permission_handler maps Permission.photos/videos to the granular
-      // Android 13+ permissions and to READ_EXTERNAL_STORAGE on 12-.
-      final photos = await Permission.photos.request();
-      final videos = await Permission.videos.request();
-      if (photos.isGranted || videos.isGranted) return true;
-      final storage = await Permission.storage.request();
-      return storage.isGranted;
-    } catch (_) {
-      // Older OS where a permission constant is moot — try anyway.
-      return true;
-    }
-  }
+  /// library (READ_MEDIA_* on Android 13+, storage before). Callers that
+  /// need the denied/permanently-denied distinction should use
+  /// [MediaPermissions.request] directly.
+  static Future<bool> ensurePermission() async =>
+      await MediaPermissions.request() == MediaAccess.granted;
 
   /// Every photo and video on the device, newest first.
   static Future<List<MediaItem>> listMedia() async {

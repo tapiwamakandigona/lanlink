@@ -23,10 +23,8 @@ class IncomingShare {
     try {
       final result = await _channel.invokeMethod<List<dynamic>>('consume');
       if (result == null) return const [];
-      return result
-          .map((e) => _decode(e))
-          .whereType<FileInfo>()
-          .toList(growable: false);
+      final decoded = await Future.wait(result.map(_decode));
+      return decoded.whereType<FileInfo>().toList(growable: false);
     } on MissingPluginException {
       return const [];
     } on PlatformException {
@@ -46,7 +44,7 @@ class IncomingShare {
     });
   }
 
-  static FileInfo? _decode(dynamic raw) {
+  static Future<FileInfo?> _decode(dynamic raw) async {
     if (raw is! Map) return null;
     final map = Map<String, dynamic>.from(raw);
     final path = map['path']?.toString();
@@ -55,7 +53,7 @@ class IncomingShare {
     if (path == null || name == null || path.isEmpty || name.isEmpty) {
       return null;
     }
-    final actualSize = size >= 0 ? size : _safeFileSize(path);
+    final actualSize = size >= 0 ? size : await _safeFileSize(path);
     return FileInfo(
       id: 'incoming-${DateTime.now().microsecondsSinceEpoch}-$name',
       fileName: name,
@@ -65,9 +63,11 @@ class IncomingShare {
     );
   }
 
-  static int _safeFileSize(String path) {
+  /// Async stat: this runs on the UI isolate during HomePage init, so the
+  /// one file-system touch here must never block frame production.
+  static Future<int> _safeFileSize(String path) async {
     try {
-      return File(path).lengthSync();
+      return await File(path).length();
     } catch (_) {
       return 0;
     }

@@ -83,6 +83,8 @@ class ConnectPayload {
         port: pair.port,
         alias: pair.alias,
         fingerprint: pair.fingerprint,
+        ssid: pair.ssid,
+        password: pair.password,
       );
     }
     if (uri.scheme != scheme || uri.host != host) return null;

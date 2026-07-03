@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:lanlink/core/models/file_info.dart';
 import 'package:lanlink/core/platform/android_apps.dart';
 import 'package:lanlink/core/platform/media_library.dart';
+import 'package:lanlink/core/platform/media_permissions.dart';
 import 'package:lanlink/ui/picker/share_picker_page.dart';
 
 AndroidAppInfo _app(String label, String pkg, int size, {Uint8List? icon}) =>
@@ -37,6 +38,9 @@ Future<_Result> _pump(
   required List<MediaItem> media,
   required List<AndroidAppInfo> apps,
   SharePickerTab tab = SharePickerTab.photos,
+  Future<MediaAccess> Function()? requestMediaAccess,
+  Future<bool> Function()? openSettings,
+  Future<List<FileInfo>> Function()? pickAnyFiles,
 }) async {
   final result = _Result();
   await tester.pumpWidget(
@@ -52,6 +56,10 @@ Future<_Result> _pump(
                     loadMedia: () async => media,
                     loadApps: () async => apps,
                     thumbnailLoader: (_) async => null,
+                    requestMediaAccess:
+                        requestMediaAccess ?? (() async => MediaAccess.granted),
+                    openSettings: openSettings ?? (() async => true),
+                    pickAnyFiles: pickAnyFiles ?? (() async => const []),
                   ),
                 ),
               );
@@ -66,6 +74,14 @@ Future<_Result> _pump(
   await tester.pumpAndSettle();
   return result;
 }
+
+FileInfo _pickedFile(String name, {int size = 100}) => FileInfo(
+      id: name,
+      fileName: name,
+      size: size,
+      fileType: fileTypeForName(name),
+      localPath: '/picked/$name',
+    );
 
 void main() {
   final media = [
@@ -147,7 +163,9 @@ void main() {
     expect(find.textContaining('1 item • '), findsOneWidget);
 
     await tester.enterText(find.byKey(const Key('picker-search')), 'calc');
-    await tester.pump();
+    // The filter is debounced (~200ms) so typing doesn't re-filter per
+    // keystroke — advance past the debounce window.
+    await tester.pump(const Duration(milliseconds: 250));
     expect(find.byKey(const Key('app-com.whatsapp')), findsNothing);
     expect(find.byKey(const Key('app-com.calc')), findsOneWidget);
 
@@ -252,5 +270,105 @@ void main() {
       matching: find.byType(Image),
     );
     expect(image, findsOneWidget);
+  });
+
+  testWidgets('denied media access shows explainer, Allow access recovers',
+      (tester) async {
+    var calls = 0;
+    await _pump(
+      tester,
+      media: media,
+      apps: apps,
+      requestMediaAccess: () async =>
+          ++calls == 1 ? MediaAccess.denied : MediaAccess.granted,
+    );
+
+    // No grid, no silent empty state — the explainer card instead.
+    expect(find.byKey(const Key('media-permission-card')), findsOneWidget);
+    expect(find.byKey(const Key('media-1')), findsNothing);
+    expect(find.byKey(const Key('media-allow-access')), findsOneWidget);
+    expect(find.byKey(const Key('media-open-settings')), findsNothing);
+
+    // Re-request granted (user tapped allow this time) → grid populates.
+    await tester.tap(find.byKey(const Key('media-allow-access')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('media-permission-card')), findsNothing);
+    expect(find.byKey(const Key('media-1')), findsOneWidget);
+    expect(calls, 2);
+  });
+
+  testWidgets('permanently denied shows Open settings deep link',
+      (tester) async {
+    var opened = false;
+    await _pump(
+      tester,
+      media: media,
+      apps: apps,
+      requestMediaAccess: () async => MediaAccess.permanentlyDenied,
+      openSettings: () async {
+        opened = true;
+        return true;
+      },
+    );
+
+    expect(find.byKey(const Key('media-permission-card')), findsOneWidget);
+    expect(find.byKey(const Key('media-allow-access')), findsNothing);
+
+    await tester.tap(find.byKey(const Key('media-open-settings')));
+    await tester.pump();
+    expect(opened, isTrue);
+  });
+
+  testWidgets('All files tab picks arbitrary files and stages them',
+      (tester) async {
+    final result = await _pump(
+      tester,
+      media: media,
+      apps: apps,
+      tab: SharePickerTab.files,
+      pickAnyFiles: () async => [
+        _pickedFile('backup.zip', size: 2048),
+        _pickedFile('notes.pdf', size: 512),
+      ],
+    );
+
+    await tester.tap(find.byKey(const Key('picker-browse-files')));
+    await tester.pumpAndSettle();
+
+    // Picked files are listed and pre-selected.
+    expect(find.text('backup.zip'), findsOneWidget);
+    expect(find.text('notes.pdf'), findsOneWidget);
+    expect(find.textContaining('2 items • '), findsOneWidget);
+
+    // Deselect one before adding.
+    await tester.tap(find.byKey(const Key('file-/picked/notes.pdf')));
+    await tester.pump();
+
+    await tester.tap(find.byKey(const Key('picker-add')));
+    await tester.pumpAndSettle();
+
+    final files = result.value!;
+    expect(files, hasLength(1));
+    expect(files.single.fileName, 'backup.zip');
+    expect(files.single.size, 2048);
+    expect(files.single.fileType, 'archive');
+    expect(files.single.localPath, '/picked/backup.zip');
+  });
+
+  testWidgets('cancelled system picker leaves the empty files tab intact',
+      (tester) async {
+    await _pump(
+      tester,
+      media: media,
+      apps: apps,
+      tab: SharePickerTab.files,
+      pickAnyFiles: () async => const [],
+    );
+
+    await tester.tap(find.byKey(const Key('picker-browse-files')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('picker-browse-files')), findsOneWidget);
+    expect(find.text('Nothing selected yet'), findsOneWidget);
   });
 }

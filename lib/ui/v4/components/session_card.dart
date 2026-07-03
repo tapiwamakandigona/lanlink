@@ -103,11 +103,15 @@ class SessionCard extends StatelessWidget {
           if (status == SessionStatus.transferring ||
               status == SessionStatus.waiting) ...[
             const SizedBox(height: VSpace.x4),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(999),
+            // RepaintBoundary keeps the indeterminate bar's per-frame
+            // repaints (waiting state) off the rest of the card/list layer;
+            // the widget's own borderRadius replaces the old ClipRRect so
+            // no clip is applied per repaint.
+            RepaintBoundary(
               child: LinearProgressIndicator(
                 value: status == SessionStatus.waiting ? null : data.progress,
                 minHeight: 6,
+                borderRadius: BorderRadius.circular(999),
               ),
             ),
             const SizedBox(height: VSpace.x2),

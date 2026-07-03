@@ -66,6 +66,23 @@ class Receiver {
   /// receiving side can learn (or refresh) the sender's alias and details.
   final void Function(Device peer)? onPeerSeen;
 
+  /// Called when a peer successfully redeems a connect token via
+  /// [LanLinkProtocol.routeConnect] *and* identifies itself with a usable
+  /// fingerprint. This is the receiver-side half of symmetric pairing
+  /// (F3): the callback pins/links the caller so trust applies both ways.
+  void Function(Device peer)? onPeerConnected;
+
+  /// Called when a linked peer dials [LanLinkProtocol.routeDisconnect].
+  /// Must return true when the disconnect was accepted (the peer was
+  /// actually linked and its identity checks out) — the route answers 403
+  /// otherwise so strangers can't tear sessions down.
+  bool Function(Device peer)? onPeerDisconnected;
+
+  /// Trust gate for pushes: when this returns true for a fingerprint the
+  /// peer has been disconnected and must re-pair, so `/prepare-upload` is
+  /// rejected with 403 before the user is ever prompted.
+  bool Function(String fingerprint)? isPeerBlocked;
+
   HttpServer? _httpServer;
   final _uuid = const Uuid();
   static const _platform = MethodChannel('lanlink/received_files');
@@ -87,7 +104,8 @@ class Receiver {
       ..post(LanLinkProtocol.routeUpload, _handleUpload)
       ..post(LanLinkProtocol.routeCancel, _handleCancel)
       ..post(LanLinkProtocol.routeConnect, _handleConnect)
-      ..get(LanLinkProtocol.routeConnect, _handleConnect);
+      ..get(LanLinkProtocol.routeConnect, _handleConnect)
+      ..post(LanLinkProtocol.routeDisconnect, _handleDisconnect);
 
     final handler =
         const Pipeline().addMiddleware(_logging()).addHandler(router.call);
@@ -198,6 +216,14 @@ class Receiver {
                 .address ??
             '0.0.0.0';
     final peer = Device.fromJson(info, ip: peerIp);
+
+    // F3 server-side enforcement: a disconnected peer cannot push files.
+    // Rejected before the consent prompt, so the local user is never
+    // bothered by a peer that must re-pair first.
+    if (isPeerBlocked?.call(peer.fingerprint) ?? false) {
+      return Response.forbidden('disconnected - pair again to send');
+    }
+
     final files = filesRaw.values
         .map((e) => FileInfo.fromJson(e as Map<String, dynamic>))
         .toList();
@@ -602,7 +628,15 @@ class Receiver {
               req.context['shelf.io.connection_info'] as HttpConnectionInfo?;
           final ip = connInfo?.remoteAddress.address;
           if (ip != null && ip.isNotEmpty) {
-            onPeerSeen?.call(Device.fromJson(decoded, ip: ip));
+            final caller = Device.fromJson(decoded, ip: ip);
+            onPeerSeen?.call(caller);
+            // Symmetric pairing (F3): the caller proved possession of our
+            // one-time token, so trust it back — pin + link on our side
+            // too, making "Send files" work in both directions without a
+            // second scan.
+            if (caller.fingerprint.isNotEmpty) {
+              onPeerConnected?.call(caller);
+            }
           }
         }
       }
@@ -622,6 +656,58 @@ class Receiver {
     final ps = _pending.remove(sessionId);
     if (ps != null) ps.session.markStatus(TransferStatus.cancelled);
     return Response.ok('ok');
+  }
+
+  /// F3 Disconnect: the peer is ending the pairing. The body carries the
+  /// caller's device info (bounded like every control route). Whether the
+  /// disconnect is honoured is decided by [onPeerDisconnected] — the app
+  /// layer checks the fingerprint belongs to a currently linked peer (and
+  /// that the caller's address matches), so a stranger on the LAN cannot
+  /// tear down someone else's session with a spoofed fingerprint.
+  Future<Response> _handleDisconnect(Request req) async {
+    // Read outside the try: an oversized body aborts via a shelf
+    // HijackException that must propagate, not be swallowed below.
+    final body = await _readBoundedControlBody(req, _maxDeviceInfoBodyBytes);
+    Device? caller;
+    try {
+      final decoded = json.decode(body);
+      if (decoded is Map<String, dynamic>) {
+        final connInfo =
+            req.context['shelf.io.connection_info'] as HttpConnectionInfo?;
+        final ip = connInfo?.remoteAddress.address;
+        if (ip != null && ip.isNotEmpty) {
+          caller = Device.fromJson(decoded, ip: ip);
+        }
+      }
+    } catch (_) {
+      // Falls through to the bad-request below.
+    }
+    if (caller == null || caller.fingerprint.isEmpty) {
+      return Response.badRequest(body: 'missing device info');
+    }
+    final accepted = onPeerDisconnected?.call(caller) ?? false;
+    if (!accepted) {
+      return Response.forbidden('not a linked peer');
+    }
+    // Kill this peer's live receive sessions so its upload tokens are dead.
+    dropSessionsForPeer(caller.fingerprint);
+    return Response.ok('ok');
+  }
+
+  /// Cancels and forgets every pending receive session belonging to
+  /// [fingerprint]: their single-use upload tokens die with the session and
+  /// any in-flight upload is rejected mid-stream (the streaming handler
+  /// aborts as soon as the session leaves the active state).
+  void dropSessionsForPeer(String fingerprint) {
+    if (fingerprint.isEmpty) return;
+    final ids = _pending.entries
+        .where((e) => e.value.session.peer.fingerprint == fingerprint)
+        .map((e) => e.key)
+        .toList();
+    for (final id in ids) {
+      final ps = _pending.remove(id);
+      ps?.session.markStatus(TransferStatus.cancelled);
+    }
   }
 
   /// Where partial data for [info] accumulates between attempts. Keyed by

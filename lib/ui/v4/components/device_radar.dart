@@ -169,12 +169,16 @@ class _EmptyRadar extends StatelessWidget {
       child: Column(
         children: [
           if (searching)
-            SizedBox(
-              width: 22,
-              height: 22,
-              child: CircularProgressIndicator(
-                strokeWidth: 2.5,
-                color: scheme.primary,
+            // The indeterminate spinner repaints every frame; the boundary
+            // keeps that repaint from spilling into the rest of the card.
+            RepaintBoundary(
+              child: SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.5,
+                  color: scheme.primary,
+                ),
               ),
             )
           else

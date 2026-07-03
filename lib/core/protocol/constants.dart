@@ -40,6 +40,12 @@ class LanLinkProtocol {
   /// device info. Replaying a consumed (or unknown) token yields 401.
   static const routeConnect = '/api/lanlink/v1/connect';
 
+  /// Ends the symmetric session between two paired devices (F3
+  /// Disconnect/Unpair). Body carries the caller's device info; the callee
+  /// only honours it when the fingerprint matches a currently linked peer
+  /// (403 otherwise), then clears its side of the session.
+  static const routeDisconnect = '/api/lanlink/v1/disconnect';
+
   // --- Device type strings (LocalSend convention) ---
   static const deviceTypeMobile = 'mobile';
   static const deviceTypeDesktop = 'desktop';
