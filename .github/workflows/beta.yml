@@ -1,0 +1,84 @@
+name: Beta APK
+
+# Manual-only: builds a signed universal Android APK from any branch so
+# betas can be sideloaded and judged on-device before a real release.
+on:
+  workflow_dispatch:
+
+env:
+  FLUTTER_VERSION: "3.24.5"
+  FLUTTER_CHANNEL: "stable"
+
+jobs:
+  build-beta-apk:
+    name: Build signed beta APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: ${{ env.FLUTTER_CHANNEL }}
+          cache: true
+
+      - name: Resolve signing keystore
+        id: keystore
+        run: |
+          set -euo pipefail
+          KEYSTORE_PATH="$RUNNER_TEMP/lanlink-release.keystore"
+          if [ -n "${{ secrets.SIGNING_KEY_BASE64 }}" ]; then
+            echo "Using user-supplied release keystore"
+            echo "${{ secrets.SIGNING_KEY_BASE64 }}" | base64 -d > "$KEYSTORE_PATH"
+            echo "store_password=${{ secrets.SIGNING_STORE_PASSWORD }}" >> $GITHUB_OUTPUT
+            echo "key_password=${{ secrets.SIGNING_KEY_PASSWORD }}" >> $GITHUB_OUTPUT
+            echo "key_alias=${{ secrets.SIGNING_KEY_ALIAS }}" >> $GITHUB_OUTPUT
+          else
+            echo "Using CI-generated debug keystore (no SIGNING_KEY_BASE64 secret)"
+            keytool -genkeypair \
+              -keystore "$KEYSTORE_PATH" \
+              -storepass lanlinkci \
+              -keypass lanlinkci \
+              -alias lanlink \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=LanLink, OU=Dev, O=LanLink, L=Local, S=Local, C=US"
+            echo "store_password=lanlinkci" >> $GITHUB_OUTPUT
+            echo "key_password=lanlinkci" >> $GITHUB_OUTPUT
+            echo "key_alias=lanlink" >> $GITHUB_OUTPUT
+          fi
+          echo "keystore_path=$KEYSTORE_PATH" >> $GITHUB_OUTPUT
+
+      - name: Write key.properties
+        run: |
+          cat > android/key.properties <<EOF
+          storeFile=${{ steps.keystore.outputs.keystore_path }}
+          storePassword=${{ steps.keystore.outputs.store_password }}
+          keyAlias=${{ steps.keystore.outputs.key_alias }}
+          keyPassword=${{ steps.keystore.outputs.key_password }}
+          EOF
+
+      - name: Pub get
+        run: flutter pub get
+
+      - name: Build universal APK
+        run: flutter build apk --release
+
+      - name: Rename APK
+        run: |
+          out=build/app/outputs/flutter-apk
+          safe_ref=$(echo "${GITHUB_REF_NAME}" | tr '/' '-')
+          mv "$out/app-release.apk" "$out/lanlink-beta-${safe_ref}-${GITHUB_SHA::7}.apk"
+          ls -la "$out"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          retention-days: 3
+          name: lanlink-beta-apk
+          path: build/app/outputs/flutter-apk/lanlink-beta-*.apk
+          if-no-files-found: error
