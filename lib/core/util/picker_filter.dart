@@ -1,3 +1,4 @@
+import '../models/file_info.dart';
 import '../platform/android_apps.dart';
 import '../platform/media_library.dart';
 
@@ -44,6 +45,22 @@ List<MediaItem> cameraRoll(List<MediaItem> items) {
 /// Total byte size of a media selection.
 int mediaTotalSize(Iterable<MediaItem> items) =>
     items.fold(0, (sum, item) => sum + item.size);
+
+/// Case-insensitive substring match on file name for the "All files"
+/// tab. Works for any extension (or none): the match is on the whole
+/// name, so `zip`, `tar.gz`, `Report.PDF` and `Makefile` all behave.
+List<FileInfo> filterFiles(List<FileInfo> files, String query) {
+  final q = query.trim().toLowerCase();
+  if (q.isEmpty) return files;
+  return [
+    for (final file in files)
+      if (file.fileName.toLowerCase().contains(q)) file,
+  ];
+}
+
+/// Total byte size of an "All files" selection.
+int filesTotalSize(Iterable<FileInfo> files) =>
+    files.fold(0, (sum, file) => sum + file.size);
 
 /// Total byte size of an app selection.
 int appsTotalSize(Iterable<AndroidAppInfo> apps) =>
