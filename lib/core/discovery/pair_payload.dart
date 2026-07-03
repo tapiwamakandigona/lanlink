@@ -13,12 +13,24 @@ class PairPayload {
     required this.port,
     required this.alias,
     this.fingerprint,
+    this.ssid,
+    this.password,
   });
 
   final String ip;
   final int port;
   final String alias;
   final String? fingerprint;
+
+  /// Hotspot credentials for the Direct link (no shared Wi-Fi) flow.
+  /// Only present when the host is running a LocalOnlyHotspot; QRs
+  /// without them parse exactly as before.
+  final String? ssid;
+  final String? password;
+
+  /// True when this payload carries the hotspot credentials a guest
+  /// needs to join before it can reach [ip].
+  bool get needsHotspotJoin => ssid != null && ssid!.isNotEmpty;
 
   static const String scheme = 'lanlink';
   static const String host = 'pair';
@@ -31,6 +43,10 @@ class PairPayload {
     };
     if (fingerprint != null && fingerprint!.isNotEmpty) {
       params['fp'] = fingerprint!;
+    }
+    if (ssid != null && ssid!.isNotEmpty) {
+      params['ssid'] = ssid!;
+      params['pass'] = password ?? '';
     }
     final uri = Uri(
       scheme: scheme,
@@ -63,6 +79,8 @@ class PairPayload {
       port: port,
       alias: alias,
       fingerprint: uri.queryParameters['fp'],
+      ssid: uri.queryParameters['ssid'],
+      password: uri.queryParameters['pass'],
     );
   }
 

@@ -65,8 +65,9 @@ PairingGuide resolvePairingGuide({
         'If both devices are on the same Wi-Fi, just open LanLink on both — '
             'they find each other automatically. Then pick files and tap the '
             'other device.',
-        'No shared Wi-Fi? Turn on a phone hotspot, connect the other device '
-            'to it, then use the pairing QR code (Scan / Show QR) to link up.',
+        'No shared Wi-Fi? On an Android phone, open Receive and switch to '
+            '"No shared Wi-Fi" — it starts a direct link the other device '
+            'joins by scanning the QR.',
       ],
       tip: 'When in doubt, get both devices onto the same Wi-Fi first — that '
           'is always the simplest path.',
@@ -106,18 +107,19 @@ PairingGuide resolvePairingGuide({
         return PairingGuide(
           title: sending ? 'Send via your hotspot' : 'Receive via your hotspot',
           steps: [
-            'Turn on your phone\'s hotspot (tap "Turn on hotspot" on the '
-                'home screen — it opens Android\'s hotspot settings).',
-            'Ask the other person to join your hotspot from their Wi-Fi '
-                'settings.',
+            'Open Receive and switch to "No shared Wi-Fi" — LanLink starts '
+                'a direct link hotspot for you, no settings needed.',
             if (sending)
-              'Open "Show QR", have them scan it, then pick files and send.'
+              'Have them scan your QR: an Android phone hops onto your link '
+                  'by itself; an iPhone or computer joins the network shown '
+                  'under the code first.'
             else
-              'Open "Show QR" so they can scan it, then accept their files '
-                  'when the prompt appears.',
+              'Have them scan your QR (Android joins your link '
+                  'automatically), then accept their files when the prompt '
+                  'appears.',
           ],
-          tip: 'LanLink can\'t flip the hotspot on for you — Android only lets '
-              'you do that from system settings.',
+          tip: 'The direct link is created in-app — you never have to touch '
+              'Android\'s hotspot settings.',
         );
       }
       return PairingGuide(
@@ -125,14 +127,19 @@ PairingGuide resolvePairingGuide({
             ? 'Send by joining their hotspot'
             : 'Receive on their hotspot',
         steps: [
-          'Ask the other person (the Android device) to turn on their '
-              'hotspot.',
-          'Join that hotspot from your Wi-Fi settings.',
-          if (sending)
-            'Scan their pairing QR code (Scan QR), then pick files and send.'
+          'Ask the other person (the Android device) to open Receive and '
+              'switch to "No shared Wi-Fi" — LanLink starts a direct link '
+              'hotspot for them.',
+          if (self == SelfPlatform.android)
+            'Scan their QR (Scan QR) — your phone joins their link '
+                'automatically.'
           else
-            'Scan their pairing QR code (Scan QR) so they can send to you, '
-                'then accept the prompt.',
+            'Join the network shown under their QR from your Wi-Fi '
+                'settings, then scan the code (Scan QR).',
+          if (sending)
+            'Pick files and send.'
+          else
+            'They pick files and send; accept the prompt when it appears.',
         ],
       );
     }
