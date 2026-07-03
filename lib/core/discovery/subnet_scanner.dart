@@ -23,6 +23,7 @@ class SubnetScanner {
     this.port = LanLinkProtocol.defaultPort,
     this.perHostTimeout = const Duration(seconds: 2),
     this.parallelProbes = 32,
+    this.minScanInterval = const Duration(seconds: 20),
   });
 
   final Sender sender;
@@ -31,10 +32,23 @@ class SubnetScanner {
   final Duration perHostTimeout;
   final int parallelProbes;
 
+  /// Minimum spacing between full sweeps. Callers re-kick the scan on a
+  /// short UI cadence (~6 s); each sweep sets up/tears down hundreds of
+  /// sockets on the main isolate, so back-to-back sweeps compete with
+  /// frame production. Calls inside this window are no-ops.
+  final Duration minScanInterval;
+
   bool _running = false;
   int _generation = 0;
+  DateTime? _lastScanStarted;
+  bool _transfersActive = false;
 
   bool get isRunning => _running;
+
+  /// While true, [scan] is a no-op. Pages/state that know a transfer is
+  /// in flight set this so the 254-host probe churn never competes with
+  /// transfer I/O and progress frames.
+  set transfersActive(bool active) => _transfersActive = active;
 
   /// Synchronously bumps the generation so any in-flight scan stops as soon
   /// as the next host slot picks it up.
@@ -46,7 +60,19 @@ class SubnetScanner {
   /// Scans every /24 derived from [localIps] plus the well-known Android
   /// hotspot subnets. Completes when either every host has been probed or
   /// [cancel] is called.
-  Future<void> scan({required List<String> localIps}) async {
+  ///
+  /// Skipped (returns immediately) while a transfer is active or when the
+  /// previous sweep started less than [minScanInterval] ago, unless
+  /// [force] is set (e.g. an explicit user refresh).
+  Future<void> scan(
+      {required List<String> localIps, bool force = false}) async {
+    if (_transfersActive && !force) return;
+    final now = DateTime.now();
+    final last = _lastScanStarted;
+    if (!force && last != null && now.difference(last) < minScanInterval) {
+      return;
+    }
+    _lastScanStarted = now;
     final gen = ++_generation;
     _running = true;
     try {
