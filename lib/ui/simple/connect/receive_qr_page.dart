@@ -82,6 +82,7 @@ class _ReceiveQrPageState extends State<ReceiveQrPage> {
           port: port,
           alias: _selfAlias,
           fingerprint: _state.fingerprint,
+          token: _state.issueConnectToken(),
         );
       });
       return;
@@ -113,6 +114,7 @@ class _ReceiveQrPageState extends State<ReceiveQrPage> {
           port: _state.port ?? port,
           alias: _selfAlias,
           fingerprint: _state.fingerprint,
+          token: _state.issueConnectToken(),
           ssid: info.ssid,
           password: info.password,
         );

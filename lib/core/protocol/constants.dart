@@ -33,6 +33,13 @@ class LanLinkProtocol {
   static const routeUpload = '$apiPrefix/upload';
   static const routeCancel = '$apiPrefix/cancel';
 
+  // --- LanLink extension routes (additive; plain LocalSend never calls
+  // these, and all LocalSend v2 routes above keep their exact semantics) ---
+
+  /// Consumes a one-time connect token minted for a QR code and returns the
+  /// device info. Replaying a consumed (or unknown) token yields 401.
+  static const routeConnect = '/api/lanlink/v1/connect';
+
   // --- Device type strings (LocalSend convention) ---
   static const deviceTypeMobile = 'mobile';
   static const deviceTypeDesktop = 'desktop';

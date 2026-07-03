@@ -18,12 +18,19 @@ import '../protocol/constants.dart';
 /// mechanism — we respond to any inbound packet with our own announcement).
 class MulticastDiscovery {
   MulticastDiscovery({
-    required this.selfDevice,
+    required this.selfDeviceProvider,
     required this.onPeer,
   });
 
-  /// The device payload to announce. Should not include the local IP.
-  Device selfDevice;
+  /// Returns the device payload to announce (should not include the local
+  /// IP). A provider — rather than a snapshot — so every announcement
+  /// carries the receiver's *actual* bound port even when the HTTP server
+  /// fell back to a different port after this object was constructed, and
+  /// so settings changes (alias etc.) take effect immediately.
+  final Device Function() selfDeviceProvider;
+
+  /// The current self-device payload, freshly built from the provider.
+  Device get selfDevice => selfDeviceProvider();
 
   /// Called whenever a new (or refreshed) peer is observed.
   final void Function(Device peer) onPeer;
@@ -136,20 +143,27 @@ class MulticastDiscovery {
     }
   }
 
+  /// The JSON payload every announcement carries. Built fresh from
+  /// [selfDeviceProvider] on each call so the announced port always matches
+  /// the receiver's live bound port.
+  @visibleForTesting
+  Map<String, dynamic> announcementJson() {
+    final self = selfDevice;
+    return Device(
+      alias: self.alias,
+      version: self.version,
+      deviceModel: self.deviceModel,
+      deviceType: self.deviceType,
+      fingerprint: self.fingerprint,
+      port: self.port,
+      protocol: self.protocol,
+      ip: '',
+      announcement: true,
+    ).toJson();
+  }
+
   void _announce() {
-    final payload = utf8.encode(json.encode(
-      Device(
-        alias: selfDevice.alias,
-        version: selfDevice.version,
-        deviceModel: selfDevice.deviceModel,
-        deviceType: selfDevice.deviceType,
-        fingerprint: selfDevice.fingerprint,
-        port: selfDevice.port,
-        protocol: selfDevice.protocol,
-        ip: '',
-        announcement: true,
-      ).toJson(),
-    ));
+    final payload = utf8.encode(json.encode(announcementJson()));
     for (final s in _sockets) {
       try {
         s.send(
@@ -162,19 +176,7 @@ class MulticastDiscovery {
   }
 
   void _sendAnnounceTo(InternetAddress addr, int port) {
-    final payload = utf8.encode(json.encode(
-      Device(
-        alias: selfDevice.alias,
-        version: selfDevice.version,
-        deviceModel: selfDevice.deviceModel,
-        deviceType: selfDevice.deviceType,
-        fingerprint: selfDevice.fingerprint,
-        port: selfDevice.port,
-        protocol: selfDevice.protocol,
-        ip: '',
-        announcement: true,
-      ).toJson(),
-    ));
+    final payload = utf8.encode(json.encode(announcementJson()));
     for (final s in _sockets) {
       try {
         s.send(payload, addr, port);

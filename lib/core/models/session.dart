@@ -65,6 +65,13 @@ class TransferSession extends ChangeNotifier {
   final TransferDirection direction;
   final Device peer;
 
+  /// Optional group identifier. Sessions that belong to one logical
+  /// "conversation" with a peer (e.g. the user tapped "+ Add files" while a
+  /// transfer card was still visible) share a groupId so the UI can render
+  /// them as a single grouped card. Assigned by AppState; null for
+  /// standalone sessions.
+  String? groupId;
+
   final Map<String, FileProgress> _files;
   Map<String, FileProgress> get files => Map.unmodifiable(_files);
 
@@ -118,7 +125,18 @@ class TransferSession extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// True once the session has reached a terminal state.
+  bool get isTerminal =>
+      status == TransferStatus.completed ||
+      status == TransferStatus.cancelled ||
+      status == TransferStatus.failed;
+
   void markStatus(TransferStatus s) {
+    // Terminal states are sticky: once a session is cancelled/failed/
+    // completed nothing may flip it to another status. This closes the
+    // cancel/upload race where a still-running upload marked a cancelled
+    // session back to completed.
+    if (isTerminal && s != status) return;
     status = s;
     if (s == TransferStatus.completed ||
         s == TransferStatus.cancelled ||

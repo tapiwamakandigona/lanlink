@@ -110,7 +110,14 @@ class _SendConnectPageState extends State<SendConnectPage> {
       }
       if (!mounted) return;
       final state = context.read<AppState>();
-      final probed = await state.probeManualPeer(payload.hostPort);
+      // QR codes minted by v4 receivers carry a one-time connect token:
+      // redeeming it pins the peer's fingerprint (verified) and consumes
+      // the token so a replayed QR is rejected. Tokenless (older) codes
+      // fall back to a plain probe.
+      final token = payload.token;
+      final probed = token != null && token.isNotEmpty
+          ? await state.connectWithToken(payload.hostPort, token)
+          : await state.probeManualPeer(payload.hostPort);
       if (!mounted) return;
       if (probed == null) {
         _showError("Connected to their network but couldn't reach "

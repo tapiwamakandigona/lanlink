@@ -21,6 +21,7 @@ class ConnectPayload {
     required this.port,
     required this.alias,
     this.fingerprint,
+    this.token,
     this.ssid,
     this.password,
   });
@@ -29,6 +30,10 @@ class ConnectPayload {
   final int port;
   final String alias;
   final String? fingerprint;
+
+  /// One-time connect token minted by the receiver for this QR. The first
+  /// device to redeem it consumes it; replays are rejected (401).
+  final String? token;
 
   /// Hotspot credentials; non-null only for the no-Wi-Fi shape.
   final String? ssid;
@@ -49,6 +54,9 @@ class ConnectPayload {
     };
     if (fingerprint != null && fingerprint!.isNotEmpty) {
       params['fp'] = fingerprint!;
+    }
+    if (token != null && token!.isNotEmpty) {
+      params['t'] = token!;
     }
     if (ssid != null && ssid!.isNotEmpty) {
       params['ssid'] = ssid!;
@@ -91,6 +99,7 @@ class ConnectPayload {
       port: port,
       alias: alias,
       fingerprint: uri.queryParameters['fp'],
+      token: uri.queryParameters['t'],
       ssid: uri.queryParameters['ssid'],
       password: uri.queryParameters['pass'],
     );
