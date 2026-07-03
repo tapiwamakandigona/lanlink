@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -44,6 +45,13 @@ class JoinFallbackSheet extends StatefulWidget {
 }
 
 class _JoinFallbackSheetState extends State<JoinFallbackSheet> {
+  /// Native channel that copies text with Android 13's "sensitive" clip
+  /// flag, so the WPA2 password is hidden from the clipboard-preview
+  /// overlay and clipboard listeners. See MainActivity's
+  /// "lanlink/clipboard" handler.
+  static const MethodChannel _clipboardChannel =
+      MethodChannel('lanlink/clipboard');
+
   /// Inline copy feedback: a SnackBar would render in the Scaffold BEHIND
   /// this modal sheet where the user can't see it.
   bool _copied = false;
@@ -56,7 +64,26 @@ class _JoinFallbackSheetState extends State<JoinFallbackSheet> {
   }
 
   Future<void> _copyPassword() async {
-    await Clipboard.setData(ClipboardData(text: widget.password));
+    // Prefer the native "sensitive" copy on Android; fall back to the
+    // plain clipboard everywhere else (and when the channel is missing,
+    // e.g. in widget tests or if the native side ever fails).
+    var copied = false;
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      try {
+        await _clipboardChannel.invokeMethod<bool>(
+          'copySensitive',
+          <String, String>{'text': widget.password},
+        );
+        copied = true;
+      } on MissingPluginException {
+        // No native handler (tests / non-app embeddings): fall through.
+      } on PlatformException {
+        // Native copy failed: fall through to the plain clipboard.
+      }
+    }
+    if (!copied) {
+      await Clipboard.setData(ClipboardData(text: widget.password));
+    }
     if (!mounted) return;
     setState(() => _copied = true);
     _copiedReset?.cancel();
