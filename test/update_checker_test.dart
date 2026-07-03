@@ -235,8 +235,7 @@ void main() {
         reason: 'production builds must not be offered v3.0.0-beta.1');
   });
 
-  test('includePrereleases: true opts back in to prerelease updates',
-      () async {
+  test('includePrereleases: true opts back in to prerelease updates', () async {
     final server = await _serveJson(mixedStableAndPrereleaseManifest());
     addTearDown(() => server.close(force: true));
 
