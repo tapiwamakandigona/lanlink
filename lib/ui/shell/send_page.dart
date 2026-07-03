@@ -99,7 +99,9 @@ class _SendPageState extends State<SendPage> {
     super.initState();
     _staged = List.of(widget.prestagedFiles ?? const []);
     final state = context.read<AppState>();
-    unawaited(state.refreshDiscovery());
+    // Opening the page is an explicit user action: probe everything and
+    // restart any in-flight sweep so results reflect the current network.
+    unawaited(state.refreshDiscovery(userInitiated: true));
     _rescan = Timer.periodic(const Duration(seconds: 6), (_) {
       if (!mounted) return;
       unawaited(context.read<AppState>().refreshDiscovery());
@@ -228,7 +230,14 @@ class _SendPageState extends State<SendPage> {
             }
             // Give the freshly bound network a beat before connecting.
             await Future<void>.delayed(const Duration(milliseconds: 800));
-            if (mounted) await context.read<AppState>().refreshDiscovery();
+            if (mounted) {
+              // Just joined their link: force a fresh sweep of the new
+              // network (incl. hotspot prefixes) instead of piggybacking
+              // on a stale in-flight scan.
+              await context
+                  .read<AppState>()
+                  .refreshDiscovery(userInitiated: true);
+            }
         }
       }
       if (!mounted) return;
