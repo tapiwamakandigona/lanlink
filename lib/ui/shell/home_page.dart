@@ -215,8 +215,7 @@ class _ConnectToPhoneTile extends StatelessWidget {
                   children: [
                     Text(
                       'Connect to phone',
-                      style:
-                          VType.bodyStrong.copyWith(color: scheme.onSurface),
+                      style: VType.bodyStrong.copyWith(color: scheme.onSurface),
                     ),
                     const SizedBox(height: 2),
                     Text(

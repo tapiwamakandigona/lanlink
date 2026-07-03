@@ -131,9 +131,9 @@ class _ReceivePageState extends State<ReceivePage> with WidgetsBindingObserver {
 
   /// Spins up (or reuses) the hotspot controller and starts hosting.
   void _startHosting() {
-    final hotspot = _hotspot ??= (widget.debugHotspotController ??
-        HotspotHostController())
-      ..addListener(_onHotspotChanged);
+    final hotspot =
+        _hotspot ??= (widget.debugHotspotController ?? HotspotHostController())
+          ..addListener(_onHotspotChanged);
     // F3 Disconnect teardown hook (F1 contract): while this device
     // hosts, AppState holds the stop path so Disconnect can tear the
     // hotspot down even though this page owns the controller.

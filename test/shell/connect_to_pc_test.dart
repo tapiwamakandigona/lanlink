@@ -124,8 +124,8 @@ void main() {
       expect(find.byType(ReceivePage), findsOneWidget);
       final page = tester.widget<ReceivePage>(find.byType(ReceivePage));
       expect(page.initialMode, NetworkMode.directLink);
-      final modeSwitch = tester
-          .widget<NetworkModeSwitch>(find.byType(NetworkModeSwitch));
+      final modeSwitch =
+          tester.widget<NetworkModeSwitch>(find.byType(NetworkModeSwitch));
       expect(modeSwitch.mode, NetworkMode.directLink,
           reason: '"No shared Wi-Fi" should be the selected mode');
     }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
@@ -179,8 +179,7 @@ void main() {
       expect(find.byType(HotspotCredsPanel), findsOneWidget);
     });
 
-    testWidgets('flipping back to Same Wi-Fi still tears down',
-        (tester) async {
+    testWidgets('flipping back to Same Wi-Fi still tears down', (tester) async {
       final state = await _makeState(tester);
       final log = <String>[];
       final controller = _fakeController(log);
