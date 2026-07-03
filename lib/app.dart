@@ -84,6 +84,13 @@ class _LanLinkAppState extends State<LanLinkApp> {
     return AcceptDecision.accept({for (final f in files) f.id});
   }
 
+  // Built once per process: AppSettings notifies on every write (nickname,
+  // trust, save dir, …) and rebuilding MaterialApp with *fresh* ThemeData
+  // instances forced a whole-tree theme flush + implicit theme animation
+  // each time. Identical instances make those rebuilds cheap.
+  static final ThemeData _lightTheme = EmberTheme.light();
+  static final ThemeData _darkTheme = EmberTheme.dark();
+
   static ThemeMode _resolveThemeMode(String raw) {
     switch (raw) {
       case 'light':
@@ -103,14 +110,18 @@ class _LanLinkAppState extends State<LanLinkApp> {
         ChangeNotifierProvider.value(value: widget.state.settings),
       ],
       builder: (context, _) {
-        final settings = context.watch<AppSettings>();
+        // Only the theme mode matters here — selecting it (instead of
+        // watching all of AppSettings) stops the 22 unrelated settings
+        // notify sites from rebuilding MaterialApp.
+        final themeModeRaw =
+            context.select<AppSettings, String>((s) => s.themeModeRaw);
         return MaterialApp(
           title: 'LanLink',
           navigatorKey: _navigatorKey,
           debugShowCheckedModeBanner: false,
-          themeMode: _resolveThemeMode(settings.themeModeRaw),
-          theme: EmberTheme.light(),
-          darkTheme: EmberTheme.dark(),
+          themeMode: _resolveThemeMode(themeModeRaw),
+          theme: _lightTheme,
+          darkTheme: _darkTheme,
           home: const _FirstRunGate(),
           routes: {
             '/receive': (_) => const ReceivePage(),
