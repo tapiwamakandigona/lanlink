@@ -2,12 +2,14 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
+import 'package:dio/io.dart';
 import 'package:flutter/foundation.dart';
 
 import '../models/device.dart';
 import '../models/file_info.dart';
 import '../models/session.dart';
 import '../protocol/constants.dart';
+import '../security/cert_pinning.dart';
 import '../util/friendly_error.dart';
 
 /// Drives outgoing transfers from this device to a [Device] peer.
@@ -19,25 +21,60 @@ class Sender {
   Sender({
     required this.localDeviceProvider,
     Dio? dio,
-  }) : _dio = dio ?? _defaultDio();
+    CertificatePinner? pinner,
+  }) : pinner = pinner ?? CertificatePinner() {
+    _dio = dio ?? _defaultDio(this.pinner);
+  }
 
   /// Returns the current local-device info to embed in `prepare-upload`.
   final Device Function() localDeviceProvider;
 
-  final Dio _dio;
+  late final Dio _dio;
+
+  /// Verifies peer TLS certificates against pinned fingerprints (and records
+  /// cert hashes on first contact — TOFU). Shared with the default Dio's
+  /// HTTP client; injectable so tests can inspect/steer it.
+  final CertificatePinner pinner;
 
   /// Dio cancel tokens for in-flight sends, keyed by session identity so
   /// [cancelSend] can abort the HTTP work promptly.
   final Map<TransferSession, CancelToken> _inflight = {};
 
-  static Dio _defaultDio() {
+  static Dio _defaultDio(CertificatePinner pinner) {
     final d = Dio(BaseOptions(
       connectTimeout: const Duration(seconds: 10),
       receiveTimeout: const Duration(minutes: 30),
       sendTimeout: const Duration(minutes: 30),
       responseType: ResponseType.json,
     ));
+    d.httpClientAdapter = _pinnedAdapter(pinner);
     return d;
+  }
+
+  /// HTTPS adapter that trusts peers by certificate fingerprint, not by CA:
+  /// peers present self-signed certificates, so every connection lands in
+  /// `badCertificateCallback`, where [CertificatePinner.check] enforces the
+  /// pin (or records the hash on first contact).
+  static HttpClientAdapter _pinnedAdapter(CertificatePinner pinner) =>
+      IOHttpClientAdapter(
+        createHttpClient: () {
+          final client = HttpClient();
+          client.badCertificateCallback = pinner.check;
+          return client;
+        },
+      );
+
+  /// Declares the fingerprint we expect [peer] to present in the TLS
+  /// handshake. Call before any request to the peer.
+  void _pin(Device peer) => pinner.expect(peer.ip, peer.port, peer.fingerprint);
+
+  /// Overrides [d]'s self-reported fingerprint with the cert hash actually
+  /// verified (or recorded) during the TLS handshake, when available. The
+  /// wire JSON is peer-controlled; the handshake is not.
+  Device _withVerifiedFingerprint(Device d) {
+    final observed = pinner.observed(d.ip, d.port);
+    if (observed == null || observed.isEmpty) return d;
+    return d.copyWith(fingerprint: observed);
   }
 
   /// Try a quick `/info` round-trip to confirm the peer is reachable. Returns
@@ -53,6 +90,7 @@ class Sender {
     CancelToken? cancelToken,
     Duration? timeout,
   }) async {
+    _pin(peer);
     try {
       final resp = await _dio.getUri<Map<String, dynamic>>(
         peer.baseUri.replace(path: LanLinkProtocol.routeInfo),
@@ -63,7 +101,8 @@ class Sender {
         ),
       );
       if (resp.statusCode == 200 && resp.data != null) {
-        return Device.fromJson(resp.data!, ip: peer.ip);
+        return _withVerifiedFingerprint(
+            Device.fromJson(resp.data!, ip: peer.ip));
       }
     } catch (_) {}
     return null;
@@ -74,6 +113,7 @@ class Sender {
   /// success, or null when the token was rejected (consumed/unknown => 401)
   /// or the peer is unreachable.
   Future<Device?> connectWithToken(Device peer, String token) async {
+    _pin(peer);
     try {
       final resp = await _dio.postUri<Map<String, dynamic>>(
         peer.baseUri.replace(
@@ -87,7 +127,8 @@ class Sender {
         ),
       );
       if (resp.statusCode == 200 && resp.data != null) {
-        return Device.fromJson(resp.data!, ip: peer.ip);
+        return _withVerifiedFingerprint(
+            Device.fromJson(resp.data!, ip: peer.ip));
       }
     } catch (_) {}
     return null;
@@ -111,6 +152,7 @@ class Sender {
       'Sender.send requires localPath on every file.',
     );
 
+    _pin(peer);
     session.markStatus(TransferStatus.transferring);
     final cancelToken = CancelToken();
     _inflight[session] = cancelToken;
@@ -305,6 +347,7 @@ class Sender {
     required TransferSession session,
     required Device peer,
   }) async {
+    _pin(peer);
     _inflight[session]?.cancel('cancelled by user');
     _markPendingFiles(session, session.files.values.map((p) => p.file),
         TransferStatus.cancelled);
@@ -343,6 +386,7 @@ class Sender {
   /// the peer is still reachable. Returns true when the peer acknowledged
   /// (HTTP 200).
   Future<bool> notifyDisconnect(Device peer) async {
+    _pin(peer);
     try {
       final resp = await _dio.postUri<dynamic>(
         peer.baseUri.replace(path: LanLinkProtocol.routeDisconnect),

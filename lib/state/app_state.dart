@@ -571,7 +571,7 @@ class AppState extends ChangeNotifier {
       deviceType: detectDeviceType(),
       fingerprint: _fingerprint,
       port: _receiver?.port ?? settings.port,
-      protocol: 'http',
+      protocol: 'https',
       ip: _localIps.isEmpty ? '0.0.0.0' : _localIps.first,
     );
   }
@@ -1102,7 +1102,7 @@ class AppState extends ChangeNotifier {
       deviceType: LanLinkProtocol.deviceTypeHeadless,
       fingerprint: '',
       port: port,
-      protocol: 'http',
+      protocol: 'https',
       ip: host,
     );
   }

@@ -16,6 +16,7 @@ import '../models/device.dart';
 import '../models/file_info.dart';
 import '../models/session.dart';
 import '../protocol/constants.dart';
+import '../security/device_certificate.dart';
 import '../util/safe_paths.dart';
 
 /// Outcome the UI returns when asked to approve an incoming transfer.
@@ -50,7 +51,17 @@ class Receiver {
     required this.onSessionStarted,
     this.onPeerSeen,
     this.idleTimeout = const Duration(minutes: 5),
+    this.certificateProvider = DeviceCertificate.load,
   });
+
+  /// Supplies the TLS identity the server presents. Defaults to the
+  /// persisted per-install certificate ([DeviceCertificate.load]);
+  /// injectable so tests can share one pre-generated certificate.
+  final Future<DeviceCertificate> Function() certificateProvider;
+
+  /// The certificate the running server presents (set by [start]).
+  DeviceCertificate? get certificate => _certificate;
+  DeviceCertificate? _certificate;
 
   /// How long a receive session may sit with no sender activity (no bytes,
   /// no upload calls) before the idle reaper fails it. Without this, a
@@ -135,6 +146,9 @@ class Receiver {
         const Pipeline().addMiddleware(_logging()).addHandler(router.call);
 
     final desired = localDeviceProvider().port;
+    // HTTPS-only (protocol 2.1): the presented certificate IS the device
+    // identity — its SHA-256 hash is the fingerprint peers pin.
+    _certificate = await certificateProvider();
     _httpServer = await _bindWithFallback(handler, desired);
 
     // Conservative idle reaper (S6): sweep once a minute for sessions whose
@@ -173,7 +187,7 @@ class Receiver {
     }
   }
 
-  /// Binds the HTTP server on [desired], falling back to nearby ports and
+  /// Binds the HTTPS server on [desired], falling back to nearby ports and
   /// finally an OS-assigned ephemeral port. Another LanLink (or LocalSend)
   /// instance on the same machine must not take the whole app down.
   Future<HttpServer> _bindWithFallback(Handler handler, int desired) async {
@@ -185,8 +199,12 @@ class Receiver {
     Object? lastError;
     for (final port in candidates) {
       try {
-        final server =
-            await shelf_io.serve(handler, InternetAddress.anyIPv4, port);
+        final server = await shelf_io.serve(
+          handler,
+          InternetAddress.anyIPv4,
+          port,
+          securityContext: _certificate!.securityContext(),
+        );
         if (port != desired) {
           debugPrint('[server] port $desired unavailable, '
               'listening on ${server.port} instead');
