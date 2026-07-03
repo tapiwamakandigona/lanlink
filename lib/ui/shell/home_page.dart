@@ -1,15 +1,18 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/models/file_info.dart';
 import '../../core/platform/incoming_share.dart';
 import '../../state/app_state.dart';
+import '../v4/direct_connect/network_mode_switch.dart';
 import '../v4/v4.dart';
 import '../widgets/connected_peer_card.dart';
 import '../widgets/live_session_card.dart';
 import '../widgets/update_available_banner.dart';
+import 'receive_page.dart';
 import 'send_page.dart';
 import 'session_display.dart';
 
@@ -99,6 +102,21 @@ class _HomePageState extends State<HomePage> {
                   onSend: () => Navigator.of(context).pushNamed('/send'),
                   onReceive: () => Navigator.of(context).pushNamed('/receive'),
                 ),
+                // Windows only: this PC can host its own hotspot, so a
+                // phone can link up even with no router around. One tap
+                // opens Receive with "No shared Wi-Fi" already running.
+                if (defaultTargetPlatform == TargetPlatform.windows) ...[
+                  const SizedBox(height: VSpace.x4),
+                  _ConnectToPhoneTile(
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const ReceivePage(
+                          initialMode: NetworkMode.directLink,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
                 // Symmetric sessions (F3): every linked peer gets a strip
                 // with "Send files" (no re-scan needed) and Disconnect.
                 if (state.linkedPeers.isNotEmpty) ...[
@@ -143,6 +161,77 @@ class _HomePageState extends State<HomePage> {
                 ],
               ],
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The Windows-only home entry point for hosting a direct link: quieter
+/// than the two verbs, but discoverable — an outlined row tile in the
+/// same Ember language as the secondary verb card.
+class _ConnectToPhoneTile extends StatelessWidget {
+  const _ConnectToPhoneTile({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: scheme.surfaceContainerLowest,
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(
+        borderRadius: VRadius.lgAll,
+        side: BorderSide(color: scheme.outlineVariant),
+      ),
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: VSpace.x4,
+            vertical: VSpace.x3,
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: scheme.primaryContainer,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.phonelink_ring,
+                  size: 22,
+                  color: scheme.onPrimaryContainer,
+                ),
+              ),
+              const SizedBox(width: VSpace.x4),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Connect to phone',
+                      style:
+                          VType.bodyStrong.copyWith(color: scheme.onSurface),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'No Wi-Fi around? Link a phone straight to this PC.',
+                      style: VType.caption
+                          .copyWith(color: scheme.onSurfaceVariant),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: VSpace.x2),
+              Icon(Icons.chevron_right, color: scheme.onSurfaceVariant),
+            ],
           ),
         ),
       ),
