@@ -411,16 +411,23 @@ class Sender {
     );
   }
 
+  /// Fails every file that hasn't already completed. Completed is sticky:
+  /// a partial failure (e.g. file 3 of 3 errors out) must not rewrite the
+  /// history of files 1–2 that already landed on the receiver.
   void _failAll(TransferSession session, List<FileInfo> files, String message) {
     for (final f in files) {
+      if (session.files[f.id]?.status == TransferStatus.completed) continue;
       session.markFile(f.id, TransferStatus.failed, error: message);
     }
     session.markStatus(TransferStatus.failed);
   }
 
+  /// Applies [status] to every file that hasn't already completed
+  /// (completed is sticky — see [_failAll]).
   void _markAll(
       TransferSession session, List<FileInfo> files, TransferStatus status) {
     for (final f in files) {
+      if (session.files[f.id]?.status == TransferStatus.completed) continue;
       session.markFile(f.id, status);
     }
   }
