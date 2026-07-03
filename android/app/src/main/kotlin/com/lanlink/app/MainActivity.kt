@@ -552,12 +552,21 @@ class MainActivity : FlutterActivity() {
                             )
                             return@setMethodCallHandler
                         }
-                        try {
-                            val published = publishToDownloads(sourcePath, fileName, subDir)
-                            result.success(published)
-                        } catch (e: Exception) {
-                            result.error("PUBLISH_FAILED", e.message, null)
-                        }
+                        // The MediaStore publish streams the whole received
+                        // file to Downloads; inline it would freeze the UI
+                        // (ANR) for multi-second copies, so run it off the
+                        // main thread like the other heavy handlers above.
+                        Thread {
+                            try {
+                                val published =
+                                    publishToDownloads(sourcePath, fileName, subDir)
+                                runOnUiThread { result.success(published) }
+                            } catch (e: Exception) {
+                                runOnUiThread {
+                                    result.error("PUBLISH_FAILED", e.message, null)
+                                }
+                            }
+                        }.start()
                     }
                     else -> result.notImplemented()
                 }
