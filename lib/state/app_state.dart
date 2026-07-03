@@ -213,8 +213,17 @@ class AppState extends ChangeNotifier {
   /// Disconnect path then releases it via [WifiJoiner.leave].
   bool _joinedHotspotAsGuest = false;
 
-  /// Marks that the session now owns a guest-side hotspot binding.
-  void markJoinedHotspotAsGuest() => _joinedHotspotAsGuest = true;
+  /// Marks that the session now owns a guest-side hotspot binding, and
+  /// takes over the network-lost callback from the Send page (the joined
+  /// network can drop mid-session — the OS unbinds; we surface it).
+  void markJoinedHotspotAsGuest() {
+    _joinedHotspotAsGuest = true;
+    WifiJoiner.setOnNetworkLost(() {
+      if (!_joinedHotspotAsGuest) return;
+      EventLog.instance.add('Direct link network was lost');
+      notifyListeners();
+    });
+  }
 
   /// Records (or refreshes) a symmetric link with [peer]. When [pin] is
   /// true the fingerprint is also pinned (verified badge + trust), which is
@@ -312,6 +321,7 @@ class AppState extends ChangeNotifier {
     }
     if (_joinedHotspotAsGuest) {
       _joinedHotspotAsGuest = false;
+      WifiJoiner.setOnNetworkLost(null);
       if (!_networkSilent) await WifiJoiner.leave();
     }
   }

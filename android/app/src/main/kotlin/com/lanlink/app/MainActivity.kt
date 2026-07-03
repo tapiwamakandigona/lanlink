@@ -51,55 +51,172 @@ class MainActivity : FlutterActivity() {
 
     private var wifiNetworkCallback: android.net.ConnectivityManager.NetworkCallback? = null
 
+    /// The `lanlink/wifi` channel, kept so native network events (e.g. the
+    /// joined hotspot dropping) can be pushed to the Dart side.
+    private var wifiChannel: MethodChannel? = null
+
+    /// Result waiting for the Settings "Add networks" save panel (Tier-2
+    /// join fallback, API 30+).
+    private var addNetworkResult: MethodChannel.Result? = null
+
     /**
      * Joins the given WPA2 hotspot with WifiNetworkSpecifier (API 29+) and
      * binds the process to that network so the app's sockets route over it.
-     * Resolves the Flutter result exactly once: true when connected, false
-     * on unavailability or after a 30 s timeout.
+     *
+     * Resolves the Flutter result exactly once with a machine-readable
+     * reason so Dart can drive the tiered fallback:
+     *   "connected"               — network available, process bound;
+     *   "declined_or_unavailable" — onUnavailable twice (user declined the
+     *                               system dialog, or no scan match);
+     *   "timeout"                 — nothing settled within 60 s;
+     *   "unsupported"             — pre-Android-10;
+     *   "error"                   — requestNetwork threw.
+     *
+     * Lifecycle: after onAvailable the callback stays registered for the
+     * whole session — releasing the request tears the local-only network
+     * down. leaveHotspotNetwork() (session end / disconnect) is the only
+     * place that unregisters and unbinds. One silent retry runs after the
+     * first onUnavailable (transient scan misses; the OS picker only scans
+     * every ~10 s).
      */
-    private fun joinHotspotNetwork(ssid: String, password: String, result: MethodChannel.Result) {
+    private fun joinHotspotNetwork(rawSsid: String, password: String, result: MethodChannel.Result) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            result.success("unsupported")
+            return
+        }
+        // The framework instantly rejects a specifier request while another
+        // one is still active ("Request cannot override active request") —
+        // always release any stale callback before requesting.
+        leaveHotspotNetwork()
+        // Android matches SSIDs byte-exactly against scan results; stray
+        // whitespace from the QR payload must never reach the specifier.
+        val ssid = rawSsid.trim()
+        val cm = getSystemService(android.net.ConnectivityManager::class.java)
+        val handler = Handler(Looper.getMainLooper())
+        var settled = false
+        var retried = false
+        fun settle(reason: String) {
+            if (settled) return
+            settled = true
+            result.success(reason)
+        }
+        fun fail(reason: String) {
+            if (settled) return  // never tear down a live session post-connect
+            // Release the pending request so Tier 2/3 (Settings-based) joins
+            // don't fight a still-active specifier dialog.
+            leaveHotspotNetwork()
+            settle(reason)
+        }
+        fun request() {
+            val specifier = android.net.wifi.WifiNetworkSpecifier.Builder()
+                .setSsid(ssid)
+                .apply { if (password.isNotEmpty()) setWpa2Passphrase(password) }
+                .build()
+            val networkRequest = android.net.NetworkRequest.Builder()
+                .addTransportType(android.net.NetworkCapabilities.TRANSPORT_WIFI)
+                .removeCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .setNetworkSpecifier(specifier)
+                .build()
+            val callback = object : android.net.ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: android.net.Network) {
+                    // Keep the callback registered (see the method KDoc).
+                    cm.bindProcessToNetwork(network)
+                    handler.post { settle("connected") }
+                }
+
+                override fun onUnavailable() {
+                    handler.post {
+                        if (settled) return@post
+                        if (!retried) {
+                            retried = true
+                            // Unregister the finished request before
+                            // re-requesting (override rejection, see above).
+                            wifiNetworkCallback?.let {
+                                try {
+                                    cm.unregisterNetworkCallback(it)
+                                } catch (_: Exception) {
+                                }
+                            }
+                            wifiNetworkCallback = null
+                            request()
+                        } else {
+                            fail("declined_or_unavailable")
+                        }
+                    }
+                }
+
+                override fun onLost(network: android.net.Network) {
+                    handler.post {
+                        cm.bindProcessToNetwork(null)
+                        // Tell Dart the hotspot dropped so the UI can react.
+                        wifiChannel?.invokeMethod("onNetworkLost", null)
+                    }
+                }
+            }
+            wifiNetworkCallback = callback
+            try {
+                cm.requestNetwork(networkRequest, callback)
+            } catch (e: Exception) {
+                wifiNetworkCallback = null
+                settle("error")
+            }
+        }
+        request()
+        // App-side timeout. Must outlive the OS picker's ~10 s scan cadence
+        // PLUS the user tap the FIRST join always needs in the system
+        // dialog — 30 s provably races and loses; 60 s does not.
+        handler.postDelayed({ fail("timeout") }, JOIN_TIMEOUT_MS)
+    }
+
+    /**
+     * Tier-2 join fallback (API 30+): opens the system "Add networks" save
+     * panel pre-filled with the hotspot credentials. Resolves true when the
+     * user saved the network (or it already existed), false otherwise.
+     */
+    private fun fallbackAddNetwork(rawSsid: String, password: String, result: MethodChannel.Result) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
             result.success(false)
             return
         }
-        leaveHotspotNetwork()
-        val cm = getSystemService(android.net.ConnectivityManager::class.java)
-        val specifier = android.net.wifi.WifiNetworkSpecifier.Builder()
-            .setSsid(ssid)
-            .apply { if (password.isNotEmpty()) setWpa2Passphrase(password) }
-            .build()
-        val request = android.net.NetworkRequest.Builder()
-            .addTransportType(android.net.NetworkCapabilities.TRANSPORT_WIFI)
-            .removeCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
-            .setNetworkSpecifier(specifier)
-            .build()
-        val handler = Handler(Looper.getMainLooper())
-        var settled = false
-        fun settle(ok: Boolean) {
-            if (settled) return
-            settled = true
-            result.success(ok)
-        }
-        val callback = object : android.net.ConnectivityManager.NetworkCallback() {
-            override fun onAvailable(network: android.net.Network) {
-                cm.bindProcessToNetwork(network)
-                handler.post { settle(true) }
-            }
-
-            override fun onUnavailable() {
-                handler.post { settle(false) }
-            }
-        }
-        wifiNetworkCallback = callback
-        try {
-            cm.requestNetwork(request, callback)
-        } catch (e: Exception) {
-            wifiNetworkCallback = null
-            settle(false)
+        if (addNetworkResult != null) {
+            result.error("busy", "Add-network panel already open", null)
             return
         }
-        // Belt-and-braces timeout in case neither callback fires.
-        handler.postDelayed({ settle(false) }, 30_000)
+        val suggestion = android.net.wifi.WifiNetworkSuggestion.Builder()
+            .setSsid(rawSsid.trim())
+            .apply { if (password.isNotEmpty()) setWpa2Passphrase(password) }
+            .build()
+        val intent = Intent(Settings.ACTION_WIFI_ADD_NETWORKS).apply {
+            putParcelableArrayListExtra(
+                Settings.EXTRA_WIFI_NETWORK_LIST,
+                arrayListOf(suggestion),
+            )
+        }
+        addNetworkResult = result
+        try {
+            startActivityForResult(intent, ADD_NETWORKS_REQUEST)
+        } catch (e: Exception) {
+            addNetworkResult = null
+            result.success(false)
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != ADD_NETWORKS_REQUEST) return
+        val pending = addNetworkResult ?: return
+        addNetworkResult = null
+        var saved = false
+        if (resultCode == RESULT_OK && data != null &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+        ) {
+            val codes = data.getIntegerArrayListExtra(Settings.EXTRA_WIFI_NETWORK_RESULT_LIST)
+            saved = codes?.any {
+                it == Settings.ADD_WIFI_RESULT_SUCCESS ||
+                    it == Settings.ADD_WIFI_RESULT_ALREADY_EXISTS
+            } ?: false
+        }
+        pending.success(saved)
     }
 
     /** Unbinds the process and releases any pending hotspot-join request. */
@@ -122,6 +239,8 @@ class MainActivity : FlutterActivity() {
 
     companion object {
         private const val HOTSPOT_PERMISSION_REQUEST = 7431
+        private const val ADD_NETWORKS_REQUEST = 7432
+        private const val JOIN_TIMEOUT_MS = 60_000L
     }
     private var shareChannel: MethodChannel? = null
 
@@ -317,29 +436,41 @@ class MainActivity : FlutterActivity() {
                 }
             }
 
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "lanlink/wifi")
-            .setMethodCallHandler { call, result ->
-                when (call.method) {
-                    "isSupported" ->
-                        result.success(Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
-                    "join" -> {
-                        val ssid = call.argument<String>("ssid")
-                        val pass = call.argument<String>("password") ?: ""
-                        if (ssid.isNullOrEmpty() ||
-                            Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
-                        ) {
-                            result.success(false)
-                        } else {
-                            joinHotspotNetwork(ssid, pass, result)
-                        }
+        wifiChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "lanlink/wifi")
+        wifiChannel?.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "isSupported" ->
+                    result.success(Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
+                // Tier 2 (Settings "Add networks" panel) needs API 30+.
+                "isAddNetworksSupported" ->
+                    result.success(Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+                "join" -> {
+                    val ssid = call.argument<String>("ssid")
+                    val pass = call.argument<String>("password") ?: ""
+                    if (ssid.isNullOrBlank() ||
+                        Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
+                    ) {
+                        result.success("unsupported")
+                    } else {
+                        joinHotspotNetwork(ssid, pass, result)
                     }
-                    "leave" -> {
-                        leaveHotspotNetwork()
-                        result.success(true)
-                    }
-                    else -> result.notImplemented()
                 }
+                "fallbackAddNetwork" -> {
+                    val ssid = call.argument<String>("ssid")
+                    val pass = call.argument<String>("password") ?: ""
+                    if (ssid.isNullOrBlank()) {
+                        result.success(false)
+                    } else {
+                        fallbackAddNetwork(ssid, pass, result)
+                    }
+                }
+                "leave" -> {
+                    leaveHotspotNetwork()
+                    result.success(true)
+                }
+                else -> result.notImplemented()
             }
+        }
 
         shareChannel = MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,

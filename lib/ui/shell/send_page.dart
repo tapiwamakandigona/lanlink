@@ -10,10 +10,12 @@ import 'package:uuid/uuid.dart';
 import '../../core/discovery/connect_payload.dart';
 import '../../core/models/device.dart';
 import '../../core/models/file_info.dart';
+import '../../core/platform/system_settings.dart';
 import '../../core/platform/wifi_joiner.dart';
 import '../../state/app_state.dart';
 import '../picker/share_picker_page.dart';
 import '../v4/direct_connect/connect_router.dart';
+import '../v4/direct_connect/join_fallback_sheet.dart';
 import '../v4/v4.dart';
 import 'session_display.dart';
 
@@ -164,12 +166,22 @@ class _SendPageState extends State<SendPage> {
     try {
       // Smart routing: try the peer on the current network first (fast
       // probe); only when it's unreachable AND the QR carries hotspot
-      // credentials do we auto-join the receiver's link.
+      // credentials do we auto-join the receiver's link (Tier 1), falling
+      // back to the Settings-based joins (Tiers 2/3) when that fails.
       if (payload.needsHotspotJoin) {
         final router = widget.connectRouter ?? ConnectRouter();
         setState(() => _progressLine = 'Reaching ${payload.alias}…');
-        final route = await router.route(payload);
-        switch (route) {
+        final decision = await router.decide(payload, onJoinStart: () {
+          // The #1 real-world failure: users don't know the system dialog
+          // needs a tap. Tell them exactly what to do while it's up.
+          if (mounted) {
+            setState(
+                () => _progressLine = 'Android will show a connection dialog — '
+                    'tap "${payload.ssid}", then Connect.');
+          }
+        });
+        if (!mounted) return;
+        switch (decision.route) {
           case ConnectRoute.direct:
           case ConnectRoute.unreachable:
             // Already reachable on this network (or nothing smarter to
@@ -177,12 +189,28 @@ class _SendPageState extends State<SendPage> {
             // the friendly error.
             break;
           case ConnectRoute.joinFailed:
-            _showError('Could not join "${payload.ssid}" automatically. '
-                'Join it from Wi-Fi settings, then scan again.');
-            await _camera?.start();
-            return;
+            // Tiers 2/3: Settings-based joins. When one of them makes the
+            // PC reachable we resume the normal connect below — the
+            // network is joined at DEVICE level then (no process binding),
+            // so _joinedHotspot stays false and Disconnect has nothing to
+            // release.
+            final resumed = await _runJoinFallback(payload, router,
+                reason: decision.joinResult);
+            if (!resumed) {
+              await _camera?.start();
+              return;
+            }
           case ConnectRoute.joinedHotspot:
             _joinedHotspot = true;
+            // The join's network callback stays registered for the whole
+            // session; surface an OS-side drop while this page still owns
+            // the binding (AppState takes over after hand-off).
+            WifiJoiner.setOnNetworkLost(() {
+              if (mounted && !_handedOff) {
+                _showError('The link to "${payload.alias}" dropped. '
+                    'Scan their code again to reconnect.');
+              }
+            });
             if (mounted) {
               setState(() => _progressLine = 'Joined their link — connecting…');
             }
@@ -216,6 +244,63 @@ class _SendPageState extends State<SendPage> {
         });
       }
     }
+  }
+
+  /// Tier-2/3 join fallback after a failed programmatic (Tier-1) join:
+  /// offers the system "Add networks" panel or manual Wi-Fi settings via a
+  /// bottom sheet, then polls the QR payload's ip:port until the PC is
+  /// reachable. Returns true when the connect flow should resume exactly
+  /// as a successful Tier-1 join would.
+  Future<bool> _runJoinFallback(
+    ConnectPayload payload,
+    ConnectRouter router, {
+    WifiJoinResult? reason,
+  }) async {
+    if (!mounted) return false;
+    setState(() {
+      _connecting = false;
+      _progressLine = null;
+    });
+    final canAddNetwork = await WifiJoiner.isAddNetworksSupported();
+    if (!mounted) return false;
+    final action = await showModalBottomSheet<JoinFallbackAction>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => JoinFallbackSheet(
+        ssid: payload.ssid!,
+        password: payload.password ?? '',
+        canAddNetwork: canAddNetwork,
+        reason: reason,
+      ),
+    );
+    if (!mounted || action == null) return false;
+    switch (action) {
+      case JoinFallbackAction.addNetwork:
+        final saved = await WifiJoiner.fallbackAddNetwork(
+            payload.ssid!, payload.password ?? '');
+        if (!saved) {
+          _showError('The network wasn\'t saved. '
+              'Join "${payload.ssid}" from Wi-Fi settings, then scan again.');
+          return false;
+        }
+      case JoinFallbackAction.openSettings:
+        // Best effort — the sheet already showed the password to type.
+        await SystemSettings.openWifiSettings();
+    }
+    if (!mounted) return false;
+    setState(() {
+      _connecting = true;
+      _progressLine = 'Waiting for this phone to reach ${payload.alias}…';
+    });
+    final reachable = await router.waitForReachable(payload);
+    if (!mounted) return false;
+    if (!reachable) {
+      _showError('Still can\'t reach "${payload.alias}". '
+          'Join "${payload.ssid}" in Wi-Fi settings, then scan again.');
+      return false;
+    }
+    setState(() => _progressLine = 'Reached ${payload.alias} — connecting…');
+    return true;
   }
 
   // ─── Connect path 3: Direct Link ─────────────────────────────────────
