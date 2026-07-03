@@ -22,8 +22,7 @@ class ReceivePage extends StatefulWidget {
   State<ReceivePage> createState() => _ReceivePageState();
 }
 
-class _ReceivePageState extends State<ReceivePage>
-    with WidgetsBindingObserver {
+class _ReceivePageState extends State<ReceivePage> with WidgetsBindingObserver {
   ConnectPayload? _payload;
 
   @override

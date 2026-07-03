@@ -40,8 +40,7 @@ Future<void> _loadFonts() async {
   await icons.load();
 }
 
-final String _outDir =
-    Platform.environment['V4_SHOTS_DIR'] ?? 'build/v4_shots';
+final String _outDir = Platform.environment['V4_SHOTS_DIR'] ?? 'build/v4_shots';
 
 Future<void> _capture(
   WidgetTester tester, {
@@ -62,15 +61,14 @@ Future<void> _capture(
 
   // Grow the surface to the gallery's full content height so the whole
   // page is on one PNG.
-  final position = tester
-      .state<ScrollableState>(find.byType(Scrollable).first)
-      .position;
+  final position =
+      tester.state<ScrollableState>(find.byType(Scrollable).first).position;
   final total = (1000 + position.maxScrollExtent).ceilToDouble();
   tester.view.physicalSize = Size(width, total);
   await tester.pump(const Duration(milliseconds: 400));
 
-  final boundary = tester
-      .renderObject<RenderRepaintBoundary>(find.byKey(boundaryKey));
+  final boundary =
+      tester.renderObject<RenderRepaintBoundary>(find.byKey(boundaryKey));
   await tester.runAsync(() async {
     final image = await boundary.toImage(pixelRatio: 2);
     final bytes = await image.toByteData(format: ui.ImageByteFormat.png);

@@ -30,8 +30,7 @@ void main() {
           same(EmberSemantics.dark));
     });
 
-    test('semantic colors are distinct from each other and from primary',
-        () {
+    test('semantic colors are distinct from each other and from primary', () {
       for (final (semantics, scheme) in [
         (EmberSemantics.light, EmberTheme.light().colorScheme),
         (EmberSemantics.dark, EmberTheme.dark().colorScheme),
@@ -42,8 +41,7 @@ void main() {
       }
     });
 
-    test('single-green rule: no component file hard-codes a Color literal',
-        () {
+    test('single-green rule: no component file hard-codes a Color literal', () {
       // The one structural guarantee of v4: colors live only in
       // lib/ui/v4/theme/. Any Color(0x...) literal elsewhere is a bug.
       final dir = Directory('lib/ui/v4');
@@ -52,7 +50,8 @@ void main() {
       final offenders = <String>[];
       for (final f in dir.listSync(recursive: true).whereType<File>()) {
         if (!f.path.endsWith('.dart')) continue;
-        if (f.path.contains('${Platform.pathSeparator}theme${Platform.pathSeparator}')) {
+        if (f.path.contains(
+            '${Platform.pathSeparator}theme${Platform.pathSeparator}')) {
           continue;
         }
         if (f.readAsStringSync().contains('Color(0x')) offenders.add(f.path);
@@ -77,8 +76,7 @@ void main() {
       expect(received, 1);
     });
 
-    testWidgets('shows visibility line with the device name',
-        (tester) async {
+    testWidgets('shows visibility line with the device name', (tester) async {
       await tester.pumpWidget(_host(TwoVerbHome(
         deviceName: 'Marmalade-Fox',
         onSend: () {},
@@ -90,8 +88,7 @@ void main() {
       );
     });
 
-    testWidgets('hidden state drops the name and says hidden',
-        (tester) async {
+    testWidgets('hidden state drops the name and says hidden', (tester) async {
       await tester.pumpWidget(_host(TwoVerbHome(
         deviceName: 'Marmalade-Fox',
         visible: false,
@@ -140,9 +137,11 @@ void main() {
     const peers = [
       RadarPeerData(
           id: 'fp-otter',
-          name: 'Purple-Otter', deviceType: DeviceType.laptop, verified: true),
+          name: 'Purple-Otter',
+          deviceType: DeviceType.laptop,
+          verified: true),
       RadarPeerData(
-        id: 'fp-heron', name: 'Sunny-Heron', deviceType: DeviceType.phone),
+          id: 'fp-heron', name: 'Sunny-Heron', deviceType: DeviceType.phone),
     ];
 
     testWidgets('shows names, never addresses', (tester) async {
@@ -176,8 +175,8 @@ void main() {
 
     testWidgets('empty + searching shows the looking-around state',
         (tester) async {
-      await tester.pumpWidget(
-          _host(DeviceRadar(peers: const [], onPeerTap: (_) {})));
+      await tester
+          .pumpWidget(_host(DeviceRadar(peers: const [], onPeerTap: (_) {})));
       await tester.pump();
       expect(find.text('Looking around…'), findsOneWidget);
       expect(find.byType(CircularProgressIndicator), findsOneWidget);
@@ -215,8 +214,8 @@ void main() {
     testWidgets('active: shows progress, speed, ETA, percent and Stop',
         (tester) async {
       var stopped = 0;
-      await tester.pumpWidget(_host(
-          SessionCard(data: transferring, onStop: () => stopped++)));
+      await tester.pumpWidget(
+          _host(SessionCard(data: transferring, onStop: () => stopped++)));
       expect(find.text('41 MB/s'), findsOneWidget);
       expect(find.text('about 2 min left'), findsOneWidget);
       expect(find.text('38%'), findsOneWidget);
@@ -309,8 +308,7 @@ void main() {
       ])));
       final context = tester.element(find.byType(Column).first);
       final ember = context.ember;
-      Text chipText(String label) =>
-          tester.widget<Text>(find.text(label));
+      Text chipText(String label) => tester.widget<Text>(find.text(label));
       expect(chipText('Sent!').style?.color, ember.onSuccessContainer);
       expect(chipText('Failed').style?.color, ember.onDangerContainer);
     });
@@ -328,8 +326,8 @@ void main() {
 
     testWidgets('states who wants to send what, with Verified badge',
         (tester) async {
-      await tester.pumpWidget(_host(ConsentSheet(
-          data: request, onAccept: () {}, onDecline: () {})));
+      await tester.pumpWidget(_host(
+          ConsentSheet(data: request, onAccept: () {}, onDecline: () {})));
       expect(find.text('Purple-Otter'), findsOneWidget);
       expect(find.text('wants to send you 14 files (48 MB)'), findsOneWidget);
       expect(find.byType(VerifiedBadge), findsOneWidget);
@@ -374,8 +372,7 @@ void main() {
         deviceName: 'Marmalade-Fox',
       )));
       expect(find.text('Marmalade-Fox'), findsOneWidget);
-      expect(
-          find.text('Scan this from the sending device'), findsOneWidget);
+      expect(find.text('Scan this from the sending device'), findsOneWidget);
     });
 
     testWidgets('QrScanFrame shows hint and hosts an injected preview',

@@ -87,8 +87,7 @@ class _FirstRunPageState extends State<FirstRunPage> {
                   Text(
                     'Send files to nearby devices — no internet, no accounts. '
                     'Other devices will see you by this name:',
-                    style:
-                        VType.body.copyWith(color: scheme.onSurfaceVariant),
+                    style: VType.body.copyWith(color: scheme.onSurfaceVariant),
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: VSpace.x6),

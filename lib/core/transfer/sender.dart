@@ -295,13 +295,15 @@ class Sender {
     required Device peer,
   }) async {
     _inflight[session]?.cancel('cancelled by user');
-    _markPendingFiles(
-        session, session.files.values.map((p) => p.file), TransferStatus.cancelled);
+    _markPendingFiles(session, session.files.values.map((p) => p.file),
+        TransferStatus.cancelled);
     session.markStatus(TransferStatus.cancelled);
     // Only sessions the receiver has acknowledged (prepare-upload returned)
     // exist on the peer; locally-minted placeholder ids are not dialable.
     final sid = session.sessionId;
-    if (sid.isEmpty || sid.startsWith('sending-') || sid.startsWith('bluetooth-')) {
+    if (sid.isEmpty ||
+        sid.startsWith('sending-') ||
+        sid.startsWith('bluetooth-')) {
       return;
     }
     try {
@@ -332,8 +334,8 @@ class Sender {
   }
 
   /// Marks every file that hasn't reached a terminal per-file state yet.
-  void _markPendingFiles(
-      TransferSession session, Iterable<FileInfo> files, TransferStatus status) {
+  void _markPendingFiles(TransferSession session, Iterable<FileInfo> files,
+      TransferStatus status) {
     for (final f in files) {
       final p = session.files[f.id];
       if (p == null) continue;

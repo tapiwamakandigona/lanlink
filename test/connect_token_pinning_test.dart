@@ -151,8 +151,7 @@ void main() {
           Sender(localDeviceProvider: () => _device('me', 'me-fp', 1)));
 
       final token = receiver.issueConnectToken();
-      final device =
-          await state.connectWithToken('127.0.0.1:$port', token);
+      final device = await state.connectWithToken('127.0.0.1:$port', token);
       expect(device, isNotNull);
       expect(settings.isPinned('receiver-fp'), isTrue,
           reason: 'a successful connect must pin the peer fingerprint');

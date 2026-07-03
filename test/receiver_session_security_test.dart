@@ -338,8 +338,7 @@ void main() {
   });
 
   test('terminal session statuses are sticky on the model', () {
-    final f = FileInfo(
-        id: 'x', fileName: 'x.bin', size: 1, fileType: 'other');
+    final f = FileInfo(id: 'x', fileName: 'x.bin', size: 1, fileType: 'other');
     final s = TransferSession(
       sessionId: 's',
       direction: TransferDirection.receive,

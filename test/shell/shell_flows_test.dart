@@ -235,13 +235,12 @@ void main() {
         fingerprint: 'self',
         token: 'tok-123',
       );
-      await tester.pumpWidget(
-          _wrap(state, const ReceivePage(debugPayload: payload)));
+      await tester
+          .pumpWidget(_wrap(state, const ReceivePage(debugPayload: payload)));
       await tester.pump();
 
       expect(find.byType(QrImageView), findsOneWidget);
-      final panel =
-          tester.widget<QrDisplayPanel>(find.byType(QrDisplayPanel));
+      final panel = tester.widget<QrDisplayPanel>(find.byType(QrDisplayPanel));
       expect(panel.payload, contains('t=tok-123'));
       expect(panel.payload, contains('192.168.1.10'));
       // Direct Link fallback shows host:port.
@@ -260,8 +259,8 @@ void main() {
       state.debugPeerSeen(_peer(alias: 'Purple-Otter', fingerprint: 'fp-a'));
       state.debugPeerSeen(_peer(alias: 'Stranger', fingerprint: 'fp-b'));
 
-      await tester.pumpWidget(
-          _wrap(state, SendPage(scannerBuilder: fakeScanner)));
+      await tester
+          .pumpWidget(_wrap(state, SendPage(scannerBuilder: fakeScanner)));
       await tester.pump();
 
       expect(find.text('Purple-Otter'), findsOneWidget);
@@ -564,9 +563,7 @@ void main() {
       addTearDown(tester.view.reset);
       final state = await _makeState(tester);
       state.seedForScreenshots(sessions: [
-        _session(
-            id: 'rx-live',
-            direction: TransferDirection.receive),
+        _session(id: 'rx-live', direction: TransferDirection.receive),
         _session(
             id: 'rx-done',
             status: TransferStatus.completed,
@@ -639,8 +636,8 @@ void main() {
       final fake = _FakeSender(probeResult: null);
       state.debugInstallSender(fake);
 
-      await tester.pumpWidget(
-          _wrap(state, SendPage(scannerBuilder: fakeScanner)));
+      await tester
+          .pumpWidget(_wrap(state, SendPage(scannerBuilder: fakeScanner)));
       await tester.pump();
       await tester.enterText(find.byType(TextField), '192.168.1.99:53317');
       await tester.tap(find.text('Connect'));
@@ -649,8 +646,7 @@ void main() {
       await tester.pump();
 
       expect(fake.probedHosts, ['192.168.1.99:53317']);
-      expect(find.textContaining('No LanLink device answered'),
-          findsOneWidget);
+      expect(find.textContaining('No LanLink device answered'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
     });
 
@@ -660,8 +656,8 @@ void main() {
       final fake = _FakeSender();
       state.debugInstallSender(fake);
 
-      await tester.pumpWidget(
-          _wrap(state, SendPage(scannerBuilder: fakeScanner)));
+      await tester
+          .pumpWidget(_wrap(state, SendPage(scannerBuilder: fakeScanner)));
       await tester.pump();
       await tester.enterText(
           find.byType(TextField), 'fe80::a1b2:c3d4:e5f6:1234');
@@ -684,8 +680,8 @@ void main() {
       );
       state.debugInstallSender(fake);
 
-      await tester.pumpWidget(
-          _wrap(state, SendPage(scannerBuilder: fakeScanner)));
+      await tester
+          .pumpWidget(_wrap(state, SendPage(scannerBuilder: fakeScanner)));
       await tester.pump();
       await tester.enterText(find.byType(TextField), '192.168.1.99:53317');
       await tester.tap(find.text('Connect'));
@@ -710,8 +706,7 @@ void main() {
       await tester.pump();
 
       // No receiver: dead-end state now has a Retry escape hatch.
-      expect(
-          find.text("Receiving isn't available right now"), findsOneWidget);
+      expect(find.text("Receiving isn't available right now"), findsOneWidget);
       expect(find.text('Retry'), findsOneWidget);
 
       late Receiver receiver;
@@ -758,8 +753,7 @@ void main() {
       // …and the page re-mints so the visible QR stays valid.
       await tester.pump();
       await tester.pump();
-      final panel2 =
-          tester.widget<QrDisplayPanel>(find.byType(QrDisplayPanel));
+      final panel2 = tester.widget<QrDisplayPanel>(find.byType(QrDisplayPanel));
       final tokenB = ConnectPayload.tryParse(panel2.payload)!.token!;
       expect(tokenB, isNot(tokenA));
       expect(state.isConnectTokenValid(tokenB), isTrue);

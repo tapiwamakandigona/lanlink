@@ -117,8 +117,7 @@ void main() {
   test('sender cancel aborts the in-flight send and notifies the receiver',
       () async {
     final (sender, peer, info, session) = buildSend();
-    final sendFuture =
-        sender.send(session: session, peer: peer, files: [info]);
+    final sendFuture = sender.send(session: session, peer: peer, files: [info]);
 
     // Wait until the upload is genuinely in flight on the receiver.
     await uploadGateReached.future.timeout(const Duration(seconds: 10));
@@ -141,8 +140,7 @@ void main() {
   test('receiver-side stop surfaces as cancelled on the sending side',
       () async {
     final (sender, peer, info, session) = buildSend();
-    final sendFuture =
-        sender.send(session: session, peer: peer, files: [info]);
+    final sendFuture = sender.send(session: session, peer: peer, files: [info]);
 
     await uploadGateReached.future.timeout(const Duration(seconds: 10));
     expect(receiveSession, isNotNull);

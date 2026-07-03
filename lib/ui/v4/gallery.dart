@@ -34,12 +34,16 @@ class V4GalleryPage extends StatelessWidget {
   static const _peers = [
     RadarPeerData(
         id: 'fp-otter',
-        name: 'Purple-Otter', deviceType: DeviceType.laptop, verified: true),
+        name: 'Purple-Otter',
+        deviceType: DeviceType.laptop,
+        verified: true),
     RadarPeerData(
         id: 'fp-heron', name: 'Sunny-Heron', deviceType: DeviceType.phone),
     RadarPeerData(
         id: 'fp-badger',
-        name: 'Quiet-Badger', deviceType: DeviceType.desktop, verified: true),
+        name: 'Quiet-Badger',
+        deviceType: DeviceType.desktop,
+        verified: true),
     RadarPeerData(
         id: 'fp-finch', name: 'Copper-Finch', deviceType: DeviceType.tablet),
     RadarPeerData(

@@ -33,6 +33,9 @@ void main() {
     expect(discovery.announcementJson()['port'], 53401,
         reason: 'announcements must advertise the port the receiver '
             'actually listens on');
-    expect(discovery.announcementJson()['announce'] ?? discovery.announcementJson()['announcement'], isNotNull);
+    expect(
+        discovery.announcementJson()['announce'] ??
+            discovery.announcementJson()['announcement'],
+        isNotNull);
   });
 }

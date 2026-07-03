@@ -51,8 +51,7 @@ class _LanLinkAppState extends State<LanLinkApp> {
         known?.verified ?? state.settings.isPinned(peer.fingerprint);
     final name = state.settings.nicknameFor(peer.fingerprint) ??
         (peer.alias.trim().isEmpty ? 'Unnamed device' : peer.alias.trim());
-    final totalSize =
-        files.fold<int>(0, (sum, f) => sum + f.size);
+    final totalSize = files.fold<int>(0, (sum, f) => sum + f.size);
     // "Always accept from this device" pins trust to the LOCALLY resolved
     // fingerprint (peer pipeline / pin store), never the identity the
     // sender claimed in the offer. No local resolution => no trust option.

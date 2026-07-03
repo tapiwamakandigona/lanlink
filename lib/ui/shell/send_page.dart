@@ -174,8 +174,7 @@ class _SendPageState extends State<SendPage> {
       _error = null;
     });
     try {
-      final peer =
-          await context.read<AppState>().probeManualPeer(hostPort);
+      final peer = await context.read<AppState>().probeManualPeer(hostPort);
       if (!mounted) return;
       setState(() => _connecting = false);
       if (peer == null) {
@@ -326,8 +325,8 @@ class _SendPageState extends State<SendPage> {
                       const SizedBox(width: VSpace.x3),
                       Text(
                         'Connecting…',
-                        style: VType.body
-                            .copyWith(color: scheme.onSurfaceVariant),
+                        style:
+                            VType.body.copyWith(color: scheme.onSurfaceVariant),
                       ),
                     ],
                   ),

@@ -90,15 +90,14 @@ class _HomePageState extends State<HomePage> {
                     state.settings.skippedUpdateVersion != update.tagName)
                   UpdateAvailableBanner(
                     release: update,
-                    onDismiss: () => state.settings
-                        .setSkippedUpdateVersion(update.tagName),
+                    onDismiss: () =>
+                        state.settings.setSkippedUpdateVersion(update.tagName),
                   ),
                 TwoVerbHome(
                   deviceName: state.displayAlias,
                   visible: state.port != null,
                   onSend: () => Navigator.of(context).pushNamed('/send'),
-                  onReceive: () =>
-                      Navigator.of(context).pushNamed('/receive'),
+                  onReceive: () => Navigator.of(context).pushNamed('/receive'),
                 ),
                 if (clusters.isNotEmpty) ...[
                   const SizedBox(height: VSpace.x6),
@@ -107,8 +106,8 @@ class _HomePageState extends State<HomePage> {
                       Expanded(
                         child: Text(
                           'Transfers',
-                          style: VType.heading
-                              .copyWith(color: scheme.onSurface),
+                          style:
+                              VType.heading.copyWith(color: scheme.onSurface),
                         ),
                       ),
                       if (hasFinished)

@@ -40,9 +40,8 @@ v4.SessionCardData sessionCardData(TransferSession session,
     {String? peerName}) {
   final files = session.files.values.toList();
   final status = displayStatus(session);
-  final title = files.length == 1
-      ? files.first.file.fileName
-      : '${files.length} files';
+  final title =
+      files.length == 1 ? files.first.file.fileName : '${files.length} files';
   final transferring = status == v4.SessionStatus.transferring;
   final speed = session.speedBytesPerSec;
   String? errorHint;

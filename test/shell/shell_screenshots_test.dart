@@ -49,8 +49,7 @@ Future<void> _loadFonts() async {
   await icons.load();
 }
 
-final String _outDir =
-    Platform.environment['V4_SHOTS_DIR'] ?? 'build/v4_shots';
+final String _outDir = Platform.environment['V4_SHOTS_DIR'] ?? 'build/v4_shots';
 
 Device _peer(String alias, String fp, {bool verified = false}) => Device(
       alias: alias,

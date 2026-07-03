@@ -78,9 +78,10 @@ void main() {
       files: {info.id: FileProgress(file: info)},
     );
     // Must complete without throwing — errors belong in the session state.
-    await sender
-        .send(session: session, peer: peer, files: [info])
-        .timeout(const Duration(seconds: 10));
+    await sender.send(
+        session: session,
+        peer: peer,
+        files: [info]).timeout(const Duration(seconds: 10));
     return session;
   }
 

@@ -83,8 +83,7 @@ void main() {
       final active = _session('s1', peer, TransferStatus.transferring);
       final done = _session('s2', peer, TransferStatus.completed);
       final failed = _session('s3', peer, TransferStatus.failed);
-      state.seedForScreenshots(
-          peers: [peer], sessions: [active, done, failed]);
+      state.seedForScreenshots(peers: [peer], sessions: [active, done, failed]);
 
       state.dismissFinishedSessions();
       expect(state.visibleSessions, [active]);
