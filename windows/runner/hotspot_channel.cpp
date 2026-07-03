@@ -19,6 +19,8 @@
 #include <ws2tcpip.h>   // inet_ntop            (link ws2_32.lib)
 #include <windows.h>
 #include <iphlpapi.h>   // GetAdaptersAddresses (link iphlpapi.lib)
+#include <wincrypt.h>   // DATA_BLOB
+#include <dpapi.h>      // CryptProtectData/CryptUnprotectData (link crypt32.lib)
 
 #include "hotspot_channel.h"
 
@@ -50,6 +52,7 @@
 #include <mutex>
 #include <optional>
 #include <random>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <utility>
@@ -191,8 +194,11 @@ std::vector<std::string> WaitForHostIps() {
 // FIRST successful WifiNetworkSpecifier join; every later join to the SAME
 // ssid+passphrase is silent (no system dialog). Regenerating credentials on
 // every start destroyed that, so the WFD path persists them under
-// %APPDATA%\LanLink\hotspot_creds (two lines: ssid, passphrase) and reloads
-// them on each start, regenerating only when the file is missing or invalid.
+// %APPDATA%\LanLink\hotspot_creds and reloads them on each start,
+// regenerating only when the file is missing or invalid. The file is a DPAPI
+// (per-user) encrypted blob prefixed with the "LLC1" magic; older installs
+// wrote two plaintext lines (ssid, passphrase), which are still readable and
+// get transparently re-saved encrypted on first load (one-time migration).
 // The Mobile-Hotspot piggyback paths are deliberately NOT persisted: they
 // report Windows' own hotspot credentials, which we don't own.
 
@@ -238,20 +244,51 @@ std::optional<std::wstring> CredsFilePath(bool create_dir) {
   return dir + L"\\hotspot_creds";
 }
 
-// Returns true and fills ssid/pass only when the persisted values pass
-// validation; any malformed file is ignored (caller regenerates).
-bool LoadPersistedCreds(std::string* ssid, std::string* pass) {
-  auto path = CredsFilePath(/*create_dir=*/false);
-  if (!path) {
+// Magic header marking the DPAPI-encrypted credential format. Anything else
+// is treated as the legacy two-line plaintext format (DPAPI ciphertext always
+// starts with a fixed GUID, so a plaintext SSID can never collide with this).
+constexpr char kCredsMagic[] = "LLC1";
+constexpr size_t kCredsMagicLen = 4;
+
+// Per-user DPAPI encrypt. The description string shows up in DPAPI audit
+// tooling; it is not a secret. UI_FORBIDDEN because we run non-interactive.
+bool DpapiEncrypt(const std::string& plaintext, std::vector<uint8_t>* out) {
+  DATA_BLOB in{};
+  in.pbData =
+      reinterpret_cast<BYTE*>(const_cast<char*>(plaintext.data()));
+  in.cbData = static_cast<DWORD>(plaintext.size());
+  DATA_BLOB encrypted{};
+  if (!CryptProtectData(&in, L"LanLink hotspot credentials", nullptr, nullptr,
+                        nullptr, CRYPTPROTECT_UI_FORBIDDEN, &encrypted)) {
     return false;
   }
-  std::ifstream file(path->c_str());  // MSVC supports wide-path streams.
-  if (!file) {
+  out->assign(encrypted.pbData, encrypted.pbData + encrypted.cbData);
+  LocalFree(encrypted.pbData);
+  return true;
+}
+
+bool DpapiDecrypt(const uint8_t* data, size_t size, std::string* out) {
+  DATA_BLOB in{};
+  in.pbData = const_cast<BYTE*>(data);
+  in.cbData = static_cast<DWORD>(size);
+  DATA_BLOB decrypted{};
+  if (!CryptUnprotectData(&in, nullptr, nullptr, nullptr, nullptr,
+                          CRYPTPROTECT_UI_FORBIDDEN, &decrypted)) {
     return false;
   }
+  out->assign(reinterpret_cast<char*>(decrypted.pbData), decrypted.cbData);
+  LocalFree(decrypted.pbData);
+  return true;
+}
+
+// Parses "ssid\npass" (optionally CRLF / trailing newline) and validates.
+// Shared by both the decrypted-blob and legacy-plaintext load paths.
+bool ParseAndValidateCreds(const std::string& text, std::string* ssid,
+                           std::string* pass) {
+  std::istringstream stream(text);
   std::string s;
   std::string p;
-  if (!std::getline(file, s) || !std::getline(file, p)) {
+  if (!std::getline(stream, s) || !std::getline(stream, p)) {
     return false;
   }
   // Tolerate CRLF from hand-edited files.
@@ -271,12 +308,58 @@ void SavePersistedCreds(const std::string& ssid, const std::string& pass) {
     LogError("could not resolve creds path; hotspot creds not persisted");
     return;
   }
-  std::ofstream file(path->c_str(), std::ios::trunc);
+  std::vector<uint8_t> blob;
+  if (!DpapiEncrypt(ssid + "\n" + pass + "\n", &blob)) {
+    // Fail closed: better to regenerate next run than persist plaintext.
+    LogError("DPAPI encrypt failed; hotspot creds not persisted");
+    return;
+  }
+  std::ofstream file(path->c_str(),
+                     std::ios::binary | std::ios::trunc);  // wide-path: MSVC
   if (!file) {
     LogError("could not write hotspot creds file");
     return;
   }
-  file << ssid << "\n" << pass << "\n";
+  file.write(kCredsMagic, kCredsMagicLen);
+  file.write(reinterpret_cast<const char*>(blob.data()),
+             static_cast<std::streamsize>(blob.size()));
+}
+
+// Returns true and fills ssid/pass only when the persisted values pass
+// validation; any malformed or undecryptable file is ignored (caller
+// regenerates). Legacy plaintext files are re-saved encrypted on the spot.
+bool LoadPersistedCreds(std::string* ssid, std::string* pass) {
+  auto path = CredsFilePath(/*create_dir=*/false);
+  if (!path) {
+    return false;
+  }
+  std::string raw;
+  {
+    std::ifstream file(path->c_str(),
+                       std::ios::binary);  // MSVC supports wide-path streams.
+    if (!file) {
+      return false;
+    }
+    std::ostringstream buffer;
+    buffer << file.rdbuf();
+    raw = buffer.str();
+  }
+  if (raw.size() >= kCredsMagicLen &&
+      raw.compare(0, kCredsMagicLen, kCredsMagic, kCredsMagicLen) == 0) {
+    std::string plaintext;
+    if (!DpapiDecrypt(
+            reinterpret_cast<const uint8_t*>(raw.data()) + kCredsMagicLen,
+            raw.size() - kCredsMagicLen, &plaintext)) {
+      return false;  // Corrupt blob or copied from another user/machine.
+    }
+    return ParseAndValidateCreds(plaintext, ssid, pass);
+  }
+  // Legacy plaintext format — migrate to the encrypted format once.
+  if (!ParseAndValidateCreds(raw, ssid, pass)) {
+    return false;
+  }
+  SavePersistedCreds(*ssid, *pass);
+  return true;
 }
 
 // ---------------------------------------------------------------------------
