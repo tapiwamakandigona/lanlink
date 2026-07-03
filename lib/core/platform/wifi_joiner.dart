@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
@@ -53,7 +54,16 @@ class WifiJoiner {
   /// contract that Tier-2/3 (device-level) joins release nothing.
   static Future<void> Function()? debugLeave;
 
-  static bool get isPlatformSupported => Platform.isAndroid;
+  /// Test hook: forces [isPlatformSupported] (there is no Android under
+  /// `flutter test`, but the channel itself can be mocked).
+  static bool? debugPlatformSupportedOverride;
+
+  /// Dart-side guard on the platform `join` reply (see [join]). Mutable so
+  /// tests can shrink it instead of waiting 90 real seconds.
+  static Duration joinReplyTimeout = const Duration(seconds: 90);
+
+  static bool get isPlatformSupported =>
+      debugPlatformSupportedOverride ?? Platform.isAndroid;
 
   /// Registers (or clears, with null) the callback fired when a joined
   /// hotspot network drops (`onLost` on the platform side, which also
@@ -99,13 +109,19 @@ class WifiJoiner {
   /// machine-readable outcome; the platform side waits up to ~60 s (the OS
   /// picker scans every ~10 s and first-time joins need a user tap in the
   /// system dialog, so shorter app timers race the dialog and lose).
+  ///
+  /// Safety net: like [fallbackAddNetwork], the platform reply can get lost
+  /// (activity recreation, OEM lifecycle quirks) — without a Dart-side
+  /// guard that wedges the Send page spinner forever. The platform side
+  /// waits ~60 s plus one silent retry, so 90 s gives it headroom while
+  /// still resolving to [WifiJoinResult.timeout] eventually.
   static Future<WifiJoinResult> join(String ssid, String password) async {
     if (!isPlatformSupported) return WifiJoinResult.unsupported;
     try {
       final reason = await _channel.invokeMethod<String>(
         'join',
         {'ssid': ssid, 'password': password},
-      );
+      ).timeout(joinReplyTimeout);
       switch (reason) {
         case 'connected':
           return WifiJoinResult.connected;
@@ -118,6 +134,8 @@ class WifiJoiner {
         default:
           return WifiJoinResult.error;
       }
+    } on TimeoutException {
+      return WifiJoinResult.timeout;
     } catch (_) {
       return WifiJoinResult.error;
     }
