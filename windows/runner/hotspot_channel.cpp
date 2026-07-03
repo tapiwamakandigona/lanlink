@@ -79,6 +79,12 @@ winrt::event_token g_conn_token{};
 NetworkOperatorTetheringManager g_tethering{nullptr};
 bool g_we_started_tethering = false;
 
+// Bumped by every DoStop. An in-flight DoStart captures the value at entry
+// and refuses to commit (tearing down whatever it just started) if a stop
+// happened in between — otherwise stop() racing a slow start() could leave a
+// live hotspot the app no longer knows about.
+std::uint64_t g_generation = 0;
+
 std::string g_ssid;
 std::string g_password;
 
@@ -93,14 +99,17 @@ std::string RandomSuffix(size_t length) {
   // No easily-confused characters (0/O, 1/l/I).
   static constexpr char kAlnum[] =
       "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+  // Used for the WPA2 passphrase, so entropy matters: std::random_device is
+  // CSPRNG-backed on MSVC, and drawing every character from it directly gives
+  // the full character-space entropy. (Seeding an mt19937 from a single rd()
+  // word would collapse the whole string to a 2^32 search space.)
   std::random_device rd;
-  std::mt19937 gen(rd());
   std::uniform_int_distribution<int> dist(
       0, static_cast<int>(sizeof(kAlnum)) - 2);
   std::string s;
   s.reserve(length);
   for (size_t i = 0; i < length; ++i) {
-    s += kAlnum[dist(gen)];
+    s += kAlnum[dist(rd)];
   }
   return s;
 }
@@ -201,7 +210,7 @@ NetworkOperatorTetheringManager GetTetheringManager() {
 }
 
 // Returns true + records ssid/pass on success. Blocking; worker thread only.
-bool StartTetheringFallback(std::string* err) {
+bool StartTetheringFallback(std::string* err, std::uint64_t start_generation) {
   auto manager = GetTetheringManager();
   if (!manager) {
     *err = "tethering unavailable (no connection profile, or disabled by "
@@ -225,13 +234,27 @@ bool StartTetheringFallback(std::string* err) {
     }
     we_started = true;  // stop() only stops what we started
   }
-  std::lock_guard<std::mutex> lock(g_mutex);
-  g_tethering = manager;
-  g_we_started_tethering = we_started;
-  g_ssid = winrt::to_string(config.Ssid());
-  g_password = winrt::to_string(config.Passphrase());
-  g_mode = Mode::kTethering;
-  return true;
+  {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (g_generation == start_generation) {
+      g_tethering = manager;
+      g_we_started_tethering = we_started;
+      g_ssid = winrt::to_string(config.Ssid());
+      g_password = winrt::to_string(config.Passphrase());
+      g_mode = Mode::kTethering;
+      return true;
+    }
+  }
+  // stop() ran while we were starting. Only undo tethering we started
+  // ourselves; the blocking stop happens outside g_mutex.
+  if (we_started) {
+    try {
+      manager.StopTetheringAsync().get();
+    } catch (...) {
+    }
+  }
+  *err = "cancelled by stop()";
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -250,7 +273,7 @@ struct PublisherWaitState {
   WiFiDirectError error = WiFiDirectError::Success;
 };
 
-bool StartWifiDirect(std::string* err) {
+bool StartWifiDirect(std::string* err, std::uint64_t start_generation) {
   std::string ssid = "LanLink-" + RandomSuffix(4);
   // Passphrase MUST be >= 8 chars, otherwise Start() aborts with an unknown
   // error. Do NOT use a "DIRECT-" SSID prefix: Android applies special P2P
@@ -305,10 +328,14 @@ bool StartWifiDirect(std::string* err) {
       });
 
   publisher.Start();
+  WiFiDirectAdvertisementPublisherStatus final_status =
+      WiFiDirectAdvertisementPublisherStatus::Created;
+  WiFiDirectError final_error = WiFiDirectError::Success;
   {
     std::unique_lock<std::mutex> lock(wait->mutex);
     if (!wait->cv.wait_for(lock, std::chrono::seconds(10),
                            [&] { return wait->final_status.has_value(); })) {
+      lock.unlock();
       publisher.StatusChanged(status_token);
       listener.ConnectionRequested(conn_token);
       try {
@@ -318,25 +345,44 @@ bool StartWifiDirect(std::string* err) {
       *err = "WFD publisher start timed out";
       return false;
     }
+    // Copy while still holding wait->mutex: the StatusChanged handler is
+    // still subscribed and may fire again (e.g. Started -> Aborted),
+    // rewriting these fields concurrently with any unlocked read.
+    final_status = *wait->final_status;
+    final_error = wait->error;
   }
-  if (*wait->final_status != WiFiDirectAdvertisementPublisherStatus::Started) {
+  if (final_status != WiFiDirectAdvertisementPublisherStatus::Started) {
     publisher.StatusChanged(status_token);
     listener.ConnectionRequested(conn_token);
     // WiFiDirectError: RadioNotAvailable (Wi-Fi off / airplane mode) or
     //                  ResourceInUse (Mobile Hotspot on, other GO active).
     *err = "WFD advertisement aborted, error=" +
-           std::to_string(static_cast<int>(wait->error));
+           std::to_string(static_cast<int>(final_error));
     return false;
   }
-  std::lock_guard<std::mutex> lock(g_mutex);
-  g_publisher = publisher;
-  g_listener = listener;
-  g_status_token = status_token;
-  g_conn_token = conn_token;
-  g_ssid = ssid;
-  g_password = pass;
-  g_mode = Mode::kWifiDirect;
-  return true;
+  {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (g_generation == start_generation) {
+      g_publisher = publisher;
+      g_listener = listener;
+      g_status_token = status_token;
+      g_conn_token = conn_token;
+      g_ssid = ssid;
+      g_password = pass;
+      g_mode = Mode::kWifiDirect;
+      return true;
+    }
+  }
+  // stop() ran while we were starting: tear down what we just started
+  // (outside g_mutex) instead of stranding a live publisher.
+  publisher.StatusChanged(status_token);
+  listener.ConnectionRequested(conn_token);
+  try {
+    publisher.Stop();
+  } catch (...) {
+  }
+  *err = "cancelled by stop()";
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -346,6 +392,11 @@ bool StartWifiDirect(std::string* err) {
 // failure.
 EncodableValue DoStart() {
   bool started = false;
+  std::uint64_t start_generation = 0;
+  {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    start_generation = g_generation;
+  }
 
   // If Mobile Hotspot is ALREADY on, WFD cannot start (Mobile Hotspot takes
   // precedence over all Wi-Fi Direct scenarios) — just piggyback on it.
@@ -355,6 +406,9 @@ EncodableValue DoStart() {
         manager.TetheringOperationalState() == TetheringOperationalState::On) {
       auto config = manager.GetCurrentAccessPointConfiguration();
       std::lock_guard<std::mutex> lock(g_mutex);
+      if (g_generation != start_generation) {
+        return EncodableValue();  // stop() raced us; nothing to undo
+      }
       g_tethering = manager;
       g_we_started_tethering = false;
       g_ssid = winrt::to_string(config.Ssid());
@@ -369,11 +423,17 @@ EncodableValue DoStart() {
   if (!started) {
     std::string wfd_error;
     std::string tethering_error;
-    if (StartWifiDirect(&wfd_error)) {
+    if (StartWifiDirect(&wfd_error, start_generation)) {
       started = true;
     } else {
+      {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        if (g_generation != start_generation) {
+          return EncodableValue();  // stop() cancelled this start
+        }
+      }
       try {
-        started = StartTetheringFallback(&tethering_error);
+        started = StartTetheringFallback(&tethering_error, start_generation);
       } catch (winrt::hresult_error const& e) {
         tethering_error = "hresult " + winrt::to_string(e.message());
       }
@@ -391,6 +451,9 @@ EncodableValue DoStart() {
     ip_list.emplace_back(ip);
   }
   std::lock_guard<std::mutex> lock(g_mutex);
+  if (g_generation != start_generation) {
+    return EncodableValue();  // stop() ran while polling IPs; state is gone
+  }
   return EncodableValue(EncodableMap{
       {EncodableValue("ssid"), EncodableValue(g_ssid)},
       {EncodableValue("password"), EncodableValue(g_password)},
@@ -399,29 +462,51 @@ EncodableValue DoStart() {
 }
 
 void DoStop() {
-  std::lock_guard<std::mutex> lock(g_mutex);
-  if (g_mode == Mode::kWifiDirect && g_publisher) {
-    try {
-      g_publisher.StatusChanged(g_status_token);
-      g_listener.ConnectionRequested(g_conn_token);
-      g_publisher.Stop();
-    } catch (...) {
-    }
+  // Snapshot-and-clear under g_mutex, then do the blocking WinRT stop calls
+  // OUTSIDE the lock: StopTetheringAsync().get() can take seconds, and
+  // Shutdown() (platform thread, app close) joins a worker running DoStop.
+  Mode mode = Mode::kNone;
+  WiFiDirectAdvertisementPublisher publisher{nullptr};
+  WiFiDirectConnectionListener listener{nullptr};
+  winrt::event_token status_token{};
+  winrt::event_token conn_token{};
+  NetworkOperatorTetheringManager tethering{nullptr};
+  bool we_started_tethering = false;
+  {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    ++g_generation;  // cancels any in-flight DoStart (see g_generation)
+    mode = g_mode;
+    publisher = std::move(g_publisher);
+    listener = std::move(g_listener);
+    status_token = g_status_token;
+    conn_token = g_conn_token;
+    tethering = std::move(g_tethering);
+    we_started_tethering = g_we_started_tethering;
     g_publisher = nullptr;
     g_listener = nullptr;
-  } else if (g_mode == Mode::kTethering && g_tethering &&
-             g_we_started_tethering) {
+    g_status_token = {};
+    g_conn_token = {};
+    g_tethering = nullptr;
+    g_mode = Mode::kNone;
+    g_ssid.clear();
+    g_password.clear();
+    g_we_started_tethering = false;
+  }
+  if (mode == Mode::kWifiDirect && publisher) {
+    try {
+      // Revoke handlers before Stop(), as before.
+      publisher.StatusChanged(status_token);
+      listener.ConnectionRequested(conn_token);
+      publisher.Stop();
+    } catch (...) {
+    }
+  } else if (mode == Mode::kTethering && tethering && we_started_tethering) {
     // Only stop tethering we started; never turn off the user's own hotspot.
     try {
-      g_tethering.StopTetheringAsync().get();
+      tethering.StopTetheringAsync().get();
     } catch (...) {
     }
   }
-  g_tethering = nullptr;
-  g_mode = Mode::kNone;
-  g_ssid.clear();
-  g_password.clear();
-  g_we_started_tethering = false;
 }
 
 bool DoIsRunning() {

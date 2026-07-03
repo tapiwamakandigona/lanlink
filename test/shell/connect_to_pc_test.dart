@@ -4,7 +4,6 @@
 // calls are faked — no test ever touches a real method channel.
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lanlink/core/discovery/connect_payload.dart';
 import 'package:lanlink/core/platform/local_hotspot.dart';
@@ -76,34 +75,6 @@ HotspotHostController _fakeController(List<String> log) =>
       stop: () async => log.add('stop'),
     );
 
-/// Mocks the `lanlink/hotspot` channel for flows that construct their own
-/// [HotspotHostController] (e.g. navigating from home), so nothing falls
-/// through to a real platform.
-void _mockHotspotChannel(WidgetTester tester) {
-  const channel = MethodChannel('lanlink/hotspot');
-  tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel,
-      (call) async {
-    switch (call.method) {
-      case 'isSupported':
-      case 'hasPermission':
-      case 'requestPermission':
-      case 'isRunning':
-        return true;
-      case 'start':
-        return <String, Object?>{
-          'ssid': _hotspotInfo.ssid,
-          'password': _hotspotInfo.password,
-          'hostIps': _hotspotInfo.hostIps,
-        };
-      case 'stop':
-        return null;
-    }
-    return null;
-  });
-  addTearDown(() => tester.binding.defaultBinaryMessenger
-      .setMockMethodCallHandler(channel, null));
-}
-
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -136,9 +107,13 @@ void main() {
           TargetPlatform.linux,
         }));
 
-    testWidgets('tap opens Receive already hosting the direct link',
+    testWidgets('tap opens Receive with "No shared Wi-Fi" pre-selected',
         (tester) async {
-      _mockHotspotChannel(tester);
+      // Scope: navigation + initialMode preselection only. Hosting is NOT
+      // exercised here — the tile constructs a real HotspotHostController
+      // whose isSupported gates on dart:io Platform, which is false on the
+      // test host. Auto-hosting, QR contents, and teardown are covered by
+      // the debugHotspotController tests below.
       final state = await _makeState(tester);
       await tester.pumpWidget(_wrap(state, const HomePage()));
       await tester.pump();
@@ -149,11 +124,10 @@ void main() {
       expect(find.byType(ReceivePage), findsOneWidget);
       final page = tester.widget<ReceivePage>(find.byType(ReceivePage));
       expect(page.initialMode, NetworkMode.directLink);
-      // "No shared Wi-Fi" mode is live (not the unsupported fallback, not
-      // a permission stop) — the mocked channel accepted the start call.
-      expect(find.text('No shared Wi-Fi'), findsOneWidget);
-      expect(find.textContaining('needs an Android'), findsNothing);
-      expect(find.text('Allow and continue'), findsNothing);
+      final modeSwitch = tester
+          .widget<NetworkModeSwitch>(find.byType(NetworkModeSwitch));
+      expect(modeSwitch.mode, NetworkMode.directLink,
+          reason: '"No shared Wi-Fi" should be the selected mode');
     }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
   });
 
