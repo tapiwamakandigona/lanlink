@@ -43,6 +43,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <fstream>
 #include <functional>
 #include <iostream>
 #include <memory>
@@ -184,6 +185,101 @@ std::vector<std::string> WaitForHostIps() {
 }
 
 // ---------------------------------------------------------------------------
+// Persistent WFD credentials
+// ---------------------------------------------------------------------------
+// Android records a per-app "user approved this network" entry after the
+// FIRST successful WifiNetworkSpecifier join; every later join to the SAME
+// ssid+passphrase is silent (no system dialog). Regenerating credentials on
+// every start destroyed that, so the WFD path persists them under
+// %APPDATA%\LanLink\hotspot_creds (two lines: ssid, passphrase) and reloads
+// them on each start, regenerating only when the file is missing or invalid.
+// The Mobile-Hotspot piggyback paths are deliberately NOT persisted: they
+// report Windows' own hotspot credentials, which we don't own.
+
+// Plain printable ASCII only: the QR payload, the WinRT LegacySettings and
+// Android's byte-exact SSID matching all agree on that subset.
+bool IsPrintableAscii(const std::string& value) {
+  for (char c : value) {
+    if (c < 0x20 || c > 0x7e) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool IsValidSsid(const std::string& ssid) {
+  if (ssid.empty() || ssid.size() > 32 || !IsPrintableAscii(ssid)) {
+    return false;
+  }
+  // Leading/trailing spaces survive a QR round-trip badly (Android matches
+  // SSIDs byte-exactly) — treat them as corrupt.
+  return ssid.front() != ' ' && ssid.back() != ' ';
+}
+
+bool IsValidPassphrase(const std::string& pass) {
+  // WPA2-PSK passphrase: 8..63 ASCII characters.
+  return pass.size() >= 8 && pass.size() <= 63 && IsPrintableAscii(pass);
+}
+
+// %APPDATA%\LanLink\hotspot_creds. Empty optional when APPDATA is unset or
+// the directory can't be created.
+std::optional<std::wstring> CredsFilePath(bool create_dir) {
+  wchar_t appdata[MAX_PATH] = {};
+  DWORD len = GetEnvironmentVariableW(L"APPDATA", appdata, MAX_PATH);
+  if (len == 0 || len >= MAX_PATH) {
+    return std::nullopt;
+  }
+  std::wstring dir(appdata);
+  dir += L"\\LanLink";
+  if (create_dir && !CreateDirectoryW(dir.c_str(), nullptr) &&
+      GetLastError() != ERROR_ALREADY_EXISTS) {
+    return std::nullopt;
+  }
+  return dir + L"\\hotspot_creds";
+}
+
+// Returns true and fills ssid/pass only when the persisted values pass
+// validation; any malformed file is ignored (caller regenerates).
+bool LoadPersistedCreds(std::string* ssid, std::string* pass) {
+  auto path = CredsFilePath(/*create_dir=*/false);
+  if (!path) {
+    return false;
+  }
+  std::ifstream file(path->c_str());  // MSVC supports wide-path streams.
+  if (!file) {
+    return false;
+  }
+  std::string s;
+  std::string p;
+  if (!std::getline(file, s) || !std::getline(file, p)) {
+    return false;
+  }
+  // Tolerate CRLF from hand-edited files.
+  if (!s.empty() && s.back() == '\r') s.pop_back();
+  if (!p.empty() && p.back() == '\r') p.pop_back();
+  if (!IsValidSsid(s) || !IsValidPassphrase(p)) {
+    return false;
+  }
+  *ssid = s;
+  *pass = p;
+  return true;
+}
+
+void SavePersistedCreds(const std::string& ssid, const std::string& pass) {
+  auto path = CredsFilePath(/*create_dir=*/true);
+  if (!path) {
+    LogError("could not resolve creds path; hotspot creds not persisted");
+    return;
+  }
+  std::ofstream file(path->c_str(), std::ios::trunc);
+  if (!file) {
+    LogError("could not write hotspot creds file");
+    return;
+  }
+  file << ssid << "\n" << pass << "\n";
+}
+
+// ---------------------------------------------------------------------------
 // Fallback: Mobile Hotspot via NetworkOperatorTetheringManager
 // ---------------------------------------------------------------------------
 // CreateFromConnectionProfile needs a non-null profile, but
@@ -274,12 +370,19 @@ struct PublisherWaitState {
 };
 
 bool StartWifiDirect(std::string* err, std::uint64_t start_generation) {
-  std::string ssid = "LanLink-" + RandomSuffix(4);
-  // Passphrase MUST be >= 8 chars, otherwise Start() aborts with an unknown
-  // error. Do NOT use a "DIRECT-" SSID prefix: Android applies special P2P
-  // heuristics to those; a plain name keeps WifiNetworkSpecifier on the
-  // ordinary STA join path.
-  std::string pass = RandomSuffix(10);
+  // Stable credentials across runs (see "Persistent WFD credentials" above):
+  // reuse the persisted pair when valid, otherwise mint + persist a new one.
+  std::string ssid;
+  std::string pass;
+  if (!LoadPersistedCreds(&ssid, &pass)) {
+    ssid = "LanLink-" + RandomSuffix(4);
+    // Passphrase MUST be >= 8 chars, otherwise Start() aborts with an unknown
+    // error. Do NOT use a "DIRECT-" SSID prefix: Android applies special P2P
+    // heuristics to those; a plain name keeps WifiNetworkSpecifier on the
+    // ordinary STA join path.
+    pass = RandomSuffix(10);
+    SavePersistedCreds(ssid, pass);
+  }
 
   WiFiDirectAdvertisementPublisher publisher;
   auto advertisement = publisher.Advertisement();
