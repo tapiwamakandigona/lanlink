@@ -5,9 +5,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
+import '../core/platform/app_invite.dart';
 import '../core/util/event_log.dart';
 import '../state/app_state.dart';
 import 'widgets/check_for_updates_tile.dart';
+import 'widgets/invite_friend_tile.dart';
 import 'widgets/glossary_tooltip.dart';
 import 'widgets/need_help_footer.dart';
 
@@ -203,6 +205,14 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           const SizedBox(height: 8),
           const CheckForUpdatesTile(),
+          if (AppInvite.isSupported) ...[
+            const Divider(height: 32),
+            Text('Spread the word', style: theme.textTheme.titleMedium),
+            const SizedBox(height: 8),
+            InviteFriendTile(
+              version: state.updateChecker.currentVersion?.toString(),
+            ),
+          ],
           const Divider(height: 32),
           Text('Help & diagnostics', style: theme.textTheme.titleMedium),
           const SizedBox(height: 8),
