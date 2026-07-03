@@ -16,6 +16,7 @@ import '../core/models/session.dart';
 import '../core/platform/foreground_service.dart';
 import '../core/platform/platform_share.dart';
 import '../core/platform/transfer_notifications.dart';
+import '../core/platform/wifi_joiner.dart';
 import '../core/protocol/constants.dart';
 import '../core/settings/app_settings.dart';
 import '../core/transfer/receiver.dart';
@@ -90,9 +91,13 @@ class AppState extends ChangeNotifier {
   void seedForScreenshots({
     List<Device> peers = const [],
     List<TransferSession> sessions = const [],
+    List<Device> linkedPeers = const [],
   }) {
     for (final d in peers) {
       _peers[d.fingerprint] = d;
+    }
+    for (final d in linkedPeers) {
+      _linkedPeers[d.fingerprint] = d;
     }
     _sessions.insertAll(0, sessions);
     notifyListeners();
@@ -110,7 +115,11 @@ class AppState extends ChangeNotifier {
   /// a live loopback listener.
   @visibleForTesting
   void debugInstallReceiver(Receiver receiver) {
-    _receiver = receiver..onConnectTokenRedeemed = notifyListeners;
+    _receiver = receiver
+      ..onConnectTokenRedeemed = notifyListeners
+      ..onPeerConnected = _handlePeerConnected
+      ..onPeerDisconnected = _handlePeerDisconnectRequest
+      ..isPeerBlocked = isPeerDisconnected;
   }
 
   /// Test hook: routes [peer] through the same code path as a live
@@ -140,6 +149,149 @@ class AppState extends ChangeNotifier {
   /// Map of peer fingerprint -> Device. Latest announcement wins.
   final Map<String, Device> _peers = {};
   Map<String, Device> get peers => Map.unmodifiable(_peers);
+
+  // ─── Symmetric sessions (F3) ───────────────────────────────────────────
+  //
+  // Once two devices pair (QR token, Direct Link probe, or an accepted
+  // transfer) the session is symmetric: both sides keep a live link so
+  // either can send without re-scanning. Disconnect clears the link on both
+  // sides and blocks further pushes from that peer until it re-pairs.
+
+  /// Peers with an active symmetric session, keyed by fingerprint. The
+  /// stored [Device] carries the address a send-back should dial.
+  final Map<String, Device> _linkedPeers = {};
+
+  /// Linked peers, in insertion (pairing) order, for the session UI.
+  List<Device> get linkedPeers => List.unmodifiable(_linkedPeers.values);
+
+  /// Whether an active symmetric session exists with [fingerprint].
+  bool isLinked(String fingerprint) =>
+      fingerprint.isNotEmpty && _linkedPeers.containsKey(fingerprint);
+
+  /// Fingerprints disconnected this run. The receiver rejects their
+  /// `/prepare-upload` with 403 (server-side, not just UI) until they
+  /// re-pair through a deliberate connect.
+  final Set<String> _disconnectedPeers = {};
+
+  /// Whether [fingerprint] was disconnected and must re-pair before it can
+  /// push files to this device again. Wired into the receiver's
+  /// `isPeerBlocked` gate.
+  bool isPeerDisconnected(String fingerprint) =>
+      _disconnectedPeers.contains(fingerprint);
+
+  /// Direct Connect teardown hook (F1 contract): while this device hosts a
+  /// LocalOnlyHotspot, the owning surface registers the controller's stop
+  /// path here so Disconnect can tear the hotspot down.
+  Future<void> Function()? _hotspotTeardown;
+
+  /// Registers (or clears, with null) the hotspot stop path used by
+  /// [disconnectPeer]. Registered by the Receive page while it hosts a
+  /// Direct Connect hotspot.
+  void registerHotspotTeardown(Future<void> Function()? teardown) {
+    _hotspotTeardown = teardown;
+  }
+
+  /// True after this device joined a peer-hosted hotspot as a guest and
+  /// handed the network binding off to the session (F1 contract): the
+  /// Disconnect path then releases it via [WifiJoiner.leave].
+  bool _joinedHotspotAsGuest = false;
+
+  /// Marks that the session now owns a guest-side hotspot binding.
+  void markJoinedHotspotAsGuest() => _joinedHotspotAsGuest = true;
+
+  /// Records (or refreshes) a symmetric link with [peer]. When [pin] is
+  /// true the fingerprint is also pinned (verified badge + trust), which is
+  /// reserved for deliberate connects: QR token redemption on either side,
+  /// or a manual Direct Link probe.
+  void _linkPeer(Device peer, {bool pin = false}) {
+    if (peer.fingerprint.isEmpty || peer.fingerprint == _fingerprint) return;
+    _disconnectedPeers.remove(peer.fingerprint);
+    final existing = _linkedPeers.remove(peer.fingerprint);
+    _linkedPeers[peer.fingerprint] = peer;
+    if (pin) unawaited(_pinPeer(peer));
+    if (existing == null ||
+        existing.ip != peer.ip ||
+        existing.port != peer.port ||
+        existing.alias != peer.alias) {
+      notifyListeners();
+    }
+  }
+
+  /// Receiver callback: a peer redeemed our one-time connect token and
+  /// identified itself. Trust it back (pin + link) so the pairing is
+  /// symmetric — this is what lets the receiver send without re-scanning.
+  void _handlePeerConnected(Device peer) {
+    _linkPeer(peer, pin: true);
+  }
+
+  /// Receiver callback for `/disconnect`: only a currently linked peer
+  /// whose address matches what we linked may end the session. Returns
+  /// whether the disconnect was accepted (the route answers 403 otherwise).
+  bool _handlePeerDisconnectRequest(Device peer) {
+    final linked = _linkedPeers[peer.fingerprint];
+    if (linked == null) return false;
+    if (linked.ip.isNotEmpty && peer.ip.isNotEmpty && linked.ip != peer.ip) {
+      return false;
+    }
+    unawaited(disconnectPeer(linked, notifyRemote: false));
+    return true;
+  }
+
+  /// Ends the symmetric session with [peer], from either side's button or
+  /// a peer's `/disconnect` call ([notifyRemote] false). Cancels in-flight
+  /// transfers, clears the link and the pinned/quick-save trust (unpair),
+  /// blocks further pushes from the peer until it re-pairs, notifies the
+  /// peer (best-effort), and tears down any Direct Connect networking this
+  /// device holds (hosted hotspot, or a guest-side join).
+  Future<void> disconnectPeer(Device peer, {bool notifyRemote = true}) async {
+    final fp = peer.fingerprint;
+    EventLog.instance.add('Disconnected from ${peer.alias}');
+    // Stop anything still moving with this peer, both directions.
+    for (final s in List.of(_sessions)) {
+      if (!s.isTerminal && s.peer.fingerprint == fp) {
+        await cancelSession(s);
+      }
+    }
+    _receiver?.dropSessionsForPeer(fp);
+    _linkedPeers.remove(fp);
+    if (fp.isNotEmpty) {
+      _disconnectedPeers.add(fp);
+      // Unpair: the peer must re-pair before it is trusted (or can push)
+      // again. Clears the verified badge and any quick-save trust.
+      if (settings.isPinned(fp)) await settings.unpinFingerprint(fp);
+      if (settings.trustedFingerprints.contains(fp)) {
+        await settings.untrust(fp);
+      }
+      final known = _peers[fp];
+      if (known != null && known.verified) {
+        _peers[fp] = known.copyWith(verified: false);
+      }
+    }
+    if (notifyRemote) {
+      final sender = _sender;
+      if (sender != null) await sender.notifyDisconnect(peer);
+    }
+    await _teardownDirectConnect();
+    notifyListeners();
+  }
+
+  /// Direct Connect session-end hooks (F1 contract): stop a hosted hotspot
+  /// via the registered controller stop path, and release a guest-side
+  /// join via [WifiJoiner.leave].
+  Future<void> _teardownDirectConnect() async {
+    final teardown = _hotspotTeardown;
+    if (teardown != null) {
+      try {
+        await teardown();
+      } catch (_) {
+        // Teardown is best-effort; the OS reclaims the reservation anyway.
+      }
+    }
+    if (_joinedHotspotAsGuest) {
+      _joinedHotspotAsGuest = false;
+      if (!_networkSilent) await WifiJoiner.leave();
+    }
+  }
 
   /// In-progress and finished sessions, newest first.
   final List<TransferSession> _sessions = [];
@@ -211,7 +363,13 @@ class AppState extends ChangeNotifier {
     )
       // A redeemed connect token invalidates the QR on screen; notify so
       // the Receive page re-mints a fresh one.
-      ..onConnectTokenRedeemed = state.notifyListeners;
+      ..onConnectTokenRedeemed = state.notifyListeners
+      // Symmetric sessions (F3): a redeemed token links the caller back,
+      // disconnects are honoured only for linked peers, and disconnected
+      // peers are blocked server-side until they re-pair.
+      ..onPeerConnected = state._handlePeerConnected
+      ..onPeerDisconnected = state._handlePeerDisconnectRequest
+      ..isPeerBlocked = state.isPeerDisconnected;
     final sender = Sender(localDeviceProvider: state._buildSelfDevice);
     state._sender = sender;
     // The discovery service gets a *provider*, not a snapshot: the self
@@ -404,8 +562,27 @@ class AppState extends ChangeNotifier {
     _attachNotifications(session);
     _attachHistoryPersistence(session);
     _attachForegroundLifecycle(session);
-    session.addListener(() => notifyListeners());
+    _attachStatusNotify(session);
     _refreshForegroundService();
+    // The user accepted a transfer from this peer: the session is now
+    // symmetric, so they can send back without re-scanning. No pin — the
+    // verified badge stays reserved for token/deliberate connects.
+    _linkPeer(session.peer);
+  }
+
+  /// Re-broadcasts a session's *status* transitions as AppState changes so
+  /// pages tracking session membership/terminal state stay fresh. Progress
+  /// ticks (byte counters, per-file updates) deliberately do NOT fan out
+  /// into a global [notifyListeners] — the session card subscribes to its
+  /// own [TransferSession] for those, so a 10 Hz tick repaints one card,
+  /// not every mounted page.
+  void _attachStatusNotify(TransferSession session) {
+    var last = session.status;
+    session.addListener(() {
+      if (session.status == last) return;
+      last = session.status;
+      notifyListeners();
+    });
   }
 
   /// Hooks a session into the Android foreground service so the OS keeps
@@ -534,11 +711,15 @@ class AppState extends ChangeNotifier {
     }
     final existing = _peers[peer.fingerprint];
     _peers[peer.fingerprint] = peer;
-    if (existing == null || existing.alias != peer.alias) {
-      notifyListeners();
-    } else {
-      // Even when nothing visible changed we still notify on a debounced
-      // boundary so "last seen" indicators (future feature) can update.
+    // Only notify when something the UI renders (or dials) actually
+    // changed. Peers re-announce every 5s and probes re-run every 6s, so an
+    // unconditional notify here kept idle pages rebuilding forever.
+    if (existing == null ||
+        existing.alias != peer.alias ||
+        existing.verified != peer.verified ||
+        existing.ip != peer.ip ||
+        existing.port != peer.port ||
+        existing.deviceType != peer.deviceType) {
       notifyListeners();
     }
   }
@@ -581,13 +762,16 @@ class AppState extends ChangeNotifier {
     // the whole exchange as one card (Stage 2 wires the visuals).
     session.groupId = _groupIdForNewSendTo(peer);
     _sessions.insert(0, session);
-    session.addListener(() => notifyListeners());
+    _attachStatusNotify(session);
     _attachNotifications(session);
     _attachHistoryPersistence(session);
     _attachForegroundLifecycle(session);
     _attachOutcomeLog(session, peer.alias);
     notifyListeners();
     _refreshForegroundService();
+    // Sending to a peer is a deliberate re-engagement: (re)link so the
+    // exchange is symmetric and any earlier disconnect block is lifted.
+    _linkPeer(peer);
 
     EventLog.instance.add('Sending ${files.length} file(s) to ${peer.alias}');
 
@@ -659,7 +843,7 @@ class AppState extends ChangeNotifier {
       status: TransferStatus.awaitingAccept,
     );
     _sessions.insert(0, session);
-    session.addListener(() => notifyListeners());
+    _attachStatusNotify(session);
     _attachNotifications(session);
     _attachHistoryPersistence(session);
     _attachForegroundLifecycle(session);
@@ -750,8 +934,10 @@ class AppState extends ChangeNotifier {
     final probed = await _sender?.probe(stub);
     if (probed != null) {
       // A deliberate direct connect that succeeded: pin the fingerprint so
-      // this peer shows as verified from now on.
+      // this peer shows as verified from now on, and link the session so
+      // either side can send (F3).
       await _pinPeer(probed);
+      _linkPeer(probed);
       _onPeerSeen(probed);
     }
     return probed;
@@ -781,6 +967,9 @@ class AppState extends ChangeNotifier {
     final device = await sender.connectWithToken(stub, token);
     if (device != null) {
       await _pinPeer(device);
+      // Pairing succeeded: open the symmetric session (F3). The peer's
+      // receiver links us back through its onPeerConnected hook.
+      _linkPeer(device);
       _onPeerSeen(device);
     }
     return device;

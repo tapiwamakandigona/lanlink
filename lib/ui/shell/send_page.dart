@@ -30,12 +30,18 @@ class SendPage extends StatefulWidget {
   const SendPage({
     super.key,
     this.prestagedFiles,
+    this.targetPeer,
     this.scannerBuilder,
     this.connectRouter,
   });
 
   /// Files staged before the page opened (Android share-into-app).
   final List<FileInfo>? prestagedFiles;
+
+  /// When set (the "Send files" action on a linked session, F3), the page
+  /// goes straight to picking files for this peer — no radar tap or scan
+  /// needed. Cancelling the picker leaves the normal send page up.
+  final Device? targetPeer;
 
   /// Test hook: replaces the live camera preview inside the scan frame.
   final Widget Function(BuildContext, void Function(String raw))?
@@ -88,6 +94,14 @@ class _SendPageState extends State<SendPage> {
       if (!mounted) return;
       unawaited(context.read<AppState>().refreshDiscovery());
     });
+    // Linked-session send-back: skip straight to the file picker for the
+    // peer we're already paired with.
+    final target = widget.targetPeer;
+    if (target != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) unawaited(_sendTo(target));
+      });
+    }
   }
 
   @override
@@ -251,8 +265,10 @@ class _SendPageState extends State<SendPage> {
       if (files.isEmpty || !mounted) return;
       final state = context.read<AppState>();
       await state.sendFiles(peer: peer, files: files);
-      // The session owns any joined hotspot network from here on.
+      // The session owns any joined hotspot network from here on; the
+      // Disconnect path releases it via WifiJoiner.leave() (F1 contract).
       _handedOff = true;
+      if (_joinedHotspot) state.markJoinedHotspotAsGuest();
       if (!mounted) return;
       // Back to home, where the session card shows live progress.
       Navigator.of(context).popUntil((route) => route.isFirst);
@@ -343,7 +359,10 @@ class _SendPageState extends State<SendPage> {
                   peers: [
                     for (final p in peers) radarPeerData(state.settings, p),
                   ],
-                  searching: true,
+                  // Real discovery state (perf S3): the radar's spinner
+                  // only animates while a sweep is actually in flight, so
+                  // an idle screen stops repainting every frame.
+                  searching: state.isScanning,
                   onPeerTap: (tapped) {
                     if (_busy) return;
                     // Resolve by fingerprint, never by display name:
@@ -365,12 +384,16 @@ class _SendPageState extends State<SendPage> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2.5,
-                          color: scheme.primary,
+                      // RepaintBoundary: the looping spinner repaints every
+                      // frame — keep that off the rest of the page's layer.
+                      RepaintBoundary(
+                        child: SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.5,
+                            color: scheme.primary,
+                          ),
                         ),
                       ),
                       const SizedBox(width: VSpace.x3),

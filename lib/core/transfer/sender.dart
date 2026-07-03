@@ -326,6 +326,31 @@ class Sender {
     }
   }
 
+  /// F3 Disconnect: tells [peer] this device is ending the pairing so it
+  /// clears its side too (unlink, drop tokens, back to idle). Best-effort
+  /// with tight timeouts — the local side disconnects regardless of whether
+  /// the peer is still reachable. Returns true when the peer acknowledged
+  /// (HTTP 200).
+  Future<bool> notifyDisconnect(Device peer) async {
+    try {
+      final resp = await _dio.postUri<dynamic>(
+        peer.baseUri.replace(path: LanLinkProtocol.routeDisconnect),
+        data: localDeviceProvider().toJson(),
+        options: Options(
+          responseType: ResponseType.plain,
+          sendTimeout: const Duration(seconds: 5),
+          receiveTimeout: const Duration(seconds: 5),
+          validateStatus: (status) => status != null,
+        ),
+      );
+      return resp.statusCode == 200;
+    } on DioException catch (e) {
+      // Best-effort: the peer may already be gone.
+      if (kDebugMode) debugPrint('[sender] disconnect notify failed: $e');
+      return false;
+    }
+  }
+
   /// True when [e] (or the session state) indicates a deliberate local
   /// cancellation rather than a failure.
   bool _wasCancelled(TransferSession session, Object e) {

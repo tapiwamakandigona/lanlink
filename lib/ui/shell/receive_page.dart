@@ -48,6 +48,11 @@ class _ReceivePageState extends State<ReceivePage> with WidgetsBindingObserver {
   NetworkMode _mode = NetworkMode.sameWifi;
   HotspotHostController? _hotspot;
 
+  /// The AppState we registered the hotspot stop path with (F3 Disconnect
+  /// teardown hook), kept so dispose can unregister without touching
+  /// context after deactivation.
+  AppState? _teardownRegistrar;
+
   /// Only Android can host a LocalOnlyHotspot from inside an app.
   bool get _canHostDirectLink =>
       widget.debugHotspotController != null || Platform.isAndroid;
@@ -62,6 +67,8 @@ class _ReceivePageState extends State<ReceivePage> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _teardownRegistrar?.registerHotspotTeardown(null);
+    _teardownRegistrar = null;
     final hotspot = _hotspot;
     if (hotspot != null) {
       hotspot.removeListener(_onHotspotChanged);
@@ -95,8 +102,16 @@ class _ReceivePageState extends State<ReceivePage> with WidgetsBindingObserver {
       final hotspot = _hotspot ??= (widget.debugHotspotController ??
           HotspotHostController())
         ..addListener(_onHotspotChanged);
+      // F3 Disconnect teardown hook (F1 contract): while this device
+      // hosts, AppState holds the stop path so Disconnect can tear the
+      // hotspot down even though this page owns the controller.
+      final appState = context.read<AppState>();
+      appState.registerHotspotTeardown(hotspot.disable);
+      _teardownRegistrar = appState;
       unawaited(hotspot.enable());
     } else {
+      _teardownRegistrar?.registerHotspotTeardown(null);
+      _teardownRegistrar = null;
       unawaited(_hotspot?.disable());
       _mintPayload();
     }
@@ -158,17 +173,25 @@ class _ReceivePageState extends State<ReceivePage> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final state = context.watch<AppState>();
+    // Narrow subscriptions (perf): this page only needs the display alias
+    // and the "is the QR's token still valid" bit, so it selects those
+    // instead of watching all of AppState — an unrelated notify (peer
+    // announcements, session changes) no longer re-encodes the QR.
+    final displayAlias =
+        context.select<AppState, String>((s) => s.displayAlias);
     final payload = _payload;
     // Tokens are single-use: the moment a sender redeems the displayed
     // one, re-mint so the QR on screen is always valid (a second device
     // can scan right away).
     final token = payload?.token;
-    if (widget.debugPayload == null &&
+    final tokenStale = context.select<AppState, bool>((s) =>
+        widget.debugPayload == null &&
         token != null &&
-        !state.isConnectTokenValid(token)) {
+        !s.isConnectTokenValid(token));
+    if (tokenStale) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
+        final state = context.read<AppState>();
         final current = _payload?.token;
         if (current != null && !state.isConnectTokenValid(current)) {
           _mintPayload();
@@ -188,7 +211,7 @@ class _ReceivePageState extends State<ReceivePage> with WidgetsBindingObserver {
                 children: [
                   NetworkModeSwitch(mode: _mode, onChanged: _setMode),
                   const SizedBox(height: VSpace.x5),
-                  ..._buildBody(scheme, state, payload),
+                  ..._buildBody(scheme, displayAlias, payload),
                 ],
               ),
             ),
@@ -200,7 +223,7 @@ class _ReceivePageState extends State<ReceivePage> with WidgetsBindingObserver {
 
   List<Widget> _buildBody(
     ColorScheme scheme,
-    AppState state,
+    String displayAlias,
     ConnectPayload? payload,
   ) {
     if (_mode == NetworkMode.directLink) {
@@ -243,7 +266,7 @@ class _ReceivePageState extends State<ReceivePage> with WidgetsBindingObserver {
             else ...[
               QrDisplayPanel(
                 payload: payload.toQrString(),
-                deviceName: state.displayAlias,
+                deviceName: displayAlias,
               ),
               const SizedBox(height: VSpace.x3),
               Text(
@@ -264,7 +287,7 @@ class _ReceivePageState extends State<ReceivePage> with WidgetsBindingObserver {
       else ...[
         QrDisplayPanel(
           payload: payload.toQrString(),
-          deviceName: state.displayAlias,
+          deviceName: displayAlias,
         ),
         const SizedBox(height: VSpace.x6),
         Text(
@@ -296,12 +319,16 @@ class _ProgressLine extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          SizedBox(
-            width: 16,
-            height: 16,
-            child: CircularProgressIndicator(
-              strokeWidth: 2.5,
-              color: scheme.primary,
+          // RepaintBoundary: the looping spinner repaints every frame —
+          // keep that off the rest of the page's layer.
+          RepaintBoundary(
+            child: SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(
+                strokeWidth: 2.5,
+                color: scheme.primary,
+              ),
             ),
           ),
           const SizedBox(width: VSpace.x3),
