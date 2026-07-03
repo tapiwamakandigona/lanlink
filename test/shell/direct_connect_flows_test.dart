@@ -304,8 +304,11 @@ void main() {
       final redeemed = <String>[];
       state.debugInstallSender(_TokenSender(onToken: redeemed.add));
       final joins = <String>[];
+      var probes = 0;
       final router = ConnectRouter(
-        probe: (ip, port, timeout) async => false,
+        // The routing probe fails (peer unreachable on this network); the
+        // post-join readiness poll succeeds once the hotspot is up.
+        probe: (ip, port, timeout) async => ++probes > 1,
         joinHotspot: (ssid, pass) async {
           joins.add('$ssid/$pass');
           return WifiJoinResult.connected;
