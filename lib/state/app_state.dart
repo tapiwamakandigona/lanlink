@@ -105,6 +105,14 @@ class AppState extends ChangeNotifier {
     _sender = sender;
   }
 
+  /// Test hook: installs a real [Receiver] on a network-silent instance so
+  /// the Receive page's token minting/re-minting can be exercised against
+  /// a live loopback listener.
+  @visibleForTesting
+  void debugInstallReceiver(Receiver receiver) {
+    _receiver = receiver..onConnectTokenRedeemed = notifyListeners;
+  }
+
   /// Test hook: routes [peer] through the same code path as a live
   /// discovery/probe observation (including verified-flag resolution).
   @visibleForTesting
@@ -200,7 +208,10 @@ class AppState extends ChangeNotifier {
       onAccept: state._handleIncomingPrompt,
       onSessionStarted: state._handleNewReceiveSession,
       onPeerSeen: state._onPeerSeen,
-    );
+    )
+      // A redeemed connect token invalidates the QR on screen; notify so
+      // the Receive page re-mints a fresh one.
+      ..onConnectTokenRedeemed = state.notifyListeners;
     final sender = Sender(localDeviceProvider: state._buildSelfDevice);
     state._sender = sender;
     // The discovery service gets a *provider*, not a snapshot: the self
@@ -752,6 +763,12 @@ class AppState extends ChangeNotifier {
   /// running (nothing to connect to anyway).
   String? issueConnectToken() => _receiver?.issueConnectToken();
 
+  /// Whether [token] is still the redeemable connect token; false once it
+  /// was consumed or superseded by a newer mint (or when the receiver is
+  /// not running).
+  bool isConnectTokenValid(String token) =>
+      _receiver?.isConnectTokenValid(token) ?? false;
+
   /// Redeems a scanned QR's one-time [token] against the peer at
   /// [hostPort]. On success the peer's fingerprint is pinned (=> verified)
   /// and it is added to the peer list. Returns null when the token was
@@ -776,7 +793,19 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  /// True when [hostPort] looks like an IPv6 address (raw or `[v6]:port`),
+  /// which Direct Link cannot connect to yet. The UI shows a specific
+  /// error instead of the generic "no device answered".
+  static bool looksLikeIpv6(String hostPort) {
+    final trimmed = hostPort.trim();
+    return trimmed.startsWith('[') || ':'.allMatches(trimmed).length > 1;
+  }
+
   Device? _stubForHostPort(String hostPort) {
+    // IPv6 would need bracket-aware parsing and a v6 HTTP stack check;
+    // reject it here so callers can surface a clear error (see
+    // [looksLikeIpv6]) rather than dialing a garbled host.
+    if (looksLikeIpv6(hostPort)) return null;
     final parts = hostPort.split(':');
     if (parts.isEmpty || parts[0].isEmpty) return null;
     final host = parts[0];

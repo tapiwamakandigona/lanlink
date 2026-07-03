@@ -79,6 +79,49 @@ void main() {
       expect(resp.statusCode, 401);
     });
 
+    test('minting a new token invalidates the previous one (401)', () async {
+      final oldToken = receiver.issueConnectToken();
+      final newToken = receiver.issueConnectToken();
+      expect(receiver.isConnectTokenValid(oldToken), isFalse,
+          reason: 'only the newest minted token may stay redeemable');
+      expect(receiver.isConnectTokenValid(newToken), isTrue);
+
+      final sender =
+          Sender(localDeviceProvider: () => _device('me', 'me-fp', 1));
+      final stub = _device('127.0.0.1', '', port);
+      expect(await sender.connectWithToken(stub, oldToken), isNull,
+          reason: 'a superseded token must be rejected');
+
+      // And the wire status for the stale token is specifically 401.
+      final dio = Dio(BaseOptions(validateStatus: (_) => true));
+      final resp = await dio.post<String>(
+        'http://127.0.0.1:$port${LanLinkProtocol.routeConnect}',
+        queryParameters: {'token': oldToken},
+        data: _device('me', 'me-fp', 1).toJson(),
+      );
+      expect(resp.statusCode, 401);
+
+      // The newest token still works.
+      expect(await sender.connectWithToken(stub, newToken), isNotNull);
+    });
+
+    test('redemption fires onConnectTokenRedeemed and consumes the token',
+        () async {
+      var redeemedCalls = 0;
+      receiver.onConnectTokenRedeemed = () => redeemedCalls++;
+      final token = receiver.issueConnectToken();
+      expect(receiver.isConnectTokenValid(token), isTrue);
+
+      final sender =
+          Sender(localDeviceProvider: () => _device('me', 'me-fp', 1));
+      final stub = _device('127.0.0.1', '', port);
+      expect(await sender.connectWithToken(stub, token), isNotNull);
+
+      expect(redeemedCalls, 1,
+          reason: 'the UI relies on this hook to re-mint the QR');
+      expect(receiver.isConnectTokenValid(token), isFalse);
+    });
+
     test('unknown token is rejected', () async {
       final sender =
           Sender(localDeviceProvider: () => _device('me', 'me-fp', 1));

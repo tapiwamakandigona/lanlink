@@ -234,7 +234,7 @@ class _SettingsPageState extends State<SettingsPage> {
             Padding(
               padding: const EdgeInsets.only(top: 4),
               child: Text(
-                'None yet. Tick "Auto-accept from this device" when a transfer prompt appears.',
+                'None yet. Tick "Always accept from this device" when a transfer prompt appears.',
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
@@ -244,7 +244,13 @@ class _SettingsPageState extends State<SettingsPage> {
             ...state.settings.trustedFingerprints.map((fp) => ListTile(
                   contentPadding: EdgeInsets.zero,
                   leading: const Icon(Icons.verified_user_outlined),
-                  title: Text(fp, style: theme.textTheme.bodySmall),
+                  title: Text(
+                    state.settings.nicknameFor(fp) ??
+                        state.settings.trustedAliasFor(fp) ??
+                        fp,
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                  subtitle: Text(fp, style: theme.textTheme.bodySmall),
                   trailing: IconButton(
                     tooltip: 'Remove',
                     icon: const Icon(Icons.delete_outline),

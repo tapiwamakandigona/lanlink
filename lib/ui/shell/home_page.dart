@@ -9,6 +9,7 @@ import '../../core/platform/incoming_share.dart';
 import '../../state/app_state.dart';
 import '../v4/v4.dart';
 import '../widgets/update_available_banner.dart';
+import 'saved_location.dart';
 import 'send_page.dart';
 import 'session_display.dart';
 
@@ -182,8 +183,16 @@ class _ClusterView extends StatelessWidget {
         peerName: displayPeerName(state.settings, session.peer),
       ),
       onStop: () => unawaited(state.cancelSession(session)),
-      onRetry: () => unawaited(state.retrySession(session)),
+      // Only offer "Try again" when a retry can actually do something
+      // (outgoing send whose source files still exist on disk).
+      onRetry: AppState.canRetry(session)
+          ? () => unawaited(state.retrySession(session))
+          : null,
       onDismiss: () => state.dismissSession(session),
+      onLocate: session.direction == TransferDirection.receive &&
+              session.status == TransferStatus.completed
+          ? () => showSavedLocationDialog(context, session)
+          : null,
     );
     if (!session.isTerminal) return card;
     // Terminal cards can also be swiped away.

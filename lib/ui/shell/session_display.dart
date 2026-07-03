@@ -65,6 +65,9 @@ v4.SessionCardData sessionCardData(TransferSession session,
       : '';
   return v4.SessionCardData(
     title: title,
+    direction: session.direction == TransferDirection.receive
+        ? v4.SessionDirection.receive
+        : v4.SessionDirection.send,
     fileCount: files.length,
     totalSize: formatBytes(session.totalBytes),
     peerName: peerName,
@@ -80,6 +83,7 @@ v4.SessionCardData sessionCardData(TransferSession session,
 /// a [Device] produced by AppState's peer pipeline (`AppState.peers`).
 v4.RadarPeerData radarPeerData(AppSettings settings, Device peer) {
   return v4.RadarPeerData(
+    id: peer.fingerprint,
     name: displayPeerName(settings, peer),
     deviceType: peer.deviceType == LanLinkProtocol.deviceTypeMobile
         ? v4.DeviceType.phone

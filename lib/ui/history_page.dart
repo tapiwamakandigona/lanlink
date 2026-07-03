@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../core/models/session.dart';
 import '../core/util/format.dart';
 import '../state/app_state.dart';
+import 'shell/saved_location.dart';
 
 class HistoryPage extends StatelessWidget {
   const HistoryPage({super.key});
@@ -121,7 +122,14 @@ class HistoryPage extends StatelessWidget {
                 label: const Text('Retry'),
                 onPressed: () => _retry(context, s),
               )
-            : null,
+            : (s.direction == TransferDirection.receive &&
+                    s.status == TransferStatus.completed
+                ? TextButton.icon(
+                    icon: const Icon(Icons.folder_open_outlined, size: 18),
+                    label: const Text('Where is it?'),
+                    onPressed: () => showSavedLocationDialog(context, s),
+                  )
+                : null),
         isThreeLine: false,
       ),
     );

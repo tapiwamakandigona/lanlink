@@ -265,6 +265,7 @@ void main() {
                     'holiday.mp4',
                   ],
                 ),
+                onTrustChanged: (_) {},
                 onAccept: () {},
                 onDecline: () {},
               ),

@@ -213,6 +213,65 @@ void main() {
         reason: 'a cancelled upload must not be finalized to the save dir');
   });
 
+  test(
+      'cancel mid-upload: the post-abort drain is bounded — a peer that '
+      'keeps streaming past 32MB gets the connection terminated', () async {
+    const chunkSize = 1024 * 1024;
+    final chunk = List<int>.filled(chunkSize, 7);
+    const totalSize = 512 * 1024 * 1024; // far past the drain bound
+    final f = FileInfo(
+      id: const Uuid().v4(),
+      fileName: 'flood.bin',
+      size: totalSize,
+      fileType: 'other',
+    );
+    final prep = await prepare([f]);
+    final session = lastReceiveSession!;
+
+    var sentBytes = 0;
+    var cancelSent = false;
+    Stream<List<int>> body() async* {
+      yield chunk;
+      sentBytes += chunkSize;
+      // Cancel the session while this upload is still streaming…
+      final resp = await dio.post<String>(
+        LanLinkProtocol.routeCancel,
+        queryParameters: {'sessionId': prep.sessionId},
+      );
+      expect(resp.statusCode, 200);
+      cancelSent = true;
+      // …then keep flooding. The receiver must stop reading once its
+      // bounded drain is exhausted, which kills this stream.
+      while (sentBytes < totalSize) {
+        yield chunk;
+        sentBytes += chunkSize;
+      }
+    }
+
+    int? statusCode;
+    try {
+      final uploadResp = await upload(
+        sessionId: prep.sessionId,
+        fileId: f.id,
+        token: prep.tokens[f.id]!,
+        body: body(),
+        contentLength: totalSize,
+      );
+      statusCode = uploadResp.statusCode;
+    } on DioException catch (_) {
+      statusCode = null; // connection aborted mid-body: the desired outcome
+    }
+
+    expect(cancelSent, isTrue);
+    expect(statusCode, isNot(200),
+        reason: 'a flooded post-cancel upload must never be acknowledged');
+    // 32MB drain bound + generous slack for socket/dio buffering. Without
+    // the bound the receiver would drink all 512MB.
+    expect(sentBytes, lessThan(64 * 1024 * 1024),
+        reason: 'the mid-stream abort drain must stop past the 32MB bound');
+    expect(session.status, TransferStatus.cancelled);
+  });
+
   test('uploads to a cancelled session are rejected outright', () async {
     final f = FileInfo(
       id: const Uuid().v4(),

@@ -139,8 +139,10 @@ void main() {
   group('DeviceRadar', () {
     const peers = [
       RadarPeerData(
+          id: 'fp-otter',
           name: 'Purple-Otter', deviceType: DeviceType.laptop, verified: true),
-      RadarPeerData(name: 'Sunny-Heron', deviceType: DeviceType.phone),
+      RadarPeerData(
+        id: 'fp-heron', name: 'Sunny-Heron', deviceType: DeviceType.phone),
     ];
 
     testWidgets('shows names, never addresses', (tester) async {

@@ -42,17 +42,24 @@ extension SessionStatusX on SessionStatus {
 
 /// A peer shown on the device radar / device list.
 ///
-/// Carries only what the radar renders: a friendly [name] (e.g.
+/// Carries only what the radar renders — a friendly [name] (e.g.
 /// "Purple-Otter"), a [deviceType] for the icon, and whether the peer is
-/// [verified] (previously paired). Deliberately has no address, port, or
-/// fingerprint fields — the radar cannot leak what it never receives.
+/// [verified] (previously paired) — plus an opaque [id] the shell uses to
+/// resolve a tap back to the right peer. The radar never renders the id,
+/// and it deliberately has no address or port fields.
 @immutable
 class RadarPeerData {
   const RadarPeerData({
+    required this.id,
     required this.name,
     required this.deviceType,
     this.verified = false,
   });
+
+  /// Opaque stable identifier for tap resolution (e.g. a fingerprint).
+  /// Never rendered; display names are NOT unique and must not be used as
+  /// lookup keys.
+  final String id;
 
   /// Friendly device name, e.g. "Purple-Otter". Never an IP or host:port.
   final String name;
@@ -66,13 +73,18 @@ class RadarPeerData {
   @override
   bool operator ==(Object other) =>
       other is RadarPeerData &&
+      other.id == id &&
       other.name == name &&
       other.deviceType == deviceType &&
       other.verified == verified;
 
   @override
-  int get hashCode => Object.hash(name, deviceType, verified);
+  int get hashCode => Object.hash(id, name, deviceType, verified);
 }
+
+/// Which way a transfer session moves, as the UI needs it for wording
+/// ("Sending" vs "Receiving", "to X" vs "from X").
+enum SessionDirection { send, receive }
 
 /// Everything a [SessionCard] renders about one transfer session.
 ///
@@ -84,6 +96,7 @@ class SessionCardData {
     required this.title,
     required this.totalSize,
     required this.status,
+    this.direction = SessionDirection.send,
     this.fileCount = 1,
     this.peerName,
     this.progress,
@@ -91,6 +104,10 @@ class SessionCardData {
     this.eta,
     this.errorHint,
   });
+
+  /// Which way the bytes move; picks direction-aware labels
+  /// ("Receiving"/"Received!"/"from X" for [SessionDirection.receive]).
+  final SessionDirection direction;
 
   /// Primary label: a filename ("holiday.mp4") or a bundle summary
   /// ("14 photos").

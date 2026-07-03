@@ -47,6 +47,11 @@ class _SendPageState extends State<SendPage> {
   MobileScannerController? _camera;
   Timer? _rescan;
   bool _busy = false;
+
+  /// True only while a QR redeem / Direct Link probe is on the wire, so
+  /// the UI can show live "Connecting…" feedback (not just disable
+  /// buttons).
+  bool _connecting = false;
   bool _scanning = false;
   String? _error;
   late List<FileInfo> _staged;
@@ -108,6 +113,7 @@ class _SendPageState extends State<SendPage> {
     }
     setState(() {
       _busy = true;
+      _connecting = true;
       _error = null;
     });
     final state = context.read<AppState>();
@@ -134,15 +140,21 @@ class _SendPageState extends State<SendPage> {
           ? await state.connectWithToken(payload.hostPort, token)
           : await state.probeManualPeer(payload.hostPort);
       if (!mounted) return;
+      setState(() => _connecting = false);
       if (peer == null) {
         _showError('Couldn\'t reach "${payload.alias}". Keep both screens '
-            'on and scan again — their code refreshes when LanLink reopens.');
+            'on and scan again — their code refreshes automatically.');
         await _camera?.start();
         return;
       }
       await _sendTo(peer);
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _connecting = false;
+        });
+      }
     }
   }
 
@@ -151,14 +163,21 @@ class _SendPageState extends State<SendPage> {
   Future<void> _connectDirect() async {
     final hostPort = _hostPortCtrl.text.trim();
     if (hostPort.isEmpty || _busy) return;
+    if (AppState.looksLikeIpv6(hostPort)) {
+      _showError("IPv6 addresses aren't supported yet. Use the IPv4 "
+          'address shown on their Receive screen.');
+      return;
+    }
     setState(() {
       _busy = true;
+      _connecting = true;
       _error = null;
     });
     try {
       final peer =
           await context.read<AppState>().probeManualPeer(hostPort);
       if (!mounted) return;
+      setState(() => _connecting = false);
       if (peer == null) {
         _showError('No LanLink device answered at $hostPort. '
             'Check the address on their Receive screen.');
@@ -166,20 +185,33 @@ class _SendPageState extends State<SendPage> {
       }
       await _sendTo(peer);
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _connecting = false;
+        });
+      }
     }
   }
 
   // ─── Staging + send ──────────────────────────────────────────────────
 
   Future<void> _sendTo(Device peer) async {
-    final files = _staged.isNotEmpty ? _staged : await _pickFiles();
-    if (files.isEmpty || !mounted) return;
-    final state = context.read<AppState>();
-    await state.sendFiles(peer: peer, files: files);
-    if (!mounted) return;
-    // Back to home, where the session card shows live progress.
-    Navigator.of(context).popUntil((route) => route.isFirst);
+    // Guards the radar path against double-taps launching two pickers;
+    // the QR/Direct Link paths already hold _busy and re-setting is a
+    // harmless no-op.
+    setState(() => _busy = true);
+    try {
+      final files = _staged.isNotEmpty ? _staged : await _pickFiles();
+      if (files.isEmpty || !mounted) return;
+      final state = context.read<AppState>();
+      await state.sendFiles(peer: peer, files: files);
+      if (!mounted) return;
+      // Back to home, where the session card shows live progress.
+      Navigator.of(context).popUntil((route) => route.isFirst);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<List<FileInfo>> _pickFiles() async {
@@ -263,14 +295,43 @@ class _SendPageState extends State<SendPage> {
                   ],
                   searching: true,
                   onPeerTap: (tapped) {
-                    final peer = peers.firstWhere(
-                      (p) =>
-                          displayPeerName(state.settings, p) == tapped.name,
-                      orElse: () => peers.first,
-                    );
-                    if (!_busy) unawaited(_sendTo(peer));
+                    if (_busy) return;
+                    // Resolve by fingerprint, never by display name:
+                    // aliases collide (or can be spoofed), and the peer
+                    // list mutates under a 6s discovery refresh. No match
+                    // => the device left; never fall back to an arbitrary
+                    // peer.
+                    final peer = state.peers[tapped.id];
+                    if (peer == null) {
+                      _showError('That device just went offline. '
+                          'Wait for it to reappear, then tap it again.');
+                      return;
+                    }
+                    unawaited(_sendTo(peer));
                   },
                 ),
+                if (_connecting) ...[
+                  const SizedBox(height: VSpace.x4),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.5,
+                          color: scheme.primary,
+                        ),
+                      ),
+                      const SizedBox(width: VSpace.x3),
+                      Text(
+                        'Connecting…',
+                        style: VType.body
+                            .copyWith(color: scheme.onSurfaceVariant),
+                      ),
+                    ],
+                  ),
+                ],
                 if (_error != null) ...[
                   const SizedBox(height: VSpace.x4),
                   Text(

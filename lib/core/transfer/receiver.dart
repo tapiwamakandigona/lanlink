@@ -330,20 +330,27 @@ class Receiver {
     int received = offset;
     String finalPath;
     var aborted = false;
+    var drainedAfterAbort = 0;
     try {
       await for (final chunk in req.read()) {
         // Stop writing the moment the session leaves the active state
         // (e.g. the local user hit Stop and /cancel raced this upload).
         // Keep draining (and discarding) the rest of the body on the same
         // subscription so the sender reliably receives our 403 instead of
-        // a broken pipe.
+        // a broken pipe — but only up to the same bound as
+        // [_drainAndReject]: past that, stop reading entirely so a peer
+        // cannot keep this handler pinned by streaming forever.
         if (!aborted && ps.session.status != TransferStatus.transferring) {
           aborted = true;
           try {
             await sink.close();
           } catch (_) {}
         }
-        if (aborted) continue;
+        if (aborted) {
+          drainedAfterAbort += chunk.length;
+          if (drainedAfterAbort > _maxDrainBytes) break;
+          continue;
+        }
         sink.add(chunk);
         received += chunk.length;
         ps.session.updateBytes(fileId, received);
@@ -421,16 +428,19 @@ class Receiver {
   /// sending side reliably receives the 403 instead of a broken pipe, then
   /// answers 403 so the sender maps it to "cancelled".
   Future<Response> _drainAndReject(Stream<List<int>> body) async {
-    const maxDrain = 32 * 1024 * 1024;
     var drained = 0;
     try {
       await for (final chunk in body) {
         drained += chunk.length;
-        if (drained > maxDrain) break;
+        if (drained > _maxDrainBytes) break;
       }
     } catch (_) {}
     return Response.forbidden('session cancelled');
   }
+
+  /// The most a rejected/aborted upload body is ever drained before we
+  /// stop reading, both pre-stream ([_drainAndReject]) and mid-stream.
+  static const _maxDrainBytes = 32 * 1024 * 1024;
 
   /// Marks [fileId] and the whole session failed and drops the session from
   /// [_pending] so its upload tokens are dead and the map cannot grow
@@ -495,17 +505,30 @@ class Receiver {
     return null;
   }
 
-  /// One-time connect tokens minted for QR payloads. Consumed on first use.
+  /// One-time connect tokens minted for QR payloads. Consumed on first
+  /// use; holds at most the newest minted token so every previously
+  /// displayed (screenshotted, shoulder-surfed) QR is dead.
   final Set<String> _connectTokens = {};
 
-  /// Mints a fresh single-use connect token for embedding in a QR code.
-  /// The token is consumed by the first successful call to the
-  /// [LanLinkProtocol.routeConnect] route; replays get 401.
+  /// Called after a connect token is successfully redeemed, so the UI can
+  /// re-mint and keep the on-screen QR valid.
+  void Function()? onConnectTokenRedeemed;
+
+  /// Mints a fresh single-use connect token for embedding in a QR code,
+  /// invalidating any previously minted token. The token is consumed by
+  /// the first successful call to the [LanLinkProtocol.routeConnect]
+  /// route; replays (and all older tokens) get 401.
   String issueConnectToken() {
     final token = _uuid.v4();
-    _connectTokens.add(token);
+    _connectTokens
+      ..clear()
+      ..add(token);
     return token;
   }
+
+  /// Whether [token] is still redeemable (i.e. it is the newest minted,
+  /// not-yet-consumed connect token).
+  bool isConnectTokenValid(String token) => _connectTokens.contains(token);
 
   Future<Response> _handleConnect(Request req) async {
     final token = req.url.queryParameters['token'];
@@ -515,6 +538,8 @@ class Receiver {
     if (!_connectTokens.remove(token)) {
       return Response(401, body: 'invalid or already-used connect token');
     }
+    // Token consumed: let the UI re-mint so the displayed QR stays valid.
+    onConnectTokenRedeemed?.call();
     // Token accepted (and consumed): behave like /info so the caller learns
     // who we are, and surface the caller as a peer like /register does.
     try {
