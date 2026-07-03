@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../core/models/session.dart';
+import '../core/settings/app_settings.dart';
 import '../core/util/format.dart';
 import '../state/app_state.dart';
 import 'shell/saved_location.dart';
@@ -11,7 +12,10 @@ class HistoryPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Single page-level watch; tiles receive what they need as parameters
+    // instead of re-subscribing per row inside itemBuilder.
     final state = context.watch<AppState>();
+    final settings = state.settings;
     final finished = state.sessions
         .where((s) =>
             s.status == TransferStatus.completed ||
@@ -68,12 +72,14 @@ class HistoryPage extends StatelessWidget {
           : ListView.builder(
               padding: const EdgeInsets.all(16),
               itemCount: finished.length,
-              itemBuilder: (context, i) => _historyTile(context, finished[i]),
+              itemBuilder: (context, i) =>
+                  _historyTile(context, settings, finished[i]),
             ),
     );
   }
 
-  Widget _historyTile(BuildContext context, TransferSession s) {
+  Widget _historyTile(
+      BuildContext context, AppSettings settings, TransferSession s) {
     final theme = Theme.of(context);
     final isSend = s.direction == TransferDirection.send;
     IconData icon;
@@ -103,8 +109,6 @@ class HistoryPage extends StatelessWidget {
         status = 'In progress';
     }
     final total = s.files.values.fold<int>(0, (a, b) => a + b.file.size);
-    final state = context.watch<AppState>();
-    final settings = state.settings;
     final peerLabel = settings.nicknameFor(s.peer.fingerprint) ??
         (s.peer.alias.isEmpty ? 'Unknown device' : s.peer.alias);
     return Card(
