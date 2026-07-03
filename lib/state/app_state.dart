@@ -98,6 +98,18 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Test hook: installs a real [Sender] on a network-silent instance so
+  /// connect/probe paths can be exercised against a loopback receiver.
+  @visibleForTesting
+  void debugInstallSender(Sender sender) {
+    _sender = sender;
+  }
+
+  /// Test hook: routes [peer] through the same code path as a live
+  /// discovery/probe observation (including verified-flag resolution).
+  @visibleForTesting
+  void debugPeerSeen(Device peer) => _onPeerSeen(peer);
+
   /// Map of peer fingerprint -> Device. Latest announcement wins.
   final Map<String, Device> _peers = {};
   Map<String, Device> get peers => Map.unmodifiable(_peers);

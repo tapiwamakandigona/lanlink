@@ -280,15 +280,15 @@ class Receiver {
     // Writes are only accepted while the session is actively transferring.
     // A cancelled/failed session must never accept more bytes.
     if (ps.session.status != TransferStatus.transferring) {
-      return Response.forbidden('session is not active');
+      return _drainAndReject(req.read());
     }
 
-    final saveDir = await saveDirProvider();
+    final Directory saveDir;
     try {
+      saveDir = await saveDirProvider();
       await saveDir.create(recursive: true);
     } catch (e) {
-      _failSession(sessionId, ps, fileId,
-          'Cannot create save folder ${saveDir.path}: $e');
+      _failSession(sessionId, ps, fileId, 'Cannot create save folder: $e');
       return Response.internalServerError(
           body: 'cannot create save folder: $e');
     }
@@ -329,18 +329,26 @@ class Receiver {
 
     int received = offset;
     String finalPath;
+    var aborted = false;
     try {
       await for (final chunk in req.read()) {
         // Stop writing the moment the session leaves the active state
         // (e.g. the local user hit Stop and /cancel raced this upload).
-        if (ps.session.status != TransferStatus.transferring) {
-          throw const _SessionNoLongerActive();
+        // Keep draining (and discarding) the rest of the body on the same
+        // subscription so the sender reliably receives our 403 instead of
+        // a broken pipe.
+        if (!aborted && ps.session.status != TransferStatus.transferring) {
+          aborted = true;
+          try {
+            await sink.close();
+          } catch (_) {}
         }
+        if (aborted) continue;
         sink.add(chunk);
         received += chunk.length;
         ps.session.updateBytes(fileId, received);
       }
-      if (ps.session.status != TransferStatus.transferring) {
+      if (aborted || ps.session.status != TransferStatus.transferring) {
         throw const _SessionNoLongerActive();
       }
       await sink.flush();
@@ -406,6 +414,22 @@ class Receiver {
       _pending.remove(sessionId);
     }
     return Response.ok('ok');
+  }
+
+  /// Politely rejects an upload whose session is no longer active: drains
+  /// (and discards) a bounded amount of the request body first so the
+  /// sending side reliably receives the 403 instead of a broken pipe, then
+  /// answers 403 so the sender maps it to "cancelled".
+  Future<Response> _drainAndReject(Stream<List<int>> body) async {
+    const maxDrain = 32 * 1024 * 1024;
+    var drained = 0;
+    try {
+      await for (final chunk in body) {
+        drained += chunk.length;
+        if (drained > maxDrain) break;
+      }
+    } catch (_) {}
+    return Response.forbidden('session cancelled');
   }
 
   /// Marks [fileId] and the whole session failed and drops the session from
