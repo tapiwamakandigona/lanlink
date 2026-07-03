@@ -50,6 +50,22 @@ void main() {
       expect(parsed.needsHotspotJoin, isFalse);
     });
 
+    test('legacy pair codes carry hotspot creds through (v4.1 host QR)', () {
+      const pair = PairPayload(
+        ip: '192.168.49.1',
+        port: 53317,
+        alias: 'Pixel',
+        fingerprint: 'ff00',
+        ssid: 'AndroidShare_9',
+        password: 'secret',
+      );
+      final parsed = ConnectPayload.tryParse(pair.toQrString());
+      expect(parsed, isNotNull);
+      expect(parsed!.needsHotspotJoin, isTrue);
+      expect(parsed.ssid, 'AndroidShare_9');
+      expect(parsed.password, 'secret');
+    });
+
     test('rejects junk', () {
       expect(ConnectPayload.tryParse(''), isNull);
       expect(ConnectPayload.tryParse('https://example.com'), isNull);

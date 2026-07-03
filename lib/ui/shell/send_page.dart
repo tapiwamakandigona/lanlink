@@ -13,6 +13,7 @@ import '../../core/models/file_info.dart';
 import '../../core/platform/wifi_joiner.dart';
 import '../../state/app_state.dart';
 import '../picker/share_picker_page.dart';
+import '../v4/direct_connect/connect_router.dart';
 import '../v4/v4.dart';
 import 'session_display.dart';
 
@@ -26,7 +27,12 @@ const _uuid = Uuid();
 /// Whichever path is used, the page then stages files (system picker, or
 /// the photos/apps picker on Android) and hands off to `sendFiles`.
 class SendPage extends StatefulWidget {
-  const SendPage({super.key, this.prestagedFiles, this.scannerBuilder});
+  const SendPage({
+    super.key,
+    this.prestagedFiles,
+    this.scannerBuilder,
+    this.connectRouter,
+  });
 
   /// Files staged before the page opened (Android share-into-app).
   final List<FileInfo>? prestagedFiles;
@@ -34,6 +40,9 @@ class SendPage extends StatefulWidget {
   /// Test hook: replaces the live camera preview inside the scan frame.
   final Widget Function(BuildContext, void Function(String raw))?
       scannerBuilder;
+
+  /// Test hook: routing probe/join with faked network + platform calls.
+  final ConnectRouter? connectRouter;
 
   /// mobile_scanner only ships a camera implementation on phones.
   static bool get cameraSupported => Platform.isAndroid || Platform.isIOS;
@@ -56,6 +65,19 @@ class _SendPageState extends State<SendPage> {
   String? _error;
   late List<FileInfo> _staged;
 
+  /// One friendly line under the radar while the smart routing runs
+  /// ("Joining their link…"), instead of the bare "Connecting…".
+  String? _progressLine;
+
+  /// True after we programmatically joined a receiver-hosted hotspot, so
+  /// leaving the page can release the network binding again.
+  bool _joinedHotspot = false;
+
+  /// True once a send session was handed off to AppState — the transfer
+  /// keeps using the joined network after this page pops, so don't
+  /// release it on dispose.
+  bool _handedOff = false;
+
   @override
   void initState() {
     super.initState();
@@ -73,6 +95,13 @@ class _SendPageState extends State<SendPage> {
     _rescan?.cancel();
     _camera?.dispose();
     _hostPortCtrl.dispose();
+    // Guest teardown: if we joined a receiver's hotspot but never handed a
+    // transfer off, release the binding so the phone returns to its own
+    // network. An in-flight transfer keeps the binding (the session owns
+    // it from here; disconnect/teardown releases it later).
+    if (_joinedHotspot && !_handedOff) {
+      unawaited(WifiJoiner.leave());
+    }
     super.dispose();
   }
 
@@ -119,18 +148,34 @@ class _SendPageState extends State<SendPage> {
     final state = context.read<AppState>();
     await _camera?.stop();
     try {
-      // Hotspot-shaped QR: join the receiver's network first, then connect.
+      // Smart routing: try the peer on the current network first (fast
+      // probe); only when it's unreachable AND the QR carries hotspot
+      // credentials do we auto-join the receiver's link.
       if (payload.needsHotspotJoin) {
-        final joined =
-            await WifiJoiner.join(payload.ssid!, payload.password ?? '');
-        if (!joined) {
-          _showError('Could not join "${payload.ssid}" automatically. '
-              'Join it from Wi-Fi settings, then scan again.');
-          await _camera?.start();
-          return;
+        final router = widget.connectRouter ?? ConnectRouter();
+        setState(() => _progressLine = 'Reaching ${payload.alias}…');
+        final route = await router.route(payload);
+        switch (route) {
+          case ConnectRoute.direct:
+          case ConnectRoute.unreachable:
+            // Already reachable on this network (or nothing smarter to
+            // try): fall through to the normal connect below, which owns
+            // the friendly error.
+            break;
+          case ConnectRoute.joinFailed:
+            _showError('Could not join "${payload.ssid}" automatically. '
+                'Join it from Wi-Fi settings, then scan again.');
+            await _camera?.start();
+            return;
+          case ConnectRoute.joinedHotspot:
+            _joinedHotspot = true;
+            if (mounted) {
+              setState(() => _progressLine = 'Joined their link — connecting…');
+            }
+            // Give the freshly bound network a beat before connecting.
+            await Future<void>.delayed(const Duration(milliseconds: 800));
+            if (mounted) await context.read<AppState>().refreshDiscovery();
         }
-        await Future<void>.delayed(const Duration(milliseconds: 800));
-        if (mounted) await context.read<AppState>().refreshDiscovery();
       }
       if (!mounted) return;
       // v4 QRs carry a one-time token: redeeming pins the fingerprint
@@ -153,6 +198,7 @@ class _SendPageState extends State<SendPage> {
         setState(() {
           _busy = false;
           _connecting = false;
+          _progressLine = null;
         });
       }
     }
@@ -205,6 +251,8 @@ class _SendPageState extends State<SendPage> {
       if (files.isEmpty || !mounted) return;
       final state = context.read<AppState>();
       await state.sendFiles(peer: peer, files: files);
+      // The session owns any joined hotspot network from here on.
+      _handedOff = true;
       if (!mounted) return;
       // Back to home, where the session card shows live progress.
       Navigator.of(context).popUntil((route) => route.isFirst);
@@ -247,7 +295,10 @@ class _SendPageState extends State<SendPage> {
 
   void _showError(String message) {
     if (!mounted) return;
-    setState(() => _error = message);
+    setState(() {
+      _error = message;
+      _progressLine = null;
+    });
   }
 
   // ─── Build ───────────────────────────────────────────────────────────
@@ -324,7 +375,7 @@ class _SendPageState extends State<SendPage> {
                       ),
                       const SizedBox(width: VSpace.x3),
                       Text(
-                        'Connecting…',
+                        _progressLine ?? 'Connecting…',
                         style:
                             VType.body.copyWith(color: scheme.onSurfaceVariant),
                       ),
