@@ -7,8 +7,6 @@ import 'package:provider/provider.dart';
 
 import '../core/util/event_log.dart';
 import '../state/app_state.dart';
-import 'onboarding_page.dart';
-import 'pairing/pairing_wizard_page.dart';
 import 'widgets/check_for_updates_tile.dart';
 import 'widgets/glossary_tooltip.dart';
 import 'widgets/need_help_footer.dart';
@@ -135,33 +133,6 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
           ),
           const Divider(height: 32),
-          Text('Simple mode', style: theme.textTheme.titleMedium),
-          const SizedBox(height: 8),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            value: state.settings.simpleMode,
-            onChanged: (v) => state.settings.setSimpleMode(v),
-            title: const Text('Use Simple mode'),
-            subtitle: const Text(
-              'A pared-down home screen with two big buttons and plain '
-              'language. Great for family members who just want to send '
-              'and receive photos.',
-            ),
-          ),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            value: state.settings.simpleModeExitButton,
-            onChanged: state.settings.simpleMode
-                ? (v) => state.settings.setSimpleModeExitButton(v)
-                : null,
-            title: const Text('Show "Full version" button'),
-            subtitle: const Text(
-              'Turn this off to hide the exit button on the Simple home '
-              'screen, so it can\'t be tapped by accident. You can always '
-              'come back here to switch modes.',
-            ),
-          ),
-          const Divider(height: 32),
           Text('Appearance', style: theme.textTheme.titleMedium),
           const SizedBox(height: 8),
           Wrap(
@@ -234,31 +205,6 @@ class _SettingsPageState extends State<SettingsPage> {
           const CheckForUpdatesTile(),
           const Divider(height: 32),
           Text('Help & diagnostics', style: theme.textTheme.titleMedium),
-          const SizedBox(height: 8),
-          OutlinedButton.icon(
-            icon: const Icon(Icons.replay),
-            label: const Text('Replay the welcome tour'),
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (ctx) =>
-                    OnboardingPage(onDone: () => Navigator.of(ctx).pop()),
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          OutlinedButton.icon(
-            icon: const Icon(Icons.handshake_outlined),
-            label: const Text('Run the pairing wizard'),
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (ctx) => PairingWizardPage(
-                  canSkip: false,
-                  onDone: () => Navigator.of(ctx).pop(),
-                  initial: state.settings.lastPairing,
-                ),
-              ),
-            ),
-          ),
           const SizedBox(height: 8),
           OutlinedButton.icon(
             icon: const Icon(Icons.copy_all_outlined),
