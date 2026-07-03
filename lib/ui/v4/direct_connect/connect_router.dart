@@ -101,6 +101,10 @@ class ConnectRouter {
   /// [isCancelled] makes the loop abortable (user cancel, page dispose):
   /// checked before every probe and every sleep; a cancelled wait resolves
   /// false without opening further sockets.
+  ///
+  /// The budget is counted in intervals (`overall ~/ interval` probes)
+  /// rather than wall-clock time, so the loop is deterministic under
+  /// `flutter test`'s fake clock and never gives up mid-probe.
   Future<bool> waitForReachable(
     ConnectPayload payload, {
     Duration interval = const Duration(seconds: 2),
@@ -108,13 +112,17 @@ class ConnectRouter {
     bool Function()? isCancelled,
   }) async {
     bool cancelled() => isCancelled?.call() ?? false;
-    final deadline = DateTime.now().add(overall);
-    while (true) {
+    final maxProbes = interval.inMilliseconds <= 0
+        ? 1
+        : (overall.inMilliseconds / interval.inMilliseconds)
+            .ceil()
+            .clamp(1, 1 << 20);
+    for (var i = 0; i < maxProbes; i++) {
       if (cancelled()) return false;
       if (await _probe(payload.ip, payload.port, probeTimeout)) return true;
       if (cancelled()) return false;
-      if (!DateTime.now().add(interval).isBefore(deadline)) return false;
-      await Future<void>.delayed(interval);
+      if (i + 1 < maxProbes) await Future<void>.delayed(interval);
     }
+    return false;
   }
 }
