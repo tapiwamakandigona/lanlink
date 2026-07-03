@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -152,8 +153,10 @@ class Receiver {
     // The register body carries the sender's own device info. Use it so the
     // receiving side learns (and refreshes) the sender's alias instead of
     // showing a stale cached name.
+    // Read outside the try: an oversized body aborts via a shelf
+    // HijackException that must propagate, not be swallowed below.
+    final body = await _readBoundedControlBody(req, _maxDeviceInfoBodyBytes);
     try {
-      final body = await req.readAsString();
       if (body.isNotEmpty) {
         final decoded = json.decode(body);
         if (decoded is Map<String, dynamic>) {
@@ -176,9 +179,10 @@ class Receiver {
   }
 
   Future<Response> _handlePrepareUpload(Request req) async {
+    final raw = await _readBoundedControlBody(req, _maxPrepareUploadBodyBytes);
     Map<String, dynamic> body;
     try {
-      body = json.decode(await req.readAsString()) as Map<String, dynamic>;
+      body = json.decode(raw) as Map<String, dynamic>;
     } catch (e) {
       return Response.badRequest(body: 'invalid json: $e');
     }
@@ -442,6 +446,51 @@ class Receiver {
   /// stop reading, both pre-stream ([_drainAndReject]) and mid-stream.
   static const _maxDrainBytes = 32 * 1024 * 1024;
 
+  /// Cap for `/prepare-upload` bodies. The largest legitimate control
+  /// payload: a huge folder transfer sends one [FileInfo] JSON entry per
+  /// file (~200–300 bytes each, plus optional base64 image previews), so
+  /// even a 10k-file folder is ~3MB. 8MB leaves >2x headroom while staying
+  /// far below the memory a flooding peer could otherwise pin.
+  static const _maxPrepareUploadBodyBytes = 8 * 1024 * 1024;
+
+  /// Cap for `/register` and `/connect` bodies, which carry a single
+  /// device-info JSON object (well under 1KB in practice).
+  static const _maxDeviceInfoBodyBytes = 64 * 1024;
+
+  /// Reads a control-route request body into a string without ever
+  /// buffering more than [maxBytes]: as soon as the declared
+  /// Content-Length or the streamed bytes exceed the cap, the connection
+  /// is answered 413 and torn down via [_rejectTooLargeAndAbort], so an
+  /// oversized flood is neither buffered nor drained to the end.
+  Future<String> _readBoundedControlBody(Request req, int maxBytes) async {
+    final declared = req.contentLength;
+    if (declared != null && declared > maxBytes) {
+      _rejectTooLargeAndAbort(req);
+    }
+    final buf = BytesBuilder(copy: false);
+    await for (final chunk in req.read()) {
+      buf.add(chunk);
+      if (buf.length > maxBytes) _rejectTooLargeAndAbort(req);
+    }
+    return utf8.decode(buf.takeBytes(), allowMalformed: true);
+  }
+
+  /// Hijacks the connection to answer 413 (payload too large) and closes
+  /// the socket immediately. A plain [Response] is not enough here:
+  /// `dart:io` drains any unread request body before completing a
+  /// keep-alive response, which would let a flooding peer make the server
+  /// read the whole oversized payload anyway. Throws shelf's
+  /// HijackException, so this never returns.
+  Never _rejectTooLargeAndAbort(Request req) {
+    req.hijack((channel) {
+      channel.sink.add(ascii.encode('HTTP/1.1 413 Payload Too Large\r\n'
+          'connection: close\r\n'
+          'content-length: 0\r\n'
+          '\r\n'));
+      channel.sink.close();
+    });
+  }
+
   /// Marks [fileId] and the whole session failed and drops the session from
   /// [_pending] so its upload tokens are dead and the map cannot grow
   /// unboundedly with terminal sessions.
@@ -542,8 +591,10 @@ class Receiver {
     onConnectTokenRedeemed?.call();
     // Token accepted (and consumed): behave like /info so the caller learns
     // who we are, and surface the caller as a peer like /register does.
+    // Read outside the try: an oversized body aborts via a shelf
+    // HijackException that must propagate, not be swallowed below.
+    final body = await _readBoundedControlBody(req, _maxDeviceInfoBodyBytes);
     try {
-      final body = await req.readAsString();
       if (body.isNotEmpty) {
         final decoded = json.decode(body);
         if (decoded is Map<String, dynamic>) {
