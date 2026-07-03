@@ -624,6 +624,9 @@ class AppState extends ChangeNotifier {
       }
     }).length;
     unawaited(TransferForegroundService.instance.sync(active));
+    // Throttle the subnet sweep while bytes are moving: active transfers
+    // deserve the bandwidth, and discovery still works via multicast.
+    _subnetScanner?.transfersActive = active > 0;
   }
 
   /// Wires a session to the history store so it gets persisted as soon as
