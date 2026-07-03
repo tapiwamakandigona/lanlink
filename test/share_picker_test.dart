@@ -163,7 +163,9 @@ void main() {
     expect(find.textContaining('1 item • '), findsOneWidget);
 
     await tester.enterText(find.byKey(const Key('picker-search')), 'calc');
-    await tester.pump();
+    // The filter is debounced (~200ms) so typing doesn't re-filter per
+    // keystroke — advance past the debounce window.
+    await tester.pump(const Duration(milliseconds: 250));
     expect(find.byKey(const Key('app-com.whatsapp')), findsNothing);
     expect(find.byKey(const Key('app-com.calc')), findsOneWidget);
 

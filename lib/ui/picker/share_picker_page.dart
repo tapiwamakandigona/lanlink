@@ -103,6 +103,13 @@ class _SharePickerPageState extends State<SharePickerPage>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late final TabController _tabs;
   final _searchController = TextEditingController();
+
+  /// The query the lists are filtered by. Trails the text field by
+  /// [_searchDebounceDelay] so the O(n) filter doesn't re-run — and both
+  /// tabs don't rebuild — on every keystroke.
+  String _query = '';
+  Timer? _searchDebounce;
+  static const _searchDebounceDelay = Duration(milliseconds: 200);
   final _thumbCache = <int, Future<Uint8List?>>{};
   final _iconCache = <String, Future<Uint8List?>>{};
 
@@ -192,9 +199,24 @@ class _SharePickerPageState extends State<SharePickerPage>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _searchDebounce?.cancel();
     _tabs.dispose();
     _searchController.dispose();
     super.dispose();
+  }
+
+  void _onSearchChanged(String text) {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(_searchDebounceDelay, () {
+      if (!mounted || _query == text) return;
+      setState(() => _query = text);
+    });
+  }
+
+  void _clearSearch() {
+    _searchDebounce?.cancel();
+    _searchController.clear();
+    setState(() => _query = '');
   }
 
   int get _selectedCount =>
@@ -230,7 +252,7 @@ class _SharePickerPageState extends State<SharePickerPage>
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final query = _searchController.text;
+    final query = _query;
     final media = filterMedia(_media ?? const [], query);
     final apps = filterApps(_apps ?? const [], query);
     final files = filterFiles(_pickedFiles.values.toList(), query);
@@ -256,7 +278,7 @@ class _SharePickerPageState extends State<SharePickerPage>
             child: TextField(
               key: const Key('picker-search'),
               controller: _searchController,
-              onChanged: (_) => setState(() {}),
+              onChanged: _onSearchChanged,
               decoration: InputDecoration(
                 prefixIcon: const Icon(Icons.search),
                 hintText: 'Search by name…',
@@ -268,10 +290,7 @@ class _SharePickerPageState extends State<SharePickerPage>
                     ? null
                     : IconButton(
                         icon: const Icon(Icons.clear),
-                        onPressed: () {
-                          _searchController.clear();
-                          setState(() {});
-                        },
+                        onPressed: _clearSearch,
                       ),
               ),
             ),
@@ -445,8 +464,15 @@ class _SharePickerPageState extends State<SharePickerPage>
                     ),
                   );
                 }
-                return Image.memory(bytes,
-                    fit: BoxFit.cover, gaplessPlayback: true);
+                // Decode at display size (tile is at most 110 lp wide):
+                // cheaper decode, less GPU memory on a fast-scrolling grid.
+                return Image.memory(
+                  bytes,
+                  fit: BoxFit.cover,
+                  gaplessPlayback: true,
+                  cacheWidth:
+                      (110 * MediaQuery.devicePixelRatioOf(context)).round(),
+                );
               },
             ),
           ),
@@ -676,7 +702,7 @@ class _SharePickerPageState extends State<SharePickerPage>
               _selectedApps.remove(app.packageName);
             }
           }),
-          secondary: _appIcon(theme, app),
+          secondary: _appIcon(context, theme, app),
           title: Text(app.label, overflow: TextOverflow.ellipsis),
           subtitle: Text(
             '${app.packageName} • ${formatBytes(app.size)}',
@@ -689,7 +715,10 @@ class _SharePickerPageState extends State<SharePickerPage>
 
   /// Lazily loaded launcher icon: the list paints instantly and icons
   /// stream in as rows become visible (same pattern as photo thumbnails).
-  Widget _appIcon(ThemeData theme, AndroidAppInfo app) {
+  Widget _appIcon(BuildContext context, ThemeData theme, AndroidAppInfo app) {
+    // Icons render at 40 lp — decode at that size instead of full raster.
+    final iconCacheWidth =
+        (40 * MediaQuery.devicePixelRatioOf(context)).round();
     final placeholder = CircleAvatar(
       backgroundColor: theme.colorScheme.surfaceContainerHighest,
       child: const Icon(Icons.android),
@@ -697,7 +726,8 @@ class _SharePickerPageState extends State<SharePickerPage>
     if (app.icon != null) {
       return ClipRRect(
         borderRadius: BorderRadius.circular(8),
-        child: Image.memory(app.icon!, width: 40, height: 40),
+        child: Image.memory(app.icon!,
+            width: 40, height: 40, cacheWidth: iconCacheWidth),
       );
     }
     final future = _iconCache.putIfAbsent(
@@ -714,7 +744,8 @@ class _SharePickerPageState extends State<SharePickerPage>
           if (bytes == null) return placeholder;
           return ClipRRect(
             borderRadius: BorderRadius.circular(8),
-            child: Image.memory(bytes, width: 40, height: 40),
+            child: Image.memory(bytes,
+                width: 40, height: 40, cacheWidth: iconCacheWidth),
           );
         },
       ),
