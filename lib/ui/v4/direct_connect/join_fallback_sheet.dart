@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -18,7 +20,7 @@ enum JoinFallbackAction {
 /// (when the platform has it) and the manual Wi-Fi-settings route, with
 /// the password shown big for typing plus a copy button. Pops with the
 /// chosen [JoinFallbackAction], or null on cancel/dismiss.
-class JoinFallbackSheet extends StatelessWidget {
+class JoinFallbackSheet extends StatefulWidget {
   const JoinFallbackSheet({
     super.key,
     required this.ssid,
@@ -37,7 +39,33 @@ class JoinFallbackSheet extends StatelessWidget {
   /// explanation.
   final WifiJoinResult? reason;
 
-  String get _explanation => switch (reason) {
+  @override
+  State<JoinFallbackSheet> createState() => _JoinFallbackSheetState();
+}
+
+class _JoinFallbackSheetState extends State<JoinFallbackSheet> {
+  /// Inline copy feedback: a SnackBar would render in the Scaffold BEHIND
+  /// this modal sheet where the user can't see it.
+  bool _copied = false;
+  Timer? _copiedReset;
+
+  @override
+  void dispose() {
+    _copiedReset?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _copyPassword() async {
+    await Clipboard.setData(ClipboardData(text: widget.password));
+    if (!mounted) return;
+    setState(() => _copied = true);
+    _copiedReset?.cancel();
+    _copiedReset = Timer(const Duration(seconds: 2), () {
+      if (mounted) setState(() => _copied = false);
+    });
+  }
+
+  String get _explanation => switch (widget.reason) {
         WifiJoinResult.timeout =>
           'The Android connection dialog timed out before the network was '
               'joined.',
@@ -61,7 +89,7 @@ class JoinFallbackSheet extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              'Couldn\'t join "$ssid" automatically',
+              'Couldn\'t join "${widget.ssid}" automatically',
               style: VType.heading.copyWith(color: scheme.onSurface),
             ),
             const SizedBox(height: VSpace.x2),
@@ -86,43 +114,60 @@ class JoinFallbackSheet extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   SelectableText(
-                    ssid,
+                    widget.ssid,
                     style: VType.bodyStrong.copyWith(color: scheme.onSurface),
                   ),
-                  const SizedBox(height: VSpace.x3),
-                  Text(
-                    'Password',
-                    style: VType.label.copyWith(color: scheme.onSurfaceVariant),
-                  ),
-                  const SizedBox(height: 2),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: SelectableText(
-                          password,
-                          style:
-                              VType.display.copyWith(color: scheme.onSurface),
+                  // Open networks (empty password) get no password row —
+                  // an empty line plus a copy button would only confuse.
+                  if (widget.password.isNotEmpty) ...[
+                    const SizedBox(height: VSpace.x3),
+                    Text(
+                      'Password',
+                      style:
+                          VType.label.copyWith(color: scheme.onSurfaceVariant),
+                    ),
+                    const SizedBox(height: 2),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: SelectableText(
+                            widget.password,
+                            style:
+                                VType.display.copyWith(color: scheme.onSurface),
+                          ),
                         ),
-                      ),
-                      IconButton(
-                        tooltip: 'Copy password',
-                        icon: const Icon(Icons.copy_rounded),
-                        onPressed: () async {
-                          await Clipboard.setData(
-                              ClipboardData(text: password));
-                          if (!context.mounted) return;
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Password copied')),
-                          );
-                        },
-                      ),
-                    ],
-                  ),
+                        if (_copied)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: VSpace.x2),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.check_rounded,
+                                    size: 18, color: scheme.primary),
+                                const SizedBox(width: VSpace.x1),
+                                Text(
+                                  'Copied',
+                                  style: VType.label
+                                      .copyWith(color: scheme.primary),
+                                ),
+                              ],
+                            ),
+                          )
+                        else
+                          IconButton(
+                            tooltip: 'Copy password',
+                            icon: const Icon(Icons.copy_rounded),
+                            onPressed: _copyPassword,
+                          ),
+                      ],
+                    ),
+                  ],
                 ],
               ),
             ),
             const SizedBox(height: VSpace.x5),
-            if (canAddNetwork) ...[
+            if (widget.canAddNetwork) ...[
               FilledButton.icon(
                 onPressed: () =>
                     Navigator.of(context).pop(JoinFallbackAction.addNetwork),

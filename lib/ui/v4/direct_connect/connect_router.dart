@@ -97,14 +97,22 @@ class ConnectRouter {
   /// for up to [overall], resolving true as soon as the peer answers —
   /// used while the user joins the network via the Settings panel or by
   /// hand, so the connect flow can resume automatically.
+  ///
+  /// [isCancelled] makes the loop abortable (user cancel, page dispose):
+  /// checked before every probe and every sleep; a cancelled wait resolves
+  /// false without opening further sockets.
   Future<bool> waitForReachable(
     ConnectPayload payload, {
     Duration interval = const Duration(seconds: 2),
     Duration overall = const Duration(seconds: 90),
+    bool Function()? isCancelled,
   }) async {
+    bool cancelled() => isCancelled?.call() ?? false;
     final deadline = DateTime.now().add(overall);
     while (true) {
+      if (cancelled()) return false;
       if (await _probe(payload.ip, payload.port, probeTimeout)) return true;
+      if (cancelled()) return false;
       if (!DateTime.now().add(interval).isBefore(deadline)) return false;
       await Future<void>.delayed(interval);
     }

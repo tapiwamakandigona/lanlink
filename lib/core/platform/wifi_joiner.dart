@@ -49,6 +49,10 @@ class WifiJoiner {
   static Future<bool> Function(String ssid, String password)?
       debugFallbackAddNetwork;
 
+  /// Test hook: replaces the [leave] platform call, so tests can pin the
+  /// contract that Tier-2/3 (device-level) joins release nothing.
+  static Future<void> Function()? debugLeave;
+
   static bool get isPlatformSupported => Platform.isAndroid;
 
   /// Registers (or clears, with null) the callback fired when a joined
@@ -123,16 +127,21 @@ class WifiJoiner {
   /// pre-filled with the hotspot credentials (API 30+). Resolves true when
   /// the user saved the network. The network is joined at device level —
   /// there is no process binding to release afterwards.
+  ///
+  /// Safety net: the platform reply can get lost if the activity is
+  /// recreated behind the Settings panel (process death, rare OEM
+  /// lifecycle quirks) — the call then times out to false instead of
+  /// wedging the fallback flow with a spinner forever.
   static Future<bool> fallbackAddNetwork(String ssid, String password) async {
     final override = debugFallbackAddNetwork;
     if (override != null) return override(ssid, password);
     if (!isPlatformSupported) return false;
     try {
-      return await _channel.invokeMethod<bool>(
-            'fallbackAddNetwork',
-            {'ssid': ssid, 'password': password},
-          ) ??
-          false;
+      final saved = await _channel.invokeMethod<bool>(
+        'fallbackAddNetwork',
+        {'ssid': ssid, 'password': password},
+      ).timeout(const Duration(minutes: 3));
+      return saved ?? false;
     } catch (_) {
       return false;
     }
@@ -142,6 +151,8 @@ class WifiJoiner {
   /// even when nothing was joined. This is the ONLY place a successful
   /// join's request gets unregistered (session end / disconnect).
   static Future<void> leave() async {
+    final override = debugLeave;
+    if (override != null) return override();
     if (!isPlatformSupported) return;
     try {
       await _channel.invokeMethod<void>('leave');

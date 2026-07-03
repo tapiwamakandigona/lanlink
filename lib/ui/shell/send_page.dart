@@ -86,6 +86,14 @@ class _SendPageState extends State<SendPage> {
   /// release it on dispose.
   bool _handedOff = false;
 
+  /// True while the Tier-2/3 probe loop waits for the PC to become
+  /// reachable, so the UI can show a Cancel affordance instead of
+  /// spinner-locking the page for up to 90 s.
+  bool _probeWaiting = false;
+
+  /// Set by the Cancel button (or dispose) to abort the probe loop.
+  bool _probeCancelled = false;
+
   @override
   void initState() {
     super.initState();
@@ -115,7 +123,11 @@ class _SendPageState extends State<SendPage> {
     // transfer off, release the binding so the phone returns to its own
     // network. An in-flight transfer keeps the binding (the session owns
     // it from here; disconnect/teardown releases it later).
+    _probeCancelled = true; // abort any in-flight Tier-2/3 probe loop
     if (_joinedHotspot && !_handedOff) {
+      // Clear the network-lost handler alongside the release: leave()'s
+      // queued onLost must not fire a stale closure over this dead State.
+      WifiJoiner.setOnNetworkLost(null);
       unawaited(WifiJoiner.leave());
     }
     super.dispose();
@@ -288,12 +300,19 @@ class _SendPageState extends State<SendPage> {
         await SystemSettings.openWifiSettings();
     }
     if (!mounted) return false;
+    _probeCancelled = false;
     setState(() {
       _connecting = true;
+      _probeWaiting = true;
       _progressLine = 'Waiting for this phone to reach ${payload.alias}…';
     });
-    final reachable = await router.waitForReachable(payload);
+    final reachable = await router.waitForReachable(
+      payload,
+      isCancelled: () => _probeCancelled || !mounted,
+    );
     if (!mounted) return false;
+    setState(() => _probeWaiting = false);
+    if (_probeCancelled) return false; // user aborted — no error banner
     if (!reachable) {
       _showError('Still can\'t reach "${payload.alias}". '
           'Join "${payload.ssid}" in Wi-Fi settings, then scan again.');
@@ -489,6 +508,13 @@ class _SendPageState extends State<SendPage> {
                       ),
                     ],
                   ),
+                  if (_probeWaiting) ...[
+                    const SizedBox(height: VSpace.x2),
+                    TextButton(
+                      onPressed: () => setState(() => _probeCancelled = true),
+                      child: const Text('Cancel'),
+                    ),
+                  ],
                 ],
                 if (_error != null) ...[
                   const SizedBox(height: VSpace.x4),

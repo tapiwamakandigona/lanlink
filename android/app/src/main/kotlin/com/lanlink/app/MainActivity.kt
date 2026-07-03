@@ -51,6 +51,13 @@ class MainActivity : FlutterActivity() {
 
     private var wifiNetworkCallback: android.net.ConnectivityManager.NetworkCallback? = null
 
+    /// Generation counter for hotspot-join attempts. Bumped by every new
+    /// join AND by leaveHotspotNetwork() so deferred closures (the 60 s
+    /// timeout, queued onUnavailable/onLost/onAvailable posts) from a
+    /// superseded attempt become no-ops instead of tearing down the
+    /// replacement session.
+    private var joinAttemptId: Long = 0
+
     /// The `lanlink/wifi` channel, kept so native network events (e.g. the
     /// joined hotspot dropping) can be pushed to the Dart side.
     private var wifiChannel: MethodChannel? = null
@@ -88,6 +95,10 @@ class MainActivity : FlutterActivity() {
         // one is still active ("Request cannot override active request") —
         // always release any stale callback before requesting.
         leaveHotspotNetwork()
+        // Claim a fresh generation AFTER the release above (which bumps the
+        // counter itself). Every deferred closure below captures `attempt`
+        // and no-ops once it is stale.
+        val attempt = ++joinAttemptId
         // Android matches SSIDs byte-exactly against scan results; stray
         // whitespace from the QR payload must never reach the specifier.
         val ssid = rawSsid.trim()
@@ -120,12 +131,16 @@ class MainActivity : FlutterActivity() {
             val callback = object : android.net.ConnectivityManager.NetworkCallback() {
                 override fun onAvailable(network: android.net.Network) {
                     // Keep the callback registered (see the method KDoc).
-                    cm.bindProcessToNetwork(network)
-                    handler.post { settle("connected") }
+                    handler.post {
+                        if (attempt != joinAttemptId) return@post
+                        cm.bindProcessToNetwork(network)
+                        settle("connected")
+                    }
                 }
 
                 override fun onUnavailable() {
                     handler.post {
+                        if (attempt != joinAttemptId) return@post
                         if (settled) return@post
                         if (!retried) {
                             retried = true
@@ -147,6 +162,10 @@ class MainActivity : FlutterActivity() {
 
                 override fun onLost(network: android.net.Network) {
                     handler.post {
+                        // A released attempt's queued onLost must neither
+                        // unbind the replacement session nor surface a
+                        // misleading "link dropped" to Dart.
+                        if (attempt != joinAttemptId) return@post
                         cm.bindProcessToNetwork(null)
                         // Tell Dart the hotspot dropped so the UI can react.
                         wifiChannel?.invokeMethod("onNetworkLost", null)
@@ -165,7 +184,15 @@ class MainActivity : FlutterActivity() {
         // App-side timeout. Must outlive the OS picker's ~10 s scan cadence
         // PLUS the user tap the FIRST join always needs in the system
         // dialog — 30 s provably races and loses; 60 s does not.
-        handler.postDelayed({ fail("timeout") }, JOIN_TIMEOUT_MS)
+        handler.postDelayed(
+            {
+                // Stale-timer guard: a superseded attempt's timeout must not
+                // tear down the attempt that replaced it (fail() releases the
+                // shared callback and unbinds the process).
+                if (attempt == joinAttemptId) fail("timeout")
+            },
+            JOIN_TIMEOUT_MS,
+        )
     }
 
     /**
@@ -222,6 +249,10 @@ class MainActivity : FlutterActivity() {
     /** Unbinds the process and releases any pending hotspot-join request. */
     private fun leaveHotspotNetwork() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+        // Invalidate every deferred closure of the current attempt (timeout
+        // runnable, queued callback posts) — the session they belong to is
+        // over as of now.
+        joinAttemptId++
         val cm = getSystemService(android.net.ConnectivityManager::class.java)
         cm.bindProcessToNetwork(null)
         wifiNetworkCallback?.let {
@@ -250,6 +281,16 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        // A pending Add-networks result can never be delivered once the
+        // activity dies — resolve it so the Dart future isn't left hanging
+        // (the Dart side additionally guards with its own timeout).
+        addNetworkResult?.let { pending ->
+            addNetworkResult = null
+            try {
+                pending.success(false)
+            } catch (_: Exception) {
+            }
+        }
         stopLocalHotspot()
         super.onDestroy()
     }

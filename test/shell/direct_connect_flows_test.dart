@@ -470,6 +470,36 @@ void main() {
     });
 
     testWidgets(
+        'Tier 3 resume: the join is device-level, so leaving the page '
+        'releases nothing (Disconnect contract)', (tester) async {
+      WifiJoiner.debugAddNetworksSupportedOverride = false;
+      final leaves = <void>[];
+      WifiJoiner.debugLeave = () async => leaves.add(null);
+      addTearDown(() {
+        WifiJoiner.debugAddNetworksSupportedOverride = null;
+        WifiJoiner.debugLeave = null;
+      });
+      final state = await _makeState(tester);
+      state.debugInstallSender(_TokenSender(onToken: (_) {}));
+      var probes = 0;
+      final router = ConnectRouter(
+        probe: (ip, port, timeout) async => ++probes > 1,
+        joinHotspot: (ssid, pass) async => WifiJoinResult.declinedOrUnavailable,
+      );
+
+      await scanHotspotQr(tester, state, router);
+      await tester.tap(find.text('Open Wi-Fi settings'));
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle(const Duration(milliseconds: 200));
+      // Pop the page without any hand-off: a Tier-1 join would release
+      // its binding here, a Tier-2/3 join must not (there is none).
+      await tester.pumpWidget(const SizedBox());
+
+      expect(leaves, isEmpty,
+          reason: 'Tier-2/3 joins have no process binding to release');
+    });
+
+    testWidgets(
         'Tier 2: Add-network save + probe loop resumes connect; retry '
         'ordering is join-first, fallback-second', (tester) async {
       WifiJoiner.debugAddNetworksSupportedOverride = true;
