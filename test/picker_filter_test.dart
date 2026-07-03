@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:lanlink/core/models/file_info.dart';
 import 'package:lanlink/core/platform/android_apps.dart';
 import 'package:lanlink/core/platform/media_library.dart';
 import 'package:lanlink/core/util/picker_filter.dart';
@@ -6,6 +7,14 @@ import 'package:lanlink/ui/picker/share_picker_page.dart';
 
 AndroidAppInfo _app(String label, String pkg, {int size = 1000}) =>
     AndroidAppInfo(label: label, packageName: pkg, apkPath: '/a', size: size);
+
+FileInfo _file(String name, {int size = 100}) => FileInfo(
+      id: name,
+      fileName: name,
+      size: size,
+      fileType: fileTypeForName(name),
+      localPath: '/picked/$name',
+    );
 
 MediaItem _media(
   String name, {
@@ -90,12 +99,51 @@ void main() {
     });
   });
 
+  group('filterFiles', () {
+    final files = [
+      _file('backup.zip'),
+      _file('Report.PDF'),
+      _file('site.tar.gz'),
+      _file('Makefile'),
+      _file('firmware.Bin.OLD'),
+    ];
+
+    test('empty query returns everything, whatever the extensions', () {
+      expect(filterFiles(files, ''), files);
+      expect(filterFiles(files, '   '), files);
+    });
+
+    test('matches common archive extensions', () {
+      expect(filterFiles(files, 'zip').single.fileName, 'backup.zip');
+      expect(filterFiles(files, 'tar.gz').single.fileName, 'site.tar.gz');
+    });
+
+    test('is case-insensitive across arbitrary extensions', () {
+      expect(filterFiles(files, 'pdf').single.fileName, 'Report.PDF');
+      expect(filterFiles(files, '.bin').single.fileName, 'firmware.Bin.OLD');
+    });
+
+    test('handles extensionless files by whole-name match', () {
+      expect(filterFiles(files, 'makef').single.fileName, 'Makefile');
+    });
+
+    test('no match yields an empty list', () {
+      expect(filterFiles(files, 'nope'), isEmpty);
+    });
+  });
+
   group('selection totals', () {
     test('mediaTotalSize and appsTotalSize sum byte sizes', () {
       expect(mediaTotalSize([_media('a', size: 5), _media('b', size: 7)]), 12);
       expect(
           appsTotalSize([_app('a', 'a', size: 3), _app('b', 'b', size: 4)]), 7);
       expect(mediaTotalSize(const []), 0);
+    });
+
+    test('filesTotalSize sums arbitrary picked files', () {
+      expect(
+          filesTotalSize([_file('a.zip', size: 8), _file('b', size: 9)]), 17);
+      expect(filesTotalSize(const []), 0);
     });
   });
 
