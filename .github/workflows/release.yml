@@ -95,7 +95,7 @@ jobs:
 
   build-windows-installer:
     name: Build Windows installer (NSIS)
-    runs-on: windows-latest
+    runs-on: windows-2022  # pin: windows-latest (vs2026 image) breaks Flutter 3.24.5 CMake generator
     steps:
       - uses: actions/checkout@v4
 

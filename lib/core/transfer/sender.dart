@@ -26,6 +26,10 @@ class Sender {
 
   final Dio _dio;
 
+  /// Dio cancel tokens for in-flight sends, keyed by session identity so
+  /// [cancelSend] can abort the HTTP work promptly.
+  final Map<TransferSession, CancelToken> _inflight = {};
+
   static Dio _defaultDio() {
     final d = Dio(BaseOptions(
       connectTimeout: const Duration(seconds: 10),
@@ -54,6 +58,30 @@ class Sender {
     return null;
   }
 
+  /// Redeems a single-use connect token (from a scanned QR) against [peer]'s
+  /// LanLink connect route. Returns the peer's up-to-date [Device] info on
+  /// success, or null when the token was rejected (consumed/unknown => 401)
+  /// or the peer is unreachable.
+  Future<Device?> connectWithToken(Device peer, String token) async {
+    try {
+      final resp = await _dio.postUri<Map<String, dynamic>>(
+        peer.baseUri.replace(
+          path: LanLinkProtocol.routeConnect,
+          queryParameters: {'token': token},
+        ),
+        data: localDeviceProvider().toJson(),
+        options: Options(
+          responseType: ResponseType.json,
+          receiveTimeout: const Duration(seconds: 5),
+        ),
+      );
+      if (resp.statusCode == 200 && resp.data != null) {
+        return Device.fromJson(resp.data!, ip: peer.ip);
+      }
+    } catch (_) {}
+    return null;
+  }
+
   /// Drives the LocalSend v2 send protocol on top of an existing
   /// [TransferSession]. Mutates [session] in-place as the transfer progresses
   /// so any UI bound to it sees live updates without re-pointing.
@@ -73,7 +101,39 @@ class Sender {
     );
 
     session.markStatus(TransferStatus.transferring);
+    final cancelToken = CancelToken();
+    _inflight[session] = cancelToken;
+    try {
+      await _sendInner(
+        session: session,
+        peer: peer,
+        files: files,
+        cancelToken: cancelToken,
+      );
+    } catch (e) {
+      // Nothing inside the send pipeline may escape into an unawaited
+      // future: a hostile or malformed peer response becomes a failed
+      // session with a user-visible error, never an unhandled async error
+      // that wedges the session at "transferring".
+      if (kDebugMode) debugPrint('[sender] send failed: $e');
+      if (_wasCancelled(session, e)) {
+        _markPendingFiles(session, files, TransferStatus.cancelled);
+        session.markStatus(TransferStatus.cancelled);
+      } else {
+        _failAll(
+            session, files, friendlyTransferError(e, peerName: peer.alias));
+      }
+    } finally {
+      _inflight.remove(session);
+    }
+  }
 
+  Future<void> _sendInner({
+    required TransferSession session,
+    required Device peer,
+    required List<FileInfo> files,
+    required CancelToken cancelToken,
+  }) async {
     // 1. prepare-upload
     final me = localDeviceProvider();
     final prepareUri =
@@ -86,12 +146,18 @@ class Sender {
           'info': me.toJson(),
           'files': {for (final f in files) f.id: f.toJson()},
         },
+        cancelToken: cancelToken,
         // Don't throw on non-2xx — we handle 403 (decline) explicitly below.
         options: Options(
           validateStatus: (status) => status != null,
         ),
       );
     } on DioException catch (e) {
+      if (_wasCancelled(session, e)) {
+        _markPendingFiles(session, files, TransferStatus.cancelled);
+        session.markStatus(TransferStatus.cancelled);
+        return;
+      }
       _failAll(session, files, friendlyTransferError(e, peerName: peer.alias));
       return;
     }
@@ -106,26 +172,29 @@ class Sender {
           friendlyHttpStatus(prepResp.statusCode, peerName: peer.alias));
       return;
     }
-    final prepData = prepResp.data as Map<String, dynamic>;
-    final sessionId = prepData['sessionId'] as String?;
-    final tokens =
-        (prepData['files'] as Map<String, dynamic>?)?.cast<String, String>();
-    if (sessionId == null || tokens == null) {
+    // Parse defensively: the response body is peer-controlled, so any shape
+    // violation (wrong types, unknown fileIds, non-string tokens) must land
+    // in the "malformed" bucket rather than throw out of this method.
+    final String sessionId;
+    final Map<String, String> tokens;
+    final resume = <String, int>{};
+    try {
+      final prepData = prepResp.data as Map<String, dynamic>;
+      sessionId = prepData['sessionId'] as String;
+      tokens = Map<String, String>.from(prepData['files'] as Map);
+      final resumeRaw = prepData['resume'];
+      if (resumeRaw is Map) {
+        for (final e in resumeRaw.entries) {
+          resume['${e.key}'] = (e.value as num).toInt();
+        }
+      }
+    } catch (_) {
       _failAll(session, files, 'Malformed prepare-upload response.');
       return;
     }
 
     // Track the receiver-assigned id so a future cancel can target it.
     session.sessionId = sessionId;
-
-    // LanLink extension: byte offsets the receiver already holds from an
-    // interrupted earlier attempt. Absent when talking to plain LocalSend.
-    final resume = <String, int>{
-      for (final e
-          in ((prepData['resume'] as Map<String, dynamic>?) ?? const {})
-              .entries)
-        e.key: (e.value as num).toInt(),
-    };
 
     // Files the receiver chose not to accept (e.g. user un-ticked them).
     for (final f in files) {
@@ -135,10 +204,18 @@ class Sender {
     }
 
     // 2. upload each accepted file in turn
+    final byId = {for (final f in files) f.id: f};
     for (final entry in tokens.entries) {
       final fileId = entry.key;
       final token = entry.value;
-      final info = files.firstWhere((f) => f.id == fileId);
+      final info = byId[fileId];
+      if (info == null) {
+        // The receiver invented a fileId we never offered — a hostile or
+        // broken peer. Fail cleanly instead of throwing (C2).
+        _failAll(session, files,
+            'Malformed prepare-upload response (unknown file id).');
+        return;
+      }
       final file = File(info.localPath!);
       if (!await file.exists()) {
         session.markFile(fileId, TransferStatus.failed,
@@ -170,6 +247,7 @@ class Sender {
               length: length,
               startAt: startAt,
               uri: uri,
+              cancelToken: cancelToken,
             );
             break;
           } on DioException catch (e) {
@@ -188,6 +266,17 @@ class Sender {
         session.markFile(fileId, TransferStatus.completed);
       } catch (e) {
         if (kDebugMode) debugPrint('[sender] upload of $fileId failed: $e');
+        // Local user hit cancel, or the receiver stopped the session
+        // (its upload handler answers 403 once the session is cancelled):
+        // that's a cancellation, not a failure.
+        final rejectedByReceiver =
+            e is DioException && e.response?.statusCode == 403;
+        if (_wasCancelled(session, e) || rejectedByReceiver) {
+          session.markFile(fileId, TransferStatus.cancelled);
+          _markPendingFiles(session, files, TransferStatus.cancelled);
+          session.markStatus(TransferStatus.cancelled);
+          return;
+        }
         session.markFile(fileId, TransferStatus.failed,
             error: friendlyTransferError(e, peerName: peer.alias));
         session.markStatus(TransferStatus.failed);
@@ -196,6 +285,67 @@ class Sender {
     }
 
     session.markStatus(TransferStatus.completed);
+  }
+
+  /// Cancels an in-flight send driven by [send]: aborts the HTTP transfer
+  /// promptly, marks the session cancelled locally, and (best-effort) dials
+  /// `POST /cancel` on [peer] so the receiving side ends its session too.
+  Future<void> cancelSend({
+    required TransferSession session,
+    required Device peer,
+  }) async {
+    _inflight[session]?.cancel('cancelled by user');
+    _markPendingFiles(session, session.files.values.map((p) => p.file),
+        TransferStatus.cancelled);
+    session.markStatus(TransferStatus.cancelled);
+    // Only sessions the receiver has acknowledged (prepare-upload returned)
+    // exist on the peer; locally-minted placeholder ids are not dialable.
+    final sid = session.sessionId;
+    if (sid.isEmpty ||
+        sid.startsWith('sending-') ||
+        sid.startsWith('bluetooth-')) {
+      return;
+    }
+    try {
+      await _dio.postUri<dynamic>(
+        peer.baseUri.replace(
+          path: LanLinkProtocol.routeCancel,
+          queryParameters: {'sessionId': sid},
+        ),
+        options: Options(
+          responseType: ResponseType.plain,
+          sendTimeout: const Duration(seconds: 5),
+          receiveTimeout: const Duration(seconds: 5),
+          validateStatus: (status) => status != null,
+        ),
+      );
+    } on DioException catch (e) {
+      // Best-effort: the peer may already be gone. The local session is
+      // cancelled regardless.
+      if (kDebugMode) debugPrint('[sender] cancel notify failed: $e');
+    }
+  }
+
+  /// True when [e] (or the session state) indicates a deliberate local
+  /// cancellation rather than a failure.
+  bool _wasCancelled(TransferSession session, Object e) {
+    if (session.status == TransferStatus.cancelled) return true;
+    return e is DioException && e.type == DioExceptionType.cancel;
+  }
+
+  /// Marks every file that hasn't reached a terminal per-file state yet.
+  void _markPendingFiles(TransferSession session, Iterable<FileInfo> files,
+      TransferStatus status) {
+    for (final f in files) {
+      final p = session.files[f.id];
+      if (p == null) continue;
+      if (p.status == TransferStatus.completed ||
+          p.status == TransferStatus.failed ||
+          p.status == TransferStatus.cancelled) {
+        continue;
+      }
+      session.markFile(f.id, status);
+    }
   }
 
   /// Streams [file] to [uri] starting at byte [startAt], updating the
@@ -207,6 +357,7 @@ class Sender {
     required int length,
     required int startAt,
     required Uri uri,
+    CancelToken? cancelToken,
   }) async {
     session.updateBytes(fileId, startAt);
     final stream = file.openRead(startAt);
@@ -223,6 +374,7 @@ class Sender {
         session.updateBytes(fileId, sent);
         return chunk;
       }),
+      cancelToken: cancelToken,
       options: Options(
         contentType: 'application/octet-stream',
         headers: {

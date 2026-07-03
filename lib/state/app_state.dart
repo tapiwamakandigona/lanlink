@@ -64,12 +64,16 @@ class AppState extends ChangeNotifier {
   /// no-ops so widget tests can exercise pages that kick off discovery.
   final bool _networkSilent;
 
-  late Receiver _receiver;
-  late Sender _sender;
-  late MulticastDiscovery _discovery;
-  late SubnetScanner _subnetScanner;
+  // Nullable rather than `late`: UI code (Settings page and friends) reads
+  // through these before/without bootstrap on test instances, and `late`
+  // fields turned that into LateInitializationError crashes. Null simply
+  // means "service not started".
+  Receiver? _receiver;
+  Sender? _sender;
+  MulticastDiscovery? _discovery;
+  SubnetScanner? _subnetScanner;
   late UpdateChecker _updateChecker;
-  late TransferHistoryStore _history;
+  TransferHistoryStore? _history;
 
   /// Whether a manual / automatic subnet sweep is currently in flight.
   bool _scanning = false;
@@ -94,6 +98,45 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Test hook: installs a real [Sender] on a network-silent instance so
+  /// connect/probe paths can be exercised against a loopback receiver.
+  @visibleForTesting
+  void debugInstallSender(Sender sender) {
+    _sender = sender;
+  }
+
+  /// Test hook: installs a real [Receiver] on a network-silent instance so
+  /// the Receive page's token minting/re-minting can be exercised against
+  /// a live loopback listener.
+  @visibleForTesting
+  void debugInstallReceiver(Receiver receiver) {
+    _receiver = receiver..onConnectTokenRedeemed = notifyListeners;
+  }
+
+  /// Test hook: routes [peer] through the same code path as a live
+  /// discovery/probe observation (including verified-flag resolution).
+  @visibleForTesting
+  void debugPeerSeen(Device peer) => _onPeerSeen(peer);
+
+  /// Test hook: drives an incoming-transfer offer through the exact same
+  /// path the [Receiver] uses, so widget tests can exercise the consent
+  /// prompt installed via [installIncomingPrompt].
+  @visibleForTesting
+  Future<AcceptDecision> debugTriggerIncomingPrompt(
+    Device peer,
+    List<FileInfo> files,
+  ) =>
+      _handleIncomingPrompt(peer, files);
+
+  /// The alias shown to peers: the user's setting, or the same platform
+  /// default the announcement payload uses when the setting is empty.
+  /// Display-mapping helper for the shell (home header, first-run prefill,
+  /// receive QR).
+  String get displayAlias {
+    final alias = settings.alias.trim();
+    return alias.isEmpty ? _defaultAlias() : alias;
+  }
+
   /// Map of peer fingerprint -> Device. Latest announcement wins.
   final Map<String, Device> _peers = {};
   Map<String, Device> get peers => Map.unmodifiable(_peers);
@@ -102,8 +145,35 @@ class AppState extends ChangeNotifier {
   final List<TransferSession> _sessions = [];
   List<TransferSession> get sessions => List.unmodifiable(_sessions);
 
+  /// Sessions the user has explicitly dismissed from the visible list.
+  /// They stay in [_sessions] (and history) — dismissing only hides them.
+  final Set<TransferSession> _dismissed = {};
+
+  /// Sessions the UI should show: everything the user hasn't dismissed.
+  /// Terminal (completed/failed/cancelled) sessions stay visible with their
+  /// terminal status until dismissed via [dismissSession].
+  List<TransferSession> get visibleSessions => List.unmodifiable(
+        _sessions.where((s) => !_dismissed.contains(s)),
+      );
+
+  /// Hides a finished session from [visibleSessions]. In-flight sessions
+  /// cannot be dismissed — cancel them first.
+  void dismissSession(TransferSession session) {
+    if (!session.isTerminal) return;
+    if (_dismissed.add(session)) notifyListeners();
+  }
+
+  /// Dismisses every terminal session in one go ("Clear finished").
+  void dismissFinishedSessions() {
+    var changed = false;
+    for (final s in _sessions) {
+      if (s.isTerminal && _dismissed.add(s)) changed = true;
+    }
+    if (changed) notifyListeners();
+  }
+
   /// Local listening port (may differ from settings if it was in use).
-  int? get port => _receiver.port;
+  int? get port => _receiver?.port;
 
   /// IPv4 addresses we're listening on (for the Settings screen).
   List<String> get localIps => List.unmodifiable(_localIps);
@@ -124,8 +194,13 @@ class AppState extends ChangeNotifier {
       fingerprint: fingerprint,
       localIps: ips,
     );
-    state._history = await TransferHistoryStore.getInstance();
-    state._sessions.addAll(state._history.load());
+    final history = await TransferHistoryStore.getInstance();
+    state._history = history;
+    final restored = history.load();
+    state._sessions.addAll(restored);
+    // Restored sessions belong to past runs: they live in the History page,
+    // not in the visible (dismissable) session list for this run.
+    state._dismissed.addAll(restored);
 
     state._receiver = Receiver(
       localDeviceProvider: state._buildSelfDevice,
@@ -133,14 +208,22 @@ class AppState extends ChangeNotifier {
       onAccept: state._handleIncomingPrompt,
       onSessionStarted: state._handleNewReceiveSession,
       onPeerSeen: state._onPeerSeen,
-    );
-    state._sender = Sender(localDeviceProvider: state._buildSelfDevice);
+    )
+      // A redeemed connect token invalidates the QR on screen; notify so
+      // the Receive page re-mints a fresh one.
+      ..onConnectTokenRedeemed = state.notifyListeners;
+    final sender = Sender(localDeviceProvider: state._buildSelfDevice);
+    state._sender = sender;
+    // The discovery service gets a *provider*, not a snapshot: the self
+    // device must be rebuilt per announcement so the announced port is the
+    // receiver's actual bound port even after the receiver fell back from
+    // the configured port during start().
     state._discovery = MulticastDiscovery(
-      selfDevice: state._buildSelfDevice(),
+      selfDeviceProvider: state._buildSelfDevice,
       onPeer: state._onPeerSeen,
     );
     state._subnetScanner = SubnetScanner(
-      sender: state._sender,
+      sender: sender,
       onPeer: state._onPeerSeen,
     );
     state._updateChecker = UpdateChecker();
@@ -149,16 +232,16 @@ class AppState extends ChangeNotifier {
     settings.addListener(state._onSettingsChanged);
 
     try {
-      await state._receiver.start();
+      await state._receiver!.start();
       EventLog.instance.add(
-        'Receiver listening on ${ips.join(", ")}:${state._receiver.port}',
+        'Receiver listening on ${ips.join(", ")}:${state._receiver!.port}',
       );
     } catch (e) {
       // Receiving is unavailable (e.g. every candidate port is taken), but
       // the app must still come up so the user can send files and see why.
       EventLog.instance.add('Could not start receiver: $e');
     }
-    await state._discovery.start();
+    await state._discovery!.start();
     if (settings.connectivityMode == ConnectivityMode.hotspot) {
       unawaited(state._kickSubnetScan());
     }
@@ -196,14 +279,17 @@ class AppState extends ChangeNotifier {
   /// changing modes immediately rediscovers peers.
   Future<void> refreshDiscovery() async {
     if (_networkSilent) return;
-    _discovery.poke();
+    _discovery?.poke();
     // Re-probe peers we already know about (including manually-added ones)
     // so renamed devices show their current alias instead of a stale one.
     final known = _peers.values.toList();
-    for (final peer in known) {
-      unawaited(_sender.probe(peer).then((fresh) {
-        if (fresh != null) _onPeerSeen(fresh);
-      }));
+    final sender = _sender;
+    if (sender != null) {
+      for (final peer in known) {
+        unawaited(sender.probe(peer).then((fresh) {
+          if (fresh != null) _onPeerSeen(fresh);
+        }));
+      }
     }
     final ips = await listLocalIPv4Addresses();
     _localIps
@@ -217,12 +303,14 @@ class AppState extends ChangeNotifier {
 
   Future<void> _kickSubnetScan() async {
     if (_scanning) {
-      _subnetScanner.cancel();
+      _subnetScanner?.cancel();
     }
+    final scanner = _subnetScanner;
+    if (scanner == null) return;
     _scanning = true;
     notifyListeners();
     try {
-      await _subnetScanner.scan(localIps: _localIps);
+      await scanner.scan(localIps: _localIps);
     } finally {
       _scanning = false;
       notifyListeners();
@@ -243,7 +331,7 @@ class AppState extends ChangeNotifier {
       deviceModel: detectDeviceModel(),
       deviceType: detectDeviceType(),
       fingerprint: _fingerprint,
-      port: _receiver.port ?? settings.port,
+      port: _receiver?.port ?? settings.port,
       protocol: 'http',
       ip: _localIps.isEmpty ? '0.0.0.0' : _localIps.first,
     );
@@ -374,7 +462,7 @@ class AppState extends ChangeNotifier {
         case TransferStatus.cancelled:
           if (saved) return;
           saved = true;
-          _history.scheduleSave(_sessions);
+          _history?.scheduleSave(_sessions);
         case TransferStatus.awaitingAccept:
         case TransferStatus.transferring:
           return;
@@ -386,7 +474,7 @@ class AppState extends ChangeNotifier {
 
   /// Wipe persisted history and drop any finished sessions from memory.
   Future<void> clearHistory() async {
-    await _history.clear();
+    await _history?.clear();
     _sessions.removeWhere((s) {
       switch (s.status) {
         case TransferStatus.completed:
@@ -435,6 +523,15 @@ class AppState extends ChangeNotifier {
 
   void _onPeerSeen(Device peer) {
     if (peer.fingerprint == _fingerprint) return;
+    // Verification is decided purely by the local pin store: a peer is
+    // verified iff its announced fingerprint was pinned on an earlier
+    // successful connect. Peers are keyed by fingerprint, so an impostor
+    // announcing a pinned device's alias under a different fingerprint is a
+    // separate, unverified entry — never the pinned device.
+    final verified = settings.isPinned(peer.fingerprint);
+    if (peer.verified != verified) {
+      peer = peer.copyWith(verified: verified);
+    }
     final existing = _peers[peer.fingerprint];
     _peers[peer.fingerprint] = peer;
     if (existing == null || existing.alias != peer.alias) {
@@ -447,8 +544,9 @@ class AppState extends ChangeNotifier {
   }
 
   void _onSettingsChanged() {
-    _discovery.selfDevice = _buildSelfDevice();
-    _discovery.poke();
+    // Discovery reads the self device through its provider, so a settings
+    // change only needs a fresh announcement.
+    _discovery?.poke();
     if (settings.connectivityMode == ConnectivityMode.hotspot && !_scanning) {
       unawaited(_kickSubnetScan());
     }
@@ -478,6 +576,10 @@ class AppState extends ChangeNotifier {
       },
       status: TransferStatus.transferring,
     );
+    // "+ Add files": a send started while another send session to the same
+    // peer is still visible joins that session's group so the UI can render
+    // the whole exchange as one card (Stage 2 wires the visuals).
+    session.groupId = _groupIdForNewSendTo(peer);
     _sessions.insert(0, session);
     session.addListener(() => notifyListeners());
     _attachNotifications(session);
@@ -491,10 +593,32 @@ class AppState extends ChangeNotifier {
 
     // Drive the transfer in the background. The sender mutates `session`
     // directly so we don't have to swap anything in the list afterward.
-    unawaited(_sender.send(session: session, peer: peer, files: files));
+    final sender = _sender;
+    if (sender != null) {
+      unawaited(sender.send(session: session, peer: peer, files: files));
+    }
 
     return session;
   }
+
+  /// Finds — minting on first use — the group id a new send to [peer]
+  /// should attach to. Returns null when no send session to that peer is
+  /// currently visible (the new session then stands alone until a later
+  /// send groups with it).
+  String? _groupIdForNewSendTo(Device peer) {
+    for (final s in _sessions) {
+      if (_dismissed.contains(s)) continue;
+      if (s.direction != TransferDirection.send) continue;
+      if (s.peer.fingerprint != peer.fingerprint) continue;
+      return s.groupId ??=
+          'group-${peer.fingerprint}-${DateTime.now().microsecondsSinceEpoch}';
+    }
+    return null;
+  }
+
+  /// All sessions belonging to [groupId], newest first.
+  List<TransferSession> sessionsInGroup(String groupId) =>
+      List.unmodifiable(_sessions.where((s) => s.groupId == groupId));
 
   /// Records the terminal outcome of [session] to the diagnostics log.
   void _attachOutcomeLog(TransferSession session, String peerAlias) {
@@ -621,13 +745,74 @@ class AppState extends ChangeNotifier {
 
   /// Manually adds a peer by host:port. Useful when discovery is blocked.
   Future<Device?> probeManualPeer(String hostPort) async {
+    final stub = _stubForHostPort(hostPort);
+    if (stub == null) return null;
+    final probed = await _sender?.probe(stub);
+    if (probed != null) {
+      // A deliberate direct connect that succeeded: pin the fingerprint so
+      // this peer shows as verified from now on.
+      await _pinPeer(probed);
+      _onPeerSeen(probed);
+    }
+    return probed;
+  }
+
+  /// Mints a single-use connect token for this device's QR payload. The
+  /// first peer to redeem it via [connectWithToken] consumes it; replays
+  /// are rejected with 401 by the receiver. Null when the receiver isn't
+  /// running (nothing to connect to anyway).
+  String? issueConnectToken() => _receiver?.issueConnectToken();
+
+  /// Whether [token] is still the redeemable connect token; false once it
+  /// was consumed or superseded by a newer mint (or when the receiver is
+  /// not running).
+  bool isConnectTokenValid(String token) =>
+      _receiver?.isConnectTokenValid(token) ?? false;
+
+  /// Redeems a scanned QR's one-time [token] against the peer at
+  /// [hostPort]. On success the peer's fingerprint is pinned (=> verified)
+  /// and it is added to the peer list. Returns null when the token was
+  /// rejected (consumed or unknown) or the peer is unreachable.
+  Future<Device?> connectWithToken(String hostPort, String token) async {
+    final stub = _stubForHostPort(hostPort);
+    if (stub == null) return null;
+    final sender = _sender;
+    if (sender == null) return null;
+    final device = await sender.connectWithToken(stub, token);
+    if (device != null) {
+      await _pinPeer(device);
+      _onPeerSeen(device);
+    }
+    return device;
+  }
+
+  Future<void> _pinPeer(Device device) async {
+    if (device.fingerprint.isEmpty) return;
+    if (!settings.isPinned(device.fingerprint)) {
+      await settings.pinFingerprint(device.fingerprint);
+    }
+  }
+
+  /// True when [hostPort] looks like an IPv6 address (raw or `[v6]:port`),
+  /// which Direct Link cannot connect to yet. The UI shows a specific
+  /// error instead of the generic "no device answered".
+  static bool looksLikeIpv6(String hostPort) {
+    final trimmed = hostPort.trim();
+    return trimmed.startsWith('[') || ':'.allMatches(trimmed).length > 1;
+  }
+
+  Device? _stubForHostPort(String hostPort) {
+    // IPv6 would need bracket-aware parsing and a v6 HTTP stack check;
+    // reject it here so callers can surface a clear error (see
+    // [looksLikeIpv6]) rather than dialing a garbled host.
+    if (looksLikeIpv6(hostPort)) return null;
     final parts = hostPort.split(':');
-    if (parts.isEmpty) return null;
+    if (parts.isEmpty || parts[0].isEmpty) return null;
     final host = parts[0];
     final port = parts.length > 1
         ? int.tryParse(parts[1]) ?? LanLinkProtocol.defaultPort
         : LanLinkProtocol.defaultPort;
-    final stub = Device(
+    return Device(
       alias: host,
       version: LanLinkProtocol.protocolVersion,
       deviceModel: '',
@@ -637,9 +822,34 @@ class AppState extends ChangeNotifier {
       protocol: 'http',
       ip: host,
     );
-    final probed = await _sender.probe(stub);
-    if (probed != null) _onPeerSeen(probed);
-    return probed;
+  }
+
+  /// Cancels an in-flight session from the local side, in either direction.
+  ///
+  /// * Outgoing sends: aborts the HTTP upload promptly, dials the peer's
+  ///   `/cancel` route (best-effort), and marks the session cancelled.
+  /// * Incoming receives: ends the receiver-side session; the in-flight
+  ///   upload is rejected mid-stream so the sending side sees the
+  ///   cancellation too.
+  Future<void> cancelSession(TransferSession session) async {
+    if (session.isTerminal) return;
+    EventLog.instance.add(
+      'Cancelling transfer with ${session.peer.alias}',
+      level: EventLevel.warn,
+    );
+    if (session.direction == TransferDirection.send) {
+      final sender = _sender;
+      if (sender != null) {
+        await sender.cancelSend(session: session, peer: session.peer);
+        return;
+      }
+      session.markStatus(TransferStatus.cancelled);
+      return;
+    }
+    _receiver?.cancelSession(session.sessionId);
+    // If the receiver no longer tracks it (or isn't running) make sure the
+    // visible session still ends up cancelled. markStatus is sticky-safe.
+    session.markStatus(TransferStatus.cancelled);
   }
 
   @override
@@ -647,9 +857,9 @@ class AppState extends ChangeNotifier {
     settings.removeListener(_onSettingsChanged);
     _updateChecker.removeListener(notifyListeners);
     _updateChecker.dispose();
-    _subnetScanner.cancel();
-    _discovery.stop();
-    _receiver.stop();
+    _subnetScanner?.cancel();
+    _discovery?.stop();
+    _receiver?.stop();
     super.dispose();
   }
 }

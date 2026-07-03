@@ -17,6 +17,7 @@ class AppSettings extends ChangeNotifier {
   static const _saveDirKey = 'lanlink_save_dir';
   static const _quickSaveKey = 'lanlink_quick_save';
   static const _trustedKey = 'lanlink_trusted_fingerprints';
+  static const _trustedAliasKey = 'lanlink_trusted_aliases';
   static const _connectivityModeKey = 'lanlink_connectivity_mode';
   static const _hotspotRoleKey = 'lanlink_hotspot_role';
   static const _autoUpdateKey = 'lanlink_auto_update_check';
@@ -278,15 +279,75 @@ class AppSettings extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> trust(String fingerprint) async {
+  static const _pinnedKey = 'lanlink_pinned_fingerprints_v1';
+
+  /// Fingerprints pinned after a successful connect. A device presenting a
+  /// pinned fingerprint is shown as verified; a device presenting a familiar
+  /// alias with an unpinned fingerprint is NOT.
+  Set<String> get pinnedFingerprints {
+    final raw = _prefs.getString(_pinnedKey);
+    if (raw == null || raw.isEmpty) return <String>{};
+    try {
+      return (json.decode(raw) as List).cast<String>().toSet();
+    } catch (_) {
+      return <String>{};
+    }
+  }
+
+  bool isPinned(String fingerprint) =>
+      fingerprint.isNotEmpty && pinnedFingerprints.contains(fingerprint);
+
+  /// Pins [fingerprint] so the peer shows as verified from now on.
+  Future<void> pinFingerprint(String fingerprint) async {
+    if (fingerprint.isEmpty) return;
+    final set = pinnedFingerprints..add(fingerprint);
+    await _prefs.setString(_pinnedKey, json.encode(set.toList()));
+    notifyListeners();
+  }
+
+  Future<void> unpinFingerprint(String fingerprint) async {
+    final set = pinnedFingerprints..remove(fingerprint);
+    if (set.isEmpty) {
+      await _prefs.remove(_pinnedKey);
+    } else {
+      await _prefs.setString(_pinnedKey, json.encode(set.toList()));
+    }
+    notifyListeners();
+  }
+
+  /// Marks [fingerprint] as trusted for Quick Save auto-accept. The
+  /// optional [alias] is only a display label for the Settings list; trust
+  /// itself is keyed on the fingerprint alone.
+  Future<void> trust(String fingerprint, {String? alias}) async {
     final set = trustedFingerprints..add(fingerprint);
     await _prefs.setString(_trustedKey, json.encode(set.toList()));
+    if (alias != null && alias.trim().isNotEmpty) {
+      final aliases = _trustedAliases..[fingerprint] = alias.trim();
+      await _prefs.setString(_trustedAliasKey, json.encode(aliases));
+    }
     notifyListeners();
   }
 
   Future<void> untrust(String fingerprint) async {
     final set = trustedFingerprints..remove(fingerprint);
     await _prefs.setString(_trustedKey, json.encode(set.toList()));
+    final aliases = _trustedAliases;
+    if (aliases.remove(fingerprint) != null) {
+      await _prefs.setString(_trustedAliasKey, json.encode(aliases));
+    }
     notifyListeners();
+  }
+
+  /// The display label recorded when [fingerprint] was trusted, if any.
+  String? trustedAliasFor(String fingerprint) => _trustedAliases[fingerprint];
+
+  Map<String, String> get _trustedAliases {
+    final raw = _prefs.getString(_trustedAliasKey);
+    if (raw == null || raw.isEmpty) return <String, String>{};
+    try {
+      return (json.decode(raw) as Map).cast<String, String>();
+    } catch (_) {
+      return <String, String>{};
+    }
   }
 }
