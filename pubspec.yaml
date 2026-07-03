@@ -38,6 +38,9 @@ dependencies:
   # Misc.
   uuid: ^4.5.1
   crypto: ^3.0.6
+  # X.509 self-signed certificate generation for the HTTPS transport
+  # (same approach as LocalSend).
+  basic_utils: ^5.7.0
   provider: ^6.1.2
   pub_semver: ^2.1.4
 
