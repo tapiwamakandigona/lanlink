@@ -55,7 +55,7 @@ class ReleaseInfo {
 class UpdateChecker extends ChangeNotifier {
   UpdateChecker({
     String? manifestUrl,
-    bool includePrereleases = true,
+    bool includePrereleases = false,
     HttpClient? httpClient,
   })  : _manifestUrl = manifestUrl ?? defaultManifestUrl,
         _includePrereleases = includePrereleases,

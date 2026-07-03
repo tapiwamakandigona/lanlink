@@ -194,6 +194,62 @@ void main() {
     expect(update, isNotNull);
     expect(update!.tagName, 'v1.0.0', reason: 'draft v9.9.9 must be ignored');
   });
+
+  List<Object> mixedStableAndPrereleaseManifest() => [
+        {
+          'tag_name': 'v3.0.0-beta.1',
+          'name': 'v3.0.0-beta.1',
+          'html_url': '',
+          'body': '',
+          'prerelease': true,
+          'draft': false,
+          'published_at': '2025-02-01T00:00:00Z',
+          'assets': const [],
+        },
+        {
+          'tag_name': 'v2.5.0',
+          'name': 'v2.5.0',
+          'html_url': '',
+          'body': '',
+          'prerelease': false,
+          'draft': false,
+          'published_at': '2025-01-01T00:00:00Z',
+          'assets': const [],
+        },
+      ];
+
+  test('by default, a newer prerelease is skipped in favour of older stable',
+      () async {
+    final server = await _serveJson(mixedStableAndPrereleaseManifest());
+    addTearDown(() => server.close(force: true));
+
+    final url = 'http://${server.address.address}:${server.port}/releases';
+    final checker = UpdateChecker(manifestUrl: url);
+    addTearDown(checker.dispose);
+
+    _setCurrent(checker, Version.parse('2.0.0'));
+    await checker.checkNow();
+    final update = checker.availableUpdate;
+    expect(update, isNotNull);
+    expect(update!.tagName, 'v2.5.0',
+        reason: 'production builds must not be offered v3.0.0-beta.1');
+  });
+
+  test('includePrereleases: true opts back in to prerelease updates',
+      () async {
+    final server = await _serveJson(mixedStableAndPrereleaseManifest());
+    addTearDown(() => server.close(force: true));
+
+    final url = 'http://${server.address.address}:${server.port}/releases';
+    final checker = UpdateChecker(manifestUrl: url, includePrereleases: true);
+    addTearDown(checker.dispose);
+
+    _setCurrent(checker, Version.parse('2.0.0'));
+    await checker.checkNow();
+    final update = checker.availableUpdate;
+    expect(update, isNotNull);
+    expect(update!.tagName, 'v3.0.0-beta.1');
+  });
 }
 
 /// Test helper: poke `_currentVersion` without exposing it publicly so the
