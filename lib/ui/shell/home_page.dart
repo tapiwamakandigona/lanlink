@@ -110,6 +110,9 @@ class _HomePageState extends State<HomePage> {
                   _ConnectToPhoneTile(
                     onTap: () => Navigator.of(context).push(
                       MaterialPageRoute(
+                        settings: const RouteSettings(
+                          name: ReceivePage.routeName,
+                        ),
                         builder: (_) => const ReceivePage(
                           initialMode: NetworkMode.directLink,
                         ),

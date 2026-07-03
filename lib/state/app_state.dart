@@ -191,6 +191,23 @@ class AppState extends ChangeNotifier {
     _hotspotTeardown = teardown;
   }
 
+  /// Final-disposal hook for a hotspot controller adopted from the Receive
+  /// page (accept → home handoff); called after Disconnect stops the link.
+  void Function()? _adoptedHotspotDispose;
+
+  /// Adopts a live hosted hotspot from a closing surface so the link (and
+  /// any transfer riding on it) survives that surface's dispose. Keeps
+  /// [teardown] registered for the Disconnect path and takes over calling
+  /// [dispose] once the link is torn down.
+  void adoptHotspot({
+    required Future<void> Function() teardown,
+    required void Function() dispose,
+  }) {
+    _adoptedHotspotDispose?.call();
+    _adoptedHotspotDispose = dispose;
+    _hotspotTeardown = teardown;
+  }
+
   /// True after this device joined a peer-hosted hotspot as a guest and
   /// handed the network binding off to the session (F1 contract): the
   /// Disconnect path then releases it via [WifiJoiner.leave].
@@ -286,6 +303,12 @@ class AppState extends ChangeNotifier {
       } catch (_) {
         // Teardown is best-effort; the OS reclaims the reservation anyway.
       }
+    }
+    final adoptedDispose = _adoptedHotspotDispose;
+    if (adoptedDispose != null) {
+      _adoptedHotspotDispose = null;
+      _hotspotTeardown = null;
+      adoptedDispose();
     }
     if (_joinedHotspotAsGuest) {
       _joinedHotspotAsGuest = false;

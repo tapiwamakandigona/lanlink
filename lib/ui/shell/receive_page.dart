@@ -32,6 +32,10 @@ class ReceivePage extends StatefulWidget {
     this.debugHotspotController,
   });
 
+  /// Route name shared by the named route and ad-hoc pushes so the
+  /// accept-flow can recognise (and pop) this page.
+  static const String routeName = '/receive';
+
   /// Which network mode the page opens in. Passing
   /// [NetworkMode.directLink] (the desktop "Connect to phone" entry
   /// point) starts hosting immediately — no extra tap.
@@ -88,18 +92,37 @@ class _ReceivePageState extends State<ReceivePage> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _teardownRegistrar?.registerHotspotTeardown(null);
+    final registrar = _teardownRegistrar;
     _teardownRegistrar = null;
     final hotspot = _hotspot;
     if (hotspot != null) {
       hotspot.removeListener(_onHotspotChanged);
-      if (widget.debugHotspotController == null) {
-        // We own it: dispose stops any live reservation.
-        hotspot.dispose();
+      if (hotspot.isRunning &&
+          registrar != null &&
+          registrar.linkedPeers.isNotEmpty) {
+        // A linked peer is (or may be) mid-transfer over our hosted link —
+        // the accept flow pops this page to show progress on Home, and
+        // killing the hotspot here would sever the session. Hand ownership
+        // to AppState: Disconnect still stops it via the teardown hook.
+        registrar.adoptHotspot(
+          teardown: hotspot.disable,
+          dispose: widget.debugHotspotController == null
+              ? hotspot.dispose
+              // Injected by a test: never dispose an object the test owns.
+              : () {},
+        );
       } else {
-        // Injected by a test: tear down but let the test keep the object.
-        unawaited(hotspot.disable());
+        registrar?.registerHotspotTeardown(null);
+        if (widget.debugHotspotController == null) {
+          // We own it: dispose stops any live reservation.
+          hotspot.dispose();
+        } else {
+          // Injected by a test: tear down but let the test keep the object.
+          unawaited(hotspot.disable());
+        }
       }
+    } else {
+      registrar?.registerHotspotTeardown(null);
     }
     super.dispose();
   }

@@ -81,6 +81,13 @@ class _LanLinkAppState extends State<LanLinkApp> {
     if (trustRequested && canTrust) {
       await state.settings.trust(localFingerprint, alias: name);
     }
+    // Transfer progress lives on Home (session strips): if the user was
+    // sitting on the Receive page, take them back so they can watch it.
+    // Any hotspot the page was hosting is handed off to AppState in its
+    // dispose, so the direct link survives the pop.
+    nav.popUntil(
+      (route) => route.isFirst || route.settings.name != ReceivePage.routeName,
+    );
     return AcceptDecision.accept({for (final f in files) f.id});
   }
 
@@ -124,7 +131,7 @@ class _LanLinkAppState extends State<LanLinkApp> {
           darkTheme: _darkTheme,
           home: const _FirstRunGate(),
           routes: {
-            '/receive': (_) => const ReceivePage(),
+            ReceivePage.routeName: (_) => const ReceivePage(),
             '/send': (_) => const SendPage(),
             '/settings': (_) => const SettingsPage(),
             '/history': (_) => const HistoryPage(),

@@ -246,6 +246,23 @@ void main() {
   }, timeout: const Timeout(Duration(seconds: 30)));
 
   test(
+      'adopted hotspot (accept → home handoff) is stopped AND disposed on '
+      'Disconnect', () async {
+    await pair();
+    var teardowns = 0;
+    var disposes = 0;
+    a.state.adoptHotspot(
+      teardown: () async => teardowns++,
+      dispose: () => disposes++,
+    );
+    await a.state.disconnectPeer(a.state.linkedPeers.single);
+    expect(teardowns, 1,
+        reason: 'the adopted hotspot must be stopped on Disconnect');
+    expect(disposes, 1,
+        reason: 'AppState owns the adopted controller and must dispose it');
+  }, timeout: const Timeout(Duration(seconds: 30)));
+
+  test(
       'progress ticks do NOT fan out into AppState.notifyListeners '
       '(status transitions still do)', () async {
     await pair();
