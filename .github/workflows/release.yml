@@ -338,9 +338,33 @@ jobs:
       - name: List artifacts
         run: ls -R artifacts
 
+      # Publish integrity checksums alongside the binaries so users (and the
+      # download mirror) can verify assets weren't corrupted or tampered with.
+      # Hash exactly the same globs that get attached to the release below.
+      - name: Generate SHA256SUMS
+        run: |
+          shopt -s nullglob
+          files=(
+            artifacts/lanlink-android-release/*.apk
+            artifacts/lanlink-windows-installer/*.exe
+            artifacts/lanlink-macos-release/*.dmg
+            artifacts/lanlink-macos-release/*.zip
+            artifacts/lanlink-ios-release/*.ipa
+            artifacts/lanlink-linux-release/*.AppImage
+            artifacts/lanlink-linux-release/*.tar.gz
+          )
+          : > artifacts/SHA256SUMS
+          for f in "${files[@]}"; do
+            # Record only the basename so `sha256sum -c SHA256SUMS` works from
+            # a plain downloads folder.
+            (cd "$(dirname "$f")" && sha256sum "$(basename "$f")") >> artifacts/SHA256SUMS
+          done
+          cat artifacts/SHA256SUMS
+
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           files: |
+            artifacts/SHA256SUMS
             artifacts/lanlink-android-release/*.apk
             artifacts/lanlink-windows-installer/*.exe
             artifacts/lanlink-macos-release/*.dmg
@@ -366,6 +390,7 @@ jobs:
             LanLink ${{ github.ref_name }} — downloads for Android, Windows, macOS, Linux and iOS.
             Website: https://tapiwa.me/lanlink
           files: |
+            artifacts/SHA256SUMS
             artifacts/lanlink-android-release/*.apk
             artifacts/lanlink-windows-installer/*.exe
             artifacts/lanlink-macos-release/*.dmg
