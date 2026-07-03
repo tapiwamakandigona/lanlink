@@ -44,6 +44,9 @@ dependencies:
   # Drag-and-drop file targets on Windows, macOS and Linux desktop.
   desktop_drop: ^0.4.4
 
+  # Unlock 90/120 Hz on Android OEMs that cap Flutter at 60 Hz.
+  flutter_displaymode: ^0.6.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
