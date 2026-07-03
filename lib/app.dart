@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import 'core/models/device.dart';
+import 'core/models/file_info.dart';
 import 'core/settings/app_settings.dart';
 import 'core/transfer/receiver.dart';
 import 'core/util/format.dart';
@@ -37,7 +39,8 @@ class _LanLinkAppState extends State<LanLinkApp> {
 
   /// Incoming transfer → v4 ConsentSheet in a bottom sheet. Accept takes
   /// every offered file; anything else (decline, dismiss) rejects.
-  Future<AcceptDecision> _promptForIncoming(peer, files) async {
+  Future<AcceptDecision> _promptForIncoming(
+      Device peer, List<FileInfo> files) async {
     final nav = _navigatorKey.currentState;
     if (nav == null) return AcceptDecision.reject();
     final state = widget.state;
