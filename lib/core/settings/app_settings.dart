@@ -278,6 +278,42 @@ class AppSettings extends ChangeNotifier {
     notifyListeners();
   }
 
+  static const _pinnedKey = 'lanlink_pinned_fingerprints_v1';
+
+  /// Fingerprints pinned after a successful connect. A device presenting a
+  /// pinned fingerprint is shown as verified; a device presenting a familiar
+  /// alias with an unpinned fingerprint is NOT.
+  Set<String> get pinnedFingerprints {
+    final raw = _prefs.getString(_pinnedKey);
+    if (raw == null || raw.isEmpty) return <String>{};
+    try {
+      return (json.decode(raw) as List).cast<String>().toSet();
+    } catch (_) {
+      return <String>{};
+    }
+  }
+
+  bool isPinned(String fingerprint) =>
+      fingerprint.isNotEmpty && pinnedFingerprints.contains(fingerprint);
+
+  /// Pins [fingerprint] so the peer shows as verified from now on.
+  Future<void> pinFingerprint(String fingerprint) async {
+    if (fingerprint.isEmpty) return;
+    final set = pinnedFingerprints..add(fingerprint);
+    await _prefs.setString(_pinnedKey, json.encode(set.toList()));
+    notifyListeners();
+  }
+
+  Future<void> unpinFingerprint(String fingerprint) async {
+    final set = pinnedFingerprints..remove(fingerprint);
+    if (set.isEmpty) {
+      await _prefs.remove(_pinnedKey);
+    } else {
+      await _prefs.setString(_pinnedKey, json.encode(set.toList()));
+    }
+    notifyListeners();
+  }
+
   Future<void> trust(String fingerprint) async {
     final set = trustedFingerprints..add(fingerprint);
     await _prefs.setString(_trustedKey, json.encode(set.toList()));

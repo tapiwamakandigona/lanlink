@@ -17,6 +17,7 @@ class Device {
     required this.ip,
     this.announcement = false,
     this.download = false,
+    this.verified = false,
   });
 
   /// Human-readable name shown to peers.
@@ -50,6 +51,13 @@ class Device {
   /// Whether the peer expects file downloads to also go to a download endpoint.
   /// Not used by v2.0; kept for forward compat with LocalSend "receive-only" mode.
   final bool download;
+
+  /// Local trust flag: true when this peer's [fingerprint] has been pinned
+  /// after an earlier successful connect. Never sent on the wire — a peer
+  /// cannot claim to be verified; only the local pin store decides. A device
+  /// announcing a familiar alias with a *different* fingerprint stays
+  /// unverified.
+  final bool verified;
 
   bool get isLocal => ip == '127.0.0.1' || ip == '0.0.0.0';
 
@@ -89,7 +97,7 @@ class Device {
     );
   }
 
-  Device copyWith({String? ip, bool? announcement}) => Device(
+  Device copyWith({String? ip, bool? announcement, bool? verified}) => Device(
         alias: alias,
         version: version,
         deviceModel: deviceModel,
@@ -100,6 +108,7 @@ class Device {
         ip: ip ?? this.ip,
         announcement: announcement ?? this.announcement,
         download: download,
+        verified: verified ?? this.verified,
       );
 
   @override

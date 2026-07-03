@@ -84,7 +84,9 @@ class Receiver {
       ..post(LanLinkProtocol.routeRegister, _handleRegister)
       ..post(LanLinkProtocol.routePrepareUpload, _handlePrepareUpload)
       ..post(LanLinkProtocol.routeUpload, _handleUpload)
-      ..post(LanLinkProtocol.routeCancel, _handleCancel);
+      ..post(LanLinkProtocol.routeCancel, _handleCancel)
+      ..post(LanLinkProtocol.routeConnect, _handleConnect)
+      ..get(LanLinkProtocol.routeConnect, _handleConnect);
 
     final handler =
         const Pipeline().addMiddleware(_logging()).addHandler(router.call);
@@ -275,14 +277,18 @@ class Receiver {
     if (ps.tokens[fileId] != token) return Response.forbidden('bad token');
     final info = ps.files[fileId];
     if (info == null) return Response.notFound('no such file');
+    // Writes are only accepted while the session is actively transferring.
+    // A cancelled/failed session must never accept more bytes.
+    if (ps.session.status != TransferStatus.transferring) {
+      return _drainAndReject(req.read());
+    }
 
-    final saveDir = await saveDirProvider();
+    final Directory saveDir;
     try {
+      saveDir = await saveDirProvider();
       await saveDir.create(recursive: true);
     } catch (e) {
-      ps.session.markFile(fileId, TransferStatus.failed,
-          error: 'Cannot create save folder ${saveDir.path}: $e');
-      ps.session.markStatus(TransferStatus.failed);
+      _failSession(sessionId, ps, fileId, 'Cannot create save folder: $e');
       return Response.internalServerError(
           body: 'cannot create save folder: $e');
     }
@@ -302,25 +308,48 @@ class Receiver {
       }
     }
 
+    // Upload tokens are single-use. Consume the token only once we're about
+    // to write (a 409 offset mismatch above must not burn it — the sender
+    // legitimately retries from zero with the same token). A replay of a
+    // consumed token is a hostile or duplicated request: reject with 401 so
+    // two concurrent uploads can never interleave writes into one part file.
+    if (!ps.consumedTokens.add(token)) {
+      return Response(401, body: 'upload token already used');
+    }
+
     IOSink? sink;
     try {
       sink = partFile.openWrite(
         mode: offset > 0 ? FileMode.append : FileMode.write,
       );
     } catch (e) {
-      ps.session.markFile(fileId, TransferStatus.failed,
-          error: 'Cannot open ${partFile.path}: $e');
-      ps.session.markStatus(TransferStatus.failed);
+      _failSession(sessionId, ps, fileId, 'Cannot open ${partFile.path}: $e');
       return Response.internalServerError(body: 'cannot open temp file: $e');
     }
 
     int received = offset;
     String finalPath;
+    var aborted = false;
     try {
       await for (final chunk in req.read()) {
+        // Stop writing the moment the session leaves the active state
+        // (e.g. the local user hit Stop and /cancel raced this upload).
+        // Keep draining (and discarding) the rest of the body on the same
+        // subscription so the sender reliably receives our 403 instead of
+        // a broken pipe.
+        if (!aborted && ps.session.status != TransferStatus.transferring) {
+          aborted = true;
+          try {
+            await sink.close();
+          } catch (_) {}
+        }
+        if (aborted) continue;
         sink.add(chunk);
         received += chunk.length;
         ps.session.updateBytes(fileId, received);
+      }
+      if (aborted || ps.session.status != TransferStatus.transferring) {
+        throw const _SessionNoLongerActive();
       }
       await sink.flush();
       await sink.close();
@@ -337,14 +366,21 @@ class Receiver {
       }
       finalPath = await _uniqueOutputPath(targetDir, segments.last);
       await partFile.rename(finalPath);
+    } on _SessionNoLongerActive {
+      // Session was cancelled (or failed) while this upload streamed in.
+      // Keep whatever made it to disk as a resume head start, but do not
+      // touch the (terminal, sticky) session status.
+      try {
+        await sink.close();
+      } catch (_) {}
+      return Response.forbidden('session cancelled');
     } catch (e) {
       // Keep the part file: whatever made it to disk is the head start for
       // the next attempt.
       try {
         await sink.close();
       } catch (_) {}
-      ps.session.markFile(fileId, TransferStatus.failed, error: '$e');
-      ps.session.markStatus(TransferStatus.failed);
+      _failSession(sessionId, ps, fileId, '$e');
       return Response.internalServerError(body: 'write failed: $e');
     }
 
@@ -362,6 +398,11 @@ class Receiver {
           : null,
     );
     final visiblePath = publicLocation ?? finalPath;
+    if (ps.session.status != TransferStatus.transferring) {
+      // Cancelled while we were publishing; the file stays on disk but the
+      // session outcome must remain terminal.
+      return Response.forbidden('session cancelled');
+    }
     ps.session
         .markFile(fileId, TransferStatus.completed, savedPath: visiblePath);
 
@@ -373,6 +414,40 @@ class Receiver {
       _pending.remove(sessionId);
     }
     return Response.ok('ok');
+  }
+
+  /// Politely rejects an upload whose session is no longer active: drains
+  /// (and discards) a bounded amount of the request body first so the
+  /// sending side reliably receives the 403 instead of a broken pipe, then
+  /// answers 403 so the sender maps it to "cancelled".
+  Future<Response> _drainAndReject(Stream<List<int>> body) async {
+    const maxDrain = 32 * 1024 * 1024;
+    var drained = 0;
+    try {
+      await for (final chunk in body) {
+        drained += chunk.length;
+        if (drained > maxDrain) break;
+      }
+    } catch (_) {}
+    return Response.forbidden('session cancelled');
+  }
+
+  /// Marks [fileId] and the whole session failed and drops the session from
+  /// [_pending] so its upload tokens are dead and the map cannot grow
+  /// unboundedly with terminal sessions.
+  void _failSession(
+      String sessionId, _PendingSession ps, String fileId, String error) {
+    ps.session.markFile(fileId, TransferStatus.failed, error: error);
+    ps.session.markStatus(TransferStatus.failed);
+    _pending.remove(sessionId);
+  }
+
+  /// Locally cancels an active receive session (e.g. the user hit Stop).
+  /// In-flight uploads for it are rejected mid-stream, so the sending side
+  /// observes a 403 and marks its own session cancelled.
+  void cancelSession(String sessionId) {
+    final ps = _pending.remove(sessionId);
+    if (ps != null) ps.session.markStatus(TransferStatus.cancelled);
   }
 
   /// On Android publishes [sourcePath] into the user-visible
@@ -418,6 +493,51 @@ class Receiver {
       await _platform.invokeMethod<void>('scanFile', {'path': sourcePath});
     } catch (_) {}
     return null;
+  }
+
+  /// One-time connect tokens minted for QR payloads. Consumed on first use.
+  final Set<String> _connectTokens = {};
+
+  /// Mints a fresh single-use connect token for embedding in a QR code.
+  /// The token is consumed by the first successful call to the
+  /// [LanLinkProtocol.routeConnect] route; replays get 401.
+  String issueConnectToken() {
+    final token = _uuid.v4();
+    _connectTokens.add(token);
+    return token;
+  }
+
+  Future<Response> _handleConnect(Request req) async {
+    final token = req.url.queryParameters['token'];
+    if (token == null || token.isEmpty) {
+      return Response.badRequest(body: 'missing token');
+    }
+    if (!_connectTokens.remove(token)) {
+      return Response(401, body: 'invalid or already-used connect token');
+    }
+    // Token accepted (and consumed): behave like /info so the caller learns
+    // who we are, and surface the caller as a peer like /register does.
+    try {
+      final body = await req.readAsString();
+      if (body.isNotEmpty) {
+        final decoded = json.decode(body);
+        if (decoded is Map<String, dynamic>) {
+          final connInfo =
+              req.context['shelf.io.connection_info'] as HttpConnectionInfo?;
+          final ip = connInfo?.remoteAddress.address;
+          if (ip != null && ip.isNotEmpty) {
+            onPeerSeen?.call(Device.fromJson(decoded, ip: ip));
+          }
+        }
+      }
+    } catch (_) {
+      // A malformed self-description is not fatal; the token was valid.
+    }
+    final me = localDeviceProvider();
+    return Response.ok(
+      json.encode(me.toJson()),
+      headers: {'Content-Type': 'application/json; charset=utf-8'},
+    );
   }
 
   Future<Response> _handleCancel(Request req) async {
@@ -469,4 +589,14 @@ class _PendingSession {
   final TransferSession session;
   final Map<String, String> tokens;
   final Map<String, FileInfo> files;
+
+  /// Upload tokens that have already begun a write. Single-use: a second
+  /// request presenting the same token is rejected with 401.
+  final Set<String> consumedTokens = {};
+}
+
+/// Internal control-flow signal: the session left the active state while an
+/// upload was streaming in, so the write must stop immediately.
+class _SessionNoLongerActive implements Exception {
+  const _SessionNoLongerActive();
 }
