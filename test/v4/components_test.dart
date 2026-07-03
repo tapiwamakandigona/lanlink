@@ -130,6 +130,25 @@ void main() {
         expect(tester.takeException(), isNull, reason: 'width $width');
       }
     });
+
+    testWidgets('verb cards grow at 2x accessibility text scale (no clip)',
+        (tester) async {
+      // Regression: fixed 180/300px card heights overflowed as soon as the
+      // user ran a large system font. Heights now scale with the text scaler.
+      for (final width in [390.0, 1200.0]) {
+        tester.view.physicalSize = Size(width, 1600);
+        tester.view.devicePixelRatio = 1;
+        tester.platformDispatcher.textScaleFactorTestValue = 2.0;
+        addTearDown(tester.view.reset);
+        addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+        await tester.pumpWidget(_host(
+          TwoVerbHome(
+              deviceName: 'Marmalade-Fox', onSend: () {}, onReceive: () {}),
+          width: width,
+        ));
+        expect(tester.takeException(), isNull, reason: 'width $width @2x');
+      }
+    });
   });
 
   // ─── Device radar ───────────────────────────────────────────────────

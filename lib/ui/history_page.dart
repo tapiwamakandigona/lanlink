@@ -6,6 +6,7 @@ import '../core/settings/app_settings.dart';
 import '../core/util/format.dart';
 import '../state/app_state.dart';
 import 'shell/saved_location.dart';
+import 'v4/theme/tokens.dart';
 
 class HistoryPage extends StatelessWidget {
   const HistoryPage({super.key});
@@ -90,7 +91,9 @@ class HistoryPage extends StatelessWidget {
         icon = isSend
             ? Icons.cloud_upload_outlined
             : Icons.cloud_download_outlined;
-        color = Colors.green;
+        // The single semantic green lives in EmberSemantics; a literal
+        // Colors.green here would reintroduce the v3 competing-greens bug.
+        color = context.ember.success;
         status = isSend ? 'Sent' : 'Received';
         break;
       case TransferStatus.failed:

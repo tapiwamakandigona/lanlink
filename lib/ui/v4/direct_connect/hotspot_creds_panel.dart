@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../theme/tokens.dart';
 
@@ -8,7 +11,7 @@ import '../theme/tokens.dart';
 /// else joins the network by hand, then scans. The hint adapts to the
 /// host: a phone host expects iPhone/computer guests, a Windows PC host
 /// expects phone guests.
-class HotspotCredsPanel extends StatelessWidget {
+class HotspotCredsPanel extends StatefulWidget {
   const HotspotCredsPanel({
     super.key,
     required this.ssid,
@@ -17,6 +20,33 @@ class HotspotCredsPanel extends StatelessWidget {
 
   final String ssid;
   final String password;
+
+  @override
+  State<HotspotCredsPanel> createState() => _HotspotCredsPanelState();
+}
+
+class _HotspotCredsPanelState extends State<HotspotCredsPanel> {
+  /// Inline copy feedback, matching the guest-side [JoinFallbackSheet]:
+  /// a SnackBar could render behind whatever surface hosts this panel,
+  /// where the user can't see it.
+  bool _copied = false;
+  Timer? _copiedReset;
+
+  @override
+  void dispose() {
+    _copiedReset?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _copyPassword() async {
+    await Clipboard.setData(ClipboardData(text: widget.password));
+    if (!mounted) return;
+    setState(() => _copied = true);
+    _copiedReset?.cancel();
+    _copiedReset = Timer(const Duration(seconds: 2), () {
+      if (mounted) setState(() => _copied = false);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -37,9 +67,33 @@ class HotspotCredsPanel extends StatelessWidget {
             style: VType.caption.copyWith(color: scheme.onSurfaceVariant),
           ),
           const SizedBox(height: VSpace.x3),
-          _CredRow(label: 'Network', value: ssid),
+          _CredRow(label: 'Network', value: widget.ssid),
           const SizedBox(height: VSpace.x2),
-          _CredRow(label: 'Password', value: password),
+          _CredRow(
+            label: 'Password',
+            value: widget.password,
+            // Manual joiners type this into another device, so give them
+            // the same copy affordance the guest fallback sheet has.
+            trailing: _copied
+                ? Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.check_rounded,
+                          size: 18, color: scheme.primary),
+                      const SizedBox(width: VSpace.x1),
+                      Text(
+                        'Copied',
+                        style: VType.label.copyWith(color: scheme.primary),
+                      ),
+                    ],
+                  )
+                : IconButton(
+                    tooltip: 'Copy password',
+                    icon: const Icon(Icons.copy_rounded, size: 18),
+                    visualDensity: VisualDensity.compact,
+                    onPressed: _copyPassword,
+                  ),
+          ),
         ],
       ),
     );
@@ -47,10 +101,13 @@ class HotspotCredsPanel extends StatelessWidget {
 }
 
 class _CredRow extends StatelessWidget {
-  const _CredRow({required this.label, required this.value});
+  const _CredRow({required this.label, required this.value, this.trailing});
 
   final String label;
   final String value;
+
+  /// Optional trailing affordance (copy button / "Copied" confirmation).
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -70,6 +127,7 @@ class _CredRow extends StatelessWidget {
             style: VType.bodyStrong.copyWith(color: scheme.onSurface),
           ),
         ),
+        if (trailing != null) trailing!,
       ],
     );
   }

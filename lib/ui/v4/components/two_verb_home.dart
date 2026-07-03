@@ -59,15 +59,22 @@ class TwoVerbHome extends StatelessWidget {
             ),
           ),
         ];
+        // Fixed 180/300px boxes clip the verb labels as soon as the user
+        // runs a large accessibility text scale, so grow the card area with
+        // the text scaler. Clamped: past 2x the cards would swallow the
+        // whole screen and the labels already fit comfortably.
+        final heightScale = MediaQuery.textScalerOf(context)
+            .clamp(maxScaleFactor: 2.0)
+            .scale(1.0);
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           mainAxisSize: MainAxisSize.min,
           children: [
             if (wide)
-              SizedBox(height: 180, child: Row(children: verbs))
+              SizedBox(height: 180 * heightScale, child: Row(children: verbs))
             else
               SizedBox(
-                height: 300,
+                height: 300 * heightScale,
                 child: Column(
                   children: [
                     Expanded(child: Row(children: [verbs[0]])),
