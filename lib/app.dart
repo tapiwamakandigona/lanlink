@@ -53,6 +53,12 @@ class _LanLinkAppState extends State<LanLinkApp> {
         (peer.alias.trim().isEmpty ? 'Unnamed device' : peer.alias.trim());
     final totalSize =
         files.fold<int>(0, (sum, f) => sum + f.size);
+    // "Always accept from this device" pins trust to the LOCALLY resolved
+    // fingerprint (peer pipeline / pin store), never the identity the
+    // sender claimed in the offer. No local resolution => no trust option.
+    final localFingerprint = known?.fingerprint;
+    final canTrust = localFingerprint != null && localFingerprint.isNotEmpty;
+    var trustRequested = false;
     final accepted = await showModalBottomSheet<bool>(
       context: nav.context,
       isScrollControlled: true,
@@ -68,10 +74,14 @@ class _LanLinkAppState extends State<LanLinkApp> {
           ),
           onAccept: () => Navigator.of(ctx).pop(true),
           onDecline: () => Navigator.of(ctx).pop(false),
+          onTrustChanged: canTrust ? (v) => trustRequested = v : null,
         ),
       ),
     );
     if (accepted != true) return AcceptDecision.reject();
+    if (trustRequested && canTrust) {
+      await state.settings.trust(localFingerprint, alias: name);
+    }
     return AcceptDecision.accept({for (final f in files) f.id});
   }
 

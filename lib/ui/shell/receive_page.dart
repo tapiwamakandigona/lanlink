@@ -73,6 +73,21 @@ class _ReceivePageState extends State<ReceivePage>
     final scheme = Theme.of(context).colorScheme;
     final state = context.watch<AppState>();
     final payload = _payload;
+    // Tokens are single-use: the moment a sender redeems the displayed
+    // one, re-mint so the QR on screen is always valid (a second device
+    // can scan right away).
+    final token = payload?.token;
+    if (widget.debugPayload == null &&
+        token != null &&
+        !state.isConnectTokenValid(token)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        final current = _payload?.token;
+        if (current != null && !state.isConnectTokenValid(current)) {
+          _mintPayload();
+        }
+      });
+    }
     return Scaffold(
       appBar: AppBar(title: const Text('Receive')),
       body: SafeArea(
@@ -82,7 +97,7 @@ class _ReceivePageState extends State<ReceivePage>
             child: SingleChildScrollView(
               padding: const EdgeInsets.all(VSpace.x6),
               child: payload == null
-                  ? _Unavailable(scheme: scheme)
+                  ? _Unavailable(scheme: scheme, onRetry: _mintPayload)
                   : Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
@@ -115,9 +130,12 @@ class _ReceivePageState extends State<ReceivePage>
 }
 
 class _Unavailable extends StatelessWidget {
-  const _Unavailable({required this.scheme});
+  const _Unavailable({required this.scheme, required this.onRetry});
 
   final ColorScheme scheme;
+
+  /// Re-attempts minting the connect payload (e.g. after Wi-Fi came back).
+  final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -136,6 +154,12 @@ class _Unavailable extends StatelessWidget {
           'Check your Wi-Fi connection and try again.',
           style: VType.body.copyWith(color: scheme.onSurfaceVariant),
           textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: VSpace.x5),
+        FilledButton.tonalIcon(
+          onPressed: onRetry,
+          icon: const Icon(Icons.refresh, size: 18),
+          label: const Text('Retry'),
         ),
       ],
     );

@@ -10,12 +10,13 @@ import 'verified_badge.dart';
 /// Friendly and calm — sender identity is a name plus an optional Verified
 /// badge; there are no hashes or addresses. Designed to be hosted inside a
 /// bottom sheet (`showModalBottomSheet`) or a dialog on desktop.
-class ConsentSheet extends StatelessWidget {
+class ConsentSheet extends StatefulWidget {
   const ConsentSheet({
     super.key,
     required this.data,
     required this.onAccept,
     required this.onDecline,
+    this.onTrustChanged,
   });
 
   /// What to render.
@@ -27,8 +28,21 @@ class ConsentSheet extends StatelessWidget {
   /// Called when the user declines.
   final VoidCallback onDecline;
 
+  /// When non-null, shows an opt-in "Always accept from this device"
+  /// checkbox (unticked by default) and reports every toggle. The caller
+  /// decides what trusting means; the sheet only collects the choice.
+  final ValueChanged<bool>? onTrustChanged;
+
+  @override
+  State<ConsentSheet> createState() => _ConsentSheetState();
+}
+
+class _ConsentSheetState extends State<ConsentSheet> {
+  bool _trust = false;
+
   @override
   Widget build(BuildContext context) {
+    final data = widget.data;
     final scheme = Theme.of(context).colorScheme;
     final files = data.fileCount == 1 ? '1 file' : '${data.fileCount} files';
     final preview = data.previewFileNames.take(3).toList();
@@ -134,12 +148,29 @@ class ConsentSheet extends StatelessWidget {
               ),
             ),
           ],
+          if (widget.onTrustChanged != null) ...[
+            const SizedBox(height: VSpace.x4),
+            CheckboxListTile(
+              value: _trust,
+              onChanged: (v) {
+                setState(() => _trust = v ?? false);
+                widget.onTrustChanged!(_trust);
+              },
+              controlAffinity: ListTileControlAffinity.leading,
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              title: Text(
+                'Always accept from this device',
+                style: VType.body.copyWith(color: scheme.onSurface),
+              ),
+            ),
+          ],
           const SizedBox(height: VSpace.x6),
           Row(
             children: [
               Expanded(
                 child: OutlinedButton(
-                  onPressed: onDecline,
+                  onPressed: widget.onDecline,
                   child: const Text('Decline'),
                 ),
               ),
@@ -147,7 +178,7 @@ class ConsentSheet extends StatelessWidget {
               Expanded(
                 flex: 2,
                 child: FilledButton(
-                  onPressed: onAccept,
+                  onPressed: widget.onAccept,
                   child: const Text('Accept'),
                 ),
               ),

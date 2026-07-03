@@ -20,6 +20,7 @@ class SessionCard extends StatelessWidget {
     this.onStop,
     this.onRetry,
     this.onDismiss,
+    this.onLocate,
   });
 
   /// What to render.
@@ -28,11 +29,16 @@ class SessionCard extends StatelessWidget {
   /// Shown while waiting/transferring.
   final VoidCallback? onStop;
 
-  /// Shown when failed.
+  /// Shown when failed. When null (e.g. the session cannot be retried),
+  /// the "Try again" action is hidden entirely.
   final VoidCallback? onRetry;
 
   /// Shown on any terminal state.
   final VoidCallback? onDismiss;
+
+  /// Optional "Where is it?" action for completed receives; shown only
+  /// when non-null and the session finished successfully.
+  final VoidCallback? onLocate;
 
   @override
   Widget build(BuildContext context) {
@@ -40,12 +46,16 @@ class SessionCard extends StatelessWidget {
     final ember = context.ember;
     final status = data.status;
 
+    final fileCountLabel = '${data.fileCount} files';
+    final receive = data.direction == SessionDirection.receive;
     final subtitleParts = <String>[
-      if (data.fileCount > 1) '${data.fileCount} files',
+      // Don't repeat the file count when the title already is the count
+      // ("14 files" as both title and subtitle).
+      if (data.fileCount > 1 && data.title != fileCountLabel) fileCountLabel,
       data.totalSize,
       if (data.peerName != null)
         status == SessionStatus.sent
-            ? 'to ${data.peerName}'
+            ? (receive ? 'from ${data.peerName}' : 'to ${data.peerName}')
             : '${data.peerName}',
     ];
 
@@ -87,7 +97,7 @@ class SessionCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: VSpace.x3),
-              SessionStatusChip(status: status),
+              SessionStatusChip(status: status, direction: data.direction),
             ],
           ),
           if (status == SessionStatus.transferring ||
@@ -175,12 +185,19 @@ class SessionCard extends StatelessWidget {
                         foregroundColor: scheme.onSurfaceVariant),
                     child: const Text('Dismiss'),
                   ),
-                  FilledButton.tonalIcon(
-                    onPressed: onRetry,
-                    icon: const Icon(Icons.refresh, size: 18),
-                    label: const Text('Try again'),
-                  ),
+                  if (onRetry != null)
+                    FilledButton.tonalIcon(
+                      onPressed: onRetry,
+                      icon: const Icon(Icons.refresh, size: 18),
+                      label: const Text('Try again'),
+                    ),
                 ],
+                if (status == SessionStatus.sent && onLocate != null)
+                  TextButton.icon(
+                    onPressed: onLocate,
+                    icon: const Icon(Icons.folder_open_outlined, size: 18),
+                    label: const Text('Where is it?'),
+                  ),
                 if (status == SessionStatus.sent ||
                     status == SessionStatus.cancelled)
                   TextButton(
@@ -200,15 +217,24 @@ class SessionCard extends StatelessWidget {
 
 /// The status chip used on [SessionCard]; exported for reuse in lists.
 class SessionStatusChip extends StatelessWidget {
-  const SessionStatusChip({super.key, required this.status});
+  const SessionStatusChip({
+    super.key,
+    required this.status,
+    this.direction = SessionDirection.send,
+  });
 
   /// Which state to render.
   final SessionStatus status;
+
+  /// Which way the bytes move; receive sessions read "Receiving" /
+  /// "Received!" instead of "Sending" / "Sent!".
+  final SessionDirection direction;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final ember = context.ember;
+    final receive = direction == SessionDirection.receive;
 
     final (String label, Color bg, Color fg) = switch (status) {
       SessionStatus.waiting => (
@@ -217,12 +243,12 @@ class SessionStatusChip extends StatelessWidget {
           scheme.onSurfaceVariant,
         ),
       SessionStatus.transferring => (
-          'Sending',
+          receive ? 'Receiving' : 'Sending',
           scheme.primaryContainer,
           scheme.onPrimaryContainer,
         ),
       SessionStatus.sent => (
-          'Sent!',
+          receive ? 'Received!' : 'Sent!',
           ember.successContainer,
           ember.onSuccessContainer,
         ),
