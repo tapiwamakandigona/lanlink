@@ -33,7 +33,7 @@ class _CountingSender extends Sender {
             deviceType: LanLinkProtocol.deviceTypeHeadless,
             fingerprint: 'me',
             port: LanLinkProtocol.defaultPort,
-            protocol: 'http',
+            protocol: 'https',
             ip: '127.0.0.1',
           ),
         );

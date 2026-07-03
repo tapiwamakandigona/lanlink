@@ -7,6 +7,7 @@
 //  * S6: sessions whose sender goes silent are failed by the idle reaper
 //    and their upload tokens die with them.
 
+import 'tls_test_helpers.dart';
 import 'dart:convert';
 import 'dart:io';
 
@@ -25,7 +26,7 @@ Device _device(String alias, String fp) => Device(
       deviceType: LanLinkProtocol.deviceTypeHeadless,
       fingerprint: fp,
       port: 1,
-      protocol: 'http',
+      protocol: 'https',
       ip: '127.0.0.1',
     );
 
@@ -43,6 +44,7 @@ void main() {
     await saveDir.create(recursive: true);
     lastSession = null;
     receiver = Receiver(
+      certificateProvider: testCertificateProvider,
       localDeviceProvider: () => _device('receiver', 'receiver-fp'),
       saveDirProvider: () async => saveDir,
       onAccept: (peer, files) async =>
@@ -52,7 +54,7 @@ void main() {
     );
     await receiver.start();
     port = receiver.port!;
-    client = HttpClient();
+    client = trustAllHttpClient();
   });
 
   tearDown(() async {
@@ -66,7 +68,7 @@ void main() {
   Future<Map<String, dynamic>> prepare(FileInfo file,
       {String senderFp = 'sender-fp'}) async {
     final req = await client.postUrl(Uri.parse(
-        'http://127.0.0.1:$port${LanLinkProtocol.routePrepareUpload}'));
+        'https://127.0.0.1:$port${LanLinkProtocol.routePrepareUpload}'));
     req.headers.contentType = ContentType.json;
     req.write(json.encode({
       'info': _device('sender', senderFp).toJson(),
@@ -84,7 +86,7 @@ void main() {
     required List<int> bytes,
   }) async {
     final req = await client.postUrl(Uri.parse(
-      'http://127.0.0.1:$port${LanLinkProtocol.routeUpload}'
+      'https://127.0.0.1:$port${LanLinkProtocol.routeUpload}'
       '?sessionId=$sessionId&fileId=$fileId&token=$token',
     ));
     req.headers.contentType = ContentType.binary;
@@ -185,7 +187,7 @@ void main() {
       // actually on the wire before the abort (mirrors the resume test).
       const cut = 24 * 1024;
       final req = await client.postUrl(Uri.parse(
-        'http://127.0.0.1:$port${LanLinkProtocol.routeUpload}'
+        'https://127.0.0.1:$port${LanLinkProtocol.routeUpload}'
         '?sessionId=${prepA['sessionId']}&fileId=${file.id}&token=$tokenA',
       ));
       req.headers.contentType = ContentType.binary;
@@ -243,7 +245,7 @@ void main() {
       final prep1 = await prepare(file);
       final token1 = (prep1['files'] as Map)[file.id] as String;
       final req1 = await client.postUrl(Uri.parse(
-        'http://127.0.0.1:$port${LanLinkProtocol.routeUpload}'
+        'https://127.0.0.1:$port${LanLinkProtocol.routeUpload}'
         '?sessionId=${prep1['sessionId']}&fileId=${file.id}&token=$token1',
       ));
       req1.headers.contentType = ContentType.binary;

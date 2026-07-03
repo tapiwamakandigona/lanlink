@@ -176,7 +176,7 @@ class SubnetScanner {
       deviceType: LanLinkProtocol.deviceTypeHeadless,
       fingerprint: '',
       port: port,
-      protocol: 'http',
+      protocol: 'https',
       ip: ip,
     );
     // A per-probe cancel token: `.timeout` alone abandons the future but

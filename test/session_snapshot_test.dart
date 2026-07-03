@@ -12,7 +12,7 @@ void main() {
       deviceType: 'desktop',
       fingerprint: 'fp-1',
       port: 53317,
-      protocol: 'http',
+      protocol: 'https',
       ip: '192.168.1.5',
     );
     final session = TransferSession(

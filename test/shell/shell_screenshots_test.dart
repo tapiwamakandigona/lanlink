@@ -58,7 +58,7 @@ Device _peer(String alias, String fp, {bool verified = false}) => Device(
       deviceType: alias.contains('Book') ? 'desktop' : 'mobile',
       fingerprint: fp,
       port: 53317,
-      protocol: 'http',
+      protocol: 'https',
       ip: '192.168.1.20',
       verified: verified,
     );

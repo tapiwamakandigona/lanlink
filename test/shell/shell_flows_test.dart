@@ -1,5 +1,6 @@
 // Widget tests for the v4 app shell: first-run gate, home sessions,
 // receive QR, send radar + Direct Link, and the consent sheet.
+import '../tls_test_helpers.dart';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
@@ -36,7 +37,7 @@ Device _peer({
       deviceType: deviceType,
       fingerprint: fingerprint,
       port: 53317,
-      protocol: 'http',
+      protocol: 'https',
       ip: '192.168.1.20',
     );
 
@@ -718,6 +719,7 @@ void main() {
       await tester.runAsync(() async {
         tmp = await Directory.systemTemp.createTemp('lanlink_shell_rx_');
         receiver = Receiver(
+          certificateProvider: testCertificateProvider,
           localDeviceProvider: () => _peer(alias: 'Self', fingerprint: 'me'),
           saveDirProvider: () async => tmp,
           onAccept: (peer, files) async => AcceptDecision.reject(),
@@ -744,9 +746,9 @@ void main() {
       // test binding's mock HttpClient answers 400 to everything).
       await tester.runAsync(
         () => HttpOverrides.runWithHttpOverrides(() async {
-          final dio = Dio(BaseOptions(validateStatus: (_) => true));
+          final dio = trustAllDio(BaseOptions(validateStatus: (_) => true));
           final resp = await dio.post<String>(
-            'http://127.0.0.1:${receiver.port}${LanLinkProtocol.routeConnect}',
+            'https://127.0.0.1:${receiver.port}${LanLinkProtocol.routeConnect}',
             queryParameters: {'token': tokenA},
             data: _peer(alias: 'Other', fingerprint: 'other-fp').toJson(),
           );

@@ -1,3 +1,4 @@
+import 'tls_test_helpers.dart';
 import 'dart:convert';
 import 'dart:io';
 
@@ -25,7 +26,7 @@ void main() {
         deviceType: LanLinkProtocol.deviceTypeHeadless,
         fingerprint: 'test-fingerprint',
         port: 0,
-        protocol: 'http',
+        protocol: 'https',
         ip: '127.0.0.1',
       );
 
@@ -33,6 +34,7 @@ void main() {
     tmp = await Directory.systemTemp.createTemp('lanlink_resume_');
     saveDir = Directory('${tmp.path}/saved');
     receiver = Receiver(
+      certificateProvider: testCertificateProvider,
       localDeviceProvider: localDevice,
       saveDirProvider: () async => saveDir,
       onAccept: (peer, files) async =>
@@ -41,7 +43,7 @@ void main() {
     );
     await receiver.start();
     port = receiver.port!;
-    client = HttpClient();
+    client = trustAllHttpClient();
   });
 
   tearDown(() async {
@@ -57,12 +59,12 @@ void main() {
         'deviceType': LanLinkProtocol.deviceTypeHeadless,
         'fingerprint': 'sender-fingerprint',
         'port': 1,
-        'protocol': 'http',
+        'protocol': 'https',
       };
 
   Future<Map<String, dynamic>> prepareUpload(FileInfo file) async {
     final req = await client.postUrl(Uri.parse(
-        'http://127.0.0.1:$port${LanLinkProtocol.routePrepareUpload}'));
+        'https://127.0.0.1:$port${LanLinkProtocol.routePrepareUpload}'));
     req.headers.contentType = ContentType.json;
     req.write(json.encode({
       'info': senderInfo(),
@@ -89,7 +91,7 @@ void main() {
     int? declaredLength,
   }) async {
     final uri = Uri.parse(
-      'http://127.0.0.1:$port${LanLinkProtocol.routeUpload}'
+      'https://127.0.0.1:$port${LanLinkProtocol.routeUpload}'
       '?sessionId=$sessionId&fileId=$fileId&token=$token'
       '${offset != null ? '&offset=$offset' : ''}',
     );

@@ -4,6 +4,7 @@
 //  * the receiver stopping its session mid-upload also surfaces as a
 //    cancelled (not failed) session on the sending side.
 
+import 'tls_test_helpers.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -24,7 +25,7 @@ Device _device(String alias, String fp, int port) => Device(
       deviceType: LanLinkProtocol.deviceTypeHeadless,
       fingerprint: fp,
       port: port,
-      protocol: 'http',
+      protocol: 'https',
       ip: '127.0.0.1',
     );
 
@@ -67,7 +68,9 @@ void main() {
     uploadGateRelease = Completer<void>();
 
     receiver = Receiver(
-      localDeviceProvider: () => _device('receiver', 'receiver-fp', 0),
+      certificateProvider: testCertificateProvider,
+      localDeviceProvider: () =>
+          _device('receiver', testCertificate().fingerprint, 0),
       saveDirProvider: () async {
         saveDirCalls++;
         if (saveDirCalls == 2) {
@@ -97,7 +100,7 @@ void main() {
     final sender = Sender(
       localDeviceProvider: () => _device('sender', 'sender-fp', 1),
     );
-    final peer = _device('receiver', 'receiver-fp', port);
+    final peer = _device('receiver', testCertificate().fingerprint, port);
     final info = FileInfo(
       id: const Uuid().v4(),
       fileName: 'big.bin',

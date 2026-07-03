@@ -5,6 +5,7 @@
 //   * a second sender connecting and completing a transfer while the first
 //     sender's transfer is still actively in flight.
 
+import '../tls_test_helpers.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -25,7 +26,8 @@ void main() {
     final receiveSessions = <TransferSession>[];
 
     final receiver = Receiver(
-      localDeviceProvider: () => device('peer-a-receiver', 'fp-a', 0),
+      certificateProvider: testCertificateProvider,
+      localDeviceProvider: () => device('peer-a-receiver', receiverFp, 0),
       saveDirProvider: () async => saveDir,
       onAccept: (peer, files) async =>
           AcceptDecision.accept(files.map((f) => f.id).toSet()),
@@ -35,7 +37,7 @@ void main() {
     final port = receiver.port!;
     final sender =
         Sender(localDeviceProvider: () => device('peer-b-sender', 'fp-b', 1));
-    final peer = device('peer-a-receiver', 'fp-a', port);
+    final peer = device('peer-a-receiver', receiverFp, port);
 
     try {
       final srcA = await writeDeterministicFile(
@@ -88,7 +90,8 @@ void main() {
     var saveDirCalls = 0;
 
     final receiver = Receiver(
-      localDeviceProvider: () => device('peer-a-receiver', 'fp-a', 0),
+      certificateProvider: testCertificateProvider,
+      localDeviceProvider: () => device('peer-a-receiver', receiverFp, 0),
       saveDirProvider: () async {
         saveDirCalls++;
         if (saveDirCalls == 2) {
@@ -103,7 +106,7 @@ void main() {
     );
     await receiver.start();
     final port = receiver.port!;
-    final peer = device('peer-a-receiver', 'fp-a', port);
+    final peer = device('peer-a-receiver', receiverFp, port);
 
     try {
       final srcA = await writeDeterministicFile(

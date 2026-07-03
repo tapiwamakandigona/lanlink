@@ -6,6 +6,7 @@
 //    announcing a pinned alias under a different fingerprint is NOT treated
 //    as the pinned device.
 
+import 'tls_test_helpers.dart';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
@@ -26,7 +27,7 @@ Device _device(String alias, String fp, int port) => Device(
       deviceType: LanLinkProtocol.deviceTypeHeadless,
       fingerprint: fp,
       port: port,
-      protocol: 'http',
+      protocol: 'https',
       ip: '127.0.0.1',
     );
 
@@ -39,7 +40,9 @@ void main() {
     setUp(() async {
       tmp = await Directory.systemTemp.createTemp('lanlink_token_test_');
       receiver = Receiver(
-        localDeviceProvider: () => _device('receiver', 'receiver-fp', 0),
+        certificateProvider: testCertificateProvider,
+        localDeviceProvider: () =>
+            _device('receiver', testCertificate().fingerprint, 0),
         saveDirProvider: () async => tmp,
         onAccept: (peer, files) async => AcceptDecision.reject(),
         onSessionStarted: (_) {},
@@ -63,16 +66,16 @@ void main() {
 
       final device = await sender.connectWithToken(stub, token);
       expect(device, isNotNull, reason: 'first redemption must succeed');
-      expect(device!.fingerprint, 'receiver-fp');
+      expect(device!.fingerprint, testCertificate().fingerprint);
 
       // Replay: consumed token must be rejected.
       final replay = await sender.connectWithToken(stub, token);
       expect(replay, isNull);
 
       // And the wire status for the replay is specifically 401.
-      final dio = Dio(BaseOptions(validateStatus: (_) => true));
+      final dio = trustAllDio(BaseOptions(validateStatus: (_) => true));
       final resp = await dio.post<String>(
-        'http://127.0.0.1:$port${LanLinkProtocol.routeConnect}',
+        'https://127.0.0.1:$port${LanLinkProtocol.routeConnect}',
         queryParameters: {'token': token},
         data: _device('me', 'me-fp', 1).toJson(),
       );
@@ -93,9 +96,9 @@ void main() {
           reason: 'a superseded token must be rejected');
 
       // And the wire status for the stale token is specifically 401.
-      final dio = Dio(BaseOptions(validateStatus: (_) => true));
+      final dio = trustAllDio(BaseOptions(validateStatus: (_) => true));
       final resp = await dio.post<String>(
-        'http://127.0.0.1:$port${LanLinkProtocol.routeConnect}',
+        'https://127.0.0.1:$port${LanLinkProtocol.routeConnect}',
         queryParameters: {'token': oldToken},
         data: _device('me', 'me-fp', 1).toJson(),
       );
@@ -153,9 +156,9 @@ void main() {
       final token = receiver.issueConnectToken();
       final device = await state.connectWithToken('127.0.0.1:$port', token);
       expect(device, isNotNull);
-      expect(settings.isPinned('receiver-fp'), isTrue,
+      expect(settings.isPinned(testCertificate().fingerprint), isTrue,
           reason: 'a successful connect must pin the peer fingerprint');
-      expect(state.peers['receiver-fp']!.verified, isTrue);
+      expect(state.peers[testCertificate().fingerprint]!.verified, isTrue);
     });
   });
 
