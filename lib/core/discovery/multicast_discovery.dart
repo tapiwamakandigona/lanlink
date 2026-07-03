@@ -45,13 +45,6 @@ class MulticastDiscovery {
     if (_running) return;
     _running = true;
 
-    final group = InternetAddress(LanLinkProtocol.multicastGroup);
-    final interfaces = await NetworkInterface.list(
-      type: InternetAddressType.IPv4,
-      includeLoopback: false,
-      includeLinkLocal: false,
-    );
-
     // Bind one socket to ANY and join the multicast group on each iface.
     try {
       final socket = await RawDatagramSocket.bind(
@@ -62,23 +55,12 @@ class MulticastDiscovery {
       );
       socket.broadcastEnabled = true;
       socket.multicastLoopback = false;
-      for (final iface in interfaces) {
-        try {
-          socket.joinMulticast(group, iface);
-        } catch (e) {
-          // Some interfaces (e.g. VPN tunnels) refuse to join multicast.
-          // Swallow and continue with the rest.
-          if (kDebugMode) {
-            debugPrint(
-                '[discovery] joinMulticast skipped on ${iface.name}: $e');
-          }
-        }
-      }
       _sockets.add(socket);
       _bindSocketHandlers(socket);
     } catch (e) {
       if (kDebugMode) debugPrint('[discovery] failed to bind socket: $e');
     }
+    await _joinGroupOnCurrentInterfaces();
 
     // Send the first announce immediately, then on a timer.
     _announce();
@@ -102,7 +84,50 @@ class MulticastDiscovery {
   }
 
   /// Triggers an immediate announce. Useful after settings change.
-  void poke() => _announce();
+  ///
+  /// Also re-joins the multicast group on the *current* interface set:
+  /// interfaces that appeared after [start] (e.g. the hotspot interface
+  /// once this phone joins the PC-hosted network) would otherwise never
+  /// receive group traffic. Cheap — one interface enumeration; re-joining
+  /// an already-joined interface just throws and is swallowed like at
+  /// start.
+  void poke() {
+    unawaited(_joinGroupOnCurrentInterfaces());
+    _announce();
+  }
+
+  /// Joins the multicast group on every currently present IPv4 interface.
+  /// Called at [start] and again on every [poke] so late-appearing
+  /// interfaces are picked up.
+  Future<void> _joinGroupOnCurrentInterfaces() async {
+    if (!_running || _sockets.isEmpty) return;
+    final group = InternetAddress(LanLinkProtocol.multicastGroup);
+    final List<NetworkInterface> interfaces;
+    try {
+      interfaces = await NetworkInterface.list(
+        type: InternetAddressType.IPv4,
+        includeLoopback: false,
+        includeLinkLocal: false,
+      );
+    } catch (_) {
+      return;
+    }
+    for (final socket in _sockets) {
+      for (final iface in interfaces) {
+        try {
+          socket.joinMulticast(group, iface);
+        } catch (e) {
+          // Some interfaces (e.g. VPN tunnels) refuse to join multicast,
+          // and already-joined interfaces throw "address in use". Swallow
+          // and continue with the rest.
+          if (kDebugMode) {
+            debugPrint(
+                '[discovery] joinMulticast skipped on ${iface.name}: $e');
+          }
+        }
+      }
+    }
+  }
 
   void _bindSocketHandlers(RawDatagramSocket socket) {
     socket.listen((event) {

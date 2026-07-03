@@ -87,7 +87,11 @@ class _FakeSender extends Sender {
   final List<Device> sentTo = [];
 
   @override
-  Future<Device?> probe(Device peer) async {
+  Future<Device?> probe(
+    Device peer, {
+    CancelToken? cancelToken,
+    Duration? timeout,
+  }) async {
     probedHosts.add('${peer.ip}:${peer.port}');
     if (probeDelay != null) await Future<void>.delayed(probeDelay!);
     return probeResult;

@@ -42,13 +42,24 @@ class Sender {
 
   /// Try a quick `/info` round-trip to confirm the peer is reachable. Returns
   /// the up-to-date [Device] info if successful, or null on failure.
-  Future<Device?> probe(Device peer) async {
+  ///
+  /// [cancelToken] lets the caller genuinely abort the probe: a bare
+  /// `.timeout()` on the returned future only abandons it, leaving the
+  /// underlying socket alive for the full 10 s connect timeout — hundreds
+  /// of lingering sockets during a subnet sweep. [timeout] optionally
+  /// tightens the receive budget to match the caller's per-host deadline.
+  Future<Device?> probe(
+    Device peer, {
+    CancelToken? cancelToken,
+    Duration? timeout,
+  }) async {
     try {
       final resp = await _dio.getUri<Map<String, dynamic>>(
         peer.baseUri.replace(path: LanLinkProtocol.routeInfo),
+        cancelToken: cancelToken,
         options: Options(
           responseType: ResponseType.json,
-          receiveTimeout: const Duration(seconds: 4),
+          receiveTimeout: timeout ?? const Duration(seconds: 4),
         ),
       );
       if (resp.statusCode == 200 && resp.data != null) {
@@ -411,16 +422,23 @@ class Sender {
     );
   }
 
+  /// Fails every file that hasn't already completed. Completed is sticky:
+  /// a partial failure (e.g. file 3 of 3 errors out) must not rewrite the
+  /// history of files 1–2 that already landed on the receiver.
   void _failAll(TransferSession session, List<FileInfo> files, String message) {
     for (final f in files) {
+      if (session.files[f.id]?.status == TransferStatus.completed) continue;
       session.markFile(f.id, TransferStatus.failed, error: message);
     }
     session.markStatus(TransferStatus.failed);
   }
 
+  /// Applies [status] to every file that hasn't already completed
+  /// (completed is sticky — see [_failAll]).
   void _markAll(
       TransferSession session, List<FileInfo> files, TransferStatus status) {
     for (final f in files) {
+      if (session.files[f.id]?.status == TransferStatus.completed) continue;
       session.markFile(f.id, status);
     }
   }
