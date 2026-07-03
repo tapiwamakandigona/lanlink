@@ -110,6 +110,25 @@ class AppState extends ChangeNotifier {
   @visibleForTesting
   void debugPeerSeen(Device peer) => _onPeerSeen(peer);
 
+  /// Test hook: drives an incoming-transfer offer through the exact same
+  /// path the [Receiver] uses, so widget tests can exercise the consent
+  /// prompt installed via [installIncomingPrompt].
+  @visibleForTesting
+  Future<AcceptDecision> debugTriggerIncomingPrompt(
+    Device peer,
+    List<FileInfo> files,
+  ) =>
+      _handleIncomingPrompt(peer, files);
+
+  /// The alias shown to peers: the user's setting, or the same platform
+  /// default the announcement payload uses when the setting is empty.
+  /// Display-mapping helper for the shell (home header, first-run prefill,
+  /// receive QR).
+  String get displayAlias {
+    final alias = settings.alias.trim();
+    return alias.isEmpty ? _defaultAlias() : alias;
+  }
+
   /// Map of peer fingerprint -> Device. Latest announcement wins.
   final Map<String, Device> _peers = {};
   Map<String, Device> get peers => Map.unmodifiable(_peers);

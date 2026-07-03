@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 
 import '../core/models/session.dart';
 import '../core/util/pairing_guide.dart';
-import 'onboarding_page.dart';
 
 /// Help + "Get connected" guide reachable from the home-screen "?" button.
 /// Walks the user through direction → other-device → tailored steps, lists a
@@ -120,12 +119,6 @@ class _HelpPageState extends State<HelpPage> {
               ),
             ),
           ),
-          const SizedBox(height: 16),
-          OutlinedButton.icon(
-            icon: const Icon(Icons.replay),
-            label: const Text('Replay the welcome tour'),
-            onPressed: _replayTour,
-          ),
           const SizedBox(height: 24),
         ],
       ),
@@ -218,15 +211,6 @@ class _HelpPageState extends State<HelpPage> {
             ],
           ],
         ),
-      ),
-    );
-  }
-
-  Future<void> _replayTour() async {
-    final navigator = Navigator.of(context);
-    await navigator.push(
-      MaterialPageRoute(
-        builder: (_) => OnboardingPage(onDone: () => navigator.pop()),
       ),
     );
   }
