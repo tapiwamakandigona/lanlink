@@ -391,7 +391,9 @@ jobs:
           python-version: "3.12"
 
       - name: Install Appwrite SDK
-        run: pip install "appwrite>=20,<21"
+        # Pinned exactly so a compromised or breaking upstream release cannot
+        # slip into the publish job unnoticed (latest 20.x at time of pinning).
+        run: pip install "appwrite==20.1.0"
 
       # Replaces the fixed-ID files behind tapiwa.me/lanlink/downloads.html
       # so the site always serves this release. See scripts/publish_downloads.py.
