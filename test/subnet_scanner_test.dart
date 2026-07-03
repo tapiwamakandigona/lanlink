@@ -9,11 +9,14 @@ import 'package:lanlink/core/protocol/constants.dart';
 import 'package:lanlink/core/transfer/sender.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'tls_test_helpers.dart';
+
 Future<HttpServer> _spinUpFakePeer({
   required String alias,
   required String fingerprint,
 }) async {
-  final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+  final server = await HttpServer.bindSecure(
+      InternetAddress.loopbackIPv4, 0, testCertificate().securityContext());
   unawaited(_serveInfo(server, alias, fingerprint));
   return server;
 }
@@ -34,7 +37,7 @@ Future<void> _serveInfo(
         'deviceType': LanLinkProtocol.deviceTypeHeadless,
         'fingerprint': fingerprint,
         'port': server.port,
-        'protocol': 'http',
+        'protocol': 'https',
       }));
       await req.response.close();
     } else {
@@ -66,7 +69,7 @@ void main() {
         deviceType: LanLinkProtocol.deviceTypeHeadless,
         fingerprint: 'me',
         port: fake.port,
-        protocol: 'http',
+        protocol: 'https',
         ip: '127.0.0.1',
       ),
     );
@@ -87,7 +90,9 @@ void main() {
     await scanner.scan(localIps: ['127.0.0.0']);
     expect(seen, isNotNull);
     expect(seen!.alias, 'unit-test-peer');
-    expect(seen!.fingerprint, 'abc123');
+    // Protocol 2.1: the fingerprint reported for a discovered peer is the
+    // hash of the TLS certificate it presented, not its self-reported JSON.
+    expect(seen!.fingerprint, testCertificate().fingerprint);
   });
 
   test('well-known hotspot prefixes cover the common OEM gateways', () {

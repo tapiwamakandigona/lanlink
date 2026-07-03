@@ -33,7 +33,7 @@ Device _peer({String alias = 'Pixel', String fingerprint = 'peer-fp'}) =>
       deviceType: 'mobile',
       fingerprint: fingerprint,
       port: 53317,
-      protocol: 'http',
+      protocol: 'https',
       ip: '192.168.49.1',
     );
 

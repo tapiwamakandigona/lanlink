@@ -9,6 +9,7 @@
 //   (c) oversized control payloads are rejected, and the post-cancel upload
 //       drain is bounded at 32MB so a flooding peer cannot pin the handler.
 
+import '../tls_test_helpers.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -42,7 +43,8 @@ void main() {
     await saveDir.create(recursive: true);
     receiveSession = null;
     receiver = Receiver(
-      localDeviceProvider: () => device('peer-a-receiver', 'fp-a', 0),
+      certificateProvider: testCertificateProvider,
+      localDeviceProvider: () => device('peer-a-receiver', receiverFp, 0),
       saveDirProvider: () async => saveDir,
       onAccept: (peer, files) async =>
           AcceptDecision.accept(files.map((f) => f.id).toSet()),
@@ -50,8 +52,8 @@ void main() {
     );
     await receiver.start();
     port = receiver.port!;
-    dio = Dio(BaseOptions(
-      baseUrl: 'http://127.0.0.1:$port',
+    dio = trustAllDio(BaseOptions(
+      baseUrl: 'https://127.0.0.1:$port',
       responseType: ResponseType.plain,
       validateStatus: (s) => s != null,
     ));
@@ -73,7 +75,7 @@ void main() {
     // First redemption over a real socket succeeds…
     final first = await sender.connectWithToken(stub, token);
     expect(first, isNotNull);
-    expect(first!.fingerprint, 'fp-a');
+    expect(first!.fingerprint, receiverFp);
 
     // …the replay is rejected, specifically with a 401 on the wire.
     expect(await sender.connectWithToken(stub, token), isNull);
@@ -98,8 +100,8 @@ void main() {
     final token = receiver.issueConnectToken();
     final real = await state.connectWithToken('127.0.0.1:$port', token);
     expect(real, isNotNull);
-    expect(settings.isPinned('fp-a'), isTrue);
-    expect(state.peers['fp-a']!.verified, isTrue);
+    expect(settings.isPinned(receiverFp), isTrue);
+    expect(state.peers[receiverFp]!.verified, isTrue);
 
     // An impostor announcing the same alias under a different fingerprint
     // must be a separate, UNverified peer — never the pinned device.
@@ -107,7 +109,7 @@ void main() {
     expect(state.peers['fp-evil']!.verified, isFalse,
         reason: 'wrong fingerprint must not inherit verified status');
     expect(settings.isPinned('fp-evil'), isFalse);
-    expect(state.peers['fp-evil'], isNot(same(state.peers['fp-a'])));
+    expect(state.peers['fp-evil'], isNot(same(state.peers[receiverFp])));
   }, timeout: const Timeout(Duration(seconds: 30)));
 
   test(

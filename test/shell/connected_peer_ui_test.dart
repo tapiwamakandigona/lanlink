@@ -24,7 +24,7 @@ Device _peer(String alias, String fp) => Device(
       deviceType: LanLinkProtocol.deviceTypeHeadless,
       fingerprint: fp,
       port: 1234,
-      protocol: 'http',
+      protocol: 'https',
       ip: '192.168.1.20',
     );
 

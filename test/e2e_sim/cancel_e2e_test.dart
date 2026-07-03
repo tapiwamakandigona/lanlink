@@ -5,6 +5,7 @@
 // state, no finalized file appears in the save dir, and any partial data is
 // confined to the clearly-marked `.lanlink_parts` staging area.
 
+import '../tls_test_helpers.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -48,7 +49,8 @@ void main() {
     uploadGateRelease = Completer<void>();
 
     receiver = Receiver(
-      localDeviceProvider: () => device('peer-a-receiver', 'fp-a', 0),
+      certificateProvider: testCertificateProvider,
+      localDeviceProvider: () => device('peer-a-receiver', receiverFp, 0),
       saveDirProvider: () async {
         saveDirCalls++;
         if (saveDirCalls == 2) {
@@ -76,7 +78,7 @@ void main() {
   (Sender, TransferSession, FileInfo) buildSend() {
     final sender =
         Sender(localDeviceProvider: () => device('peer-b-sender', 'fp-b', 1));
-    final peer = device('peer-a-receiver', 'fp-a', port);
+    final peer = device('peer-a-receiver', receiverFp, port);
     final info = fileInfoFor(sourceFile, fileName: 'big.bin', size: srcSize);
     final session = sendSessionFor(peer, [info]);
     return (sender, session, info);
@@ -106,7 +108,7 @@ void main() {
   test('sender-initiated cancel mid-transfer: both sides end cancelled',
       () async {
     final (sender, session, info) = buildSend();
-    final peer = device('peer-a-receiver', 'fp-a', port);
+    final peer = device('peer-a-receiver', receiverFp, port);
     final sendFuture = sender.send(session: session, peer: peer, files: [info]);
 
     await uploadGateReached.future.timeout(const Duration(seconds: 10));
@@ -133,7 +135,7 @@ void main() {
   test('receiver-initiated cancel mid-transfer: both sides end cancelled',
       () async {
     final (sender, session, info) = buildSend();
-    final peer = device('peer-a-receiver', 'fp-a', port);
+    final peer = device('peer-a-receiver', receiverFp, port);
     final sendFuture = sender.send(session: session, peer: peer, files: [info]);
 
     await uploadGateReached.future.timeout(const Duration(seconds: 10));

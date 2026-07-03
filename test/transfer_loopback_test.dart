@@ -4,6 +4,7 @@
 // asserts both that the file lands on disk and that the same
 // [TransferSession] visible to the UI advances through progress updates.
 
+import 'tls_test_helpers.dart';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -36,14 +37,15 @@ void main() {
 
     lastReceiveSession = null;
     receiver = Receiver(
+      certificateProvider: testCertificateProvider,
       localDeviceProvider: () => Device(
         alias: 'receiver',
         version: LanLinkProtocol.protocolVersion,
         deviceModel: 'test',
         deviceType: LanLinkProtocol.deviceTypeHeadless,
-        fingerprint: 'receiver-fp',
+        fingerprint: testCertificate().fingerprint,
         port: 0,
-        protocol: 'http',
+        protocol: 'https',
         ip: '127.0.0.1',
       ),
       saveDirProvider: () async => saveDir,
@@ -71,7 +73,7 @@ void main() {
         deviceType: LanLinkProtocol.deviceTypeMobile,
         fingerprint: 'sender-fp',
         port: 0,
-        protocol: 'http',
+        protocol: 'https',
         ip: '127.0.0.1',
       ),
     );
@@ -81,9 +83,9 @@ void main() {
       version: LanLinkProtocol.protocolVersion,
       deviceModel: 'test',
       deviceType: LanLinkProtocol.deviceTypeHeadless,
-      fingerprint: 'receiver-fp',
+      fingerprint: testCertificate().fingerprint,
       port: port,
-      protocol: 'http',
+      protocol: 'https',
       ip: '127.0.0.1',
     );
 
@@ -139,14 +141,15 @@ void main() {
 
   test('rejected files do not produce a file on disk', () async {
     final restrictiveReceiver = Receiver(
+      certificateProvider: testCertificateProvider,
       localDeviceProvider: () => Device(
         alias: 'receiver',
         version: LanLinkProtocol.protocolVersion,
         deviceModel: 'test',
         deviceType: LanLinkProtocol.deviceTypeHeadless,
-        fingerprint: 'receiver-fp-2',
+        fingerprint: testCertificate().fingerprint,
         port: 0,
-        protocol: 'http',
+        protocol: 'https',
         ip: '127.0.0.1',
       ),
       saveDirProvider: () async => saveDir,
@@ -164,7 +167,7 @@ void main() {
           deviceType: LanLinkProtocol.deviceTypeMobile,
           fingerprint: 'sender-fp-2',
           port: 0,
-          protocol: 'http',
+          protocol: 'https',
           ip: '127.0.0.1',
         ),
       );
@@ -173,9 +176,9 @@ void main() {
         version: LanLinkProtocol.protocolVersion,
         deviceModel: 'test',
         deviceType: LanLinkProtocol.deviceTypeHeadless,
-        fingerprint: 'receiver-fp-2',
+        fingerprint: testCertificate().fingerprint,
         port: rejPort,
-        protocol: 'http',
+        protocol: 'https',
         ip: '127.0.0.1',
       );
       final fileInfo = FileInfo(

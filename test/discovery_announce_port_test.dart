@@ -19,7 +19,7 @@ void main() {
         deviceType: LanLinkProtocol.deviceTypeHeadless,
         fingerprint: 'me-fp',
         port: boundPort,
-        protocol: 'http',
+        protocol: 'https',
         ip: '',
       ),
       onPeer: (_) {},

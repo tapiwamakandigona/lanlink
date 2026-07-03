@@ -12,12 +12,14 @@
 //  * perf regression: a session's progress ticks do NOT fan out into
 //    AppState.notifyListeners (only status transitions do).
 
+import 'tls_test_helpers.dart';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lanlink/core/models/device.dart';
+import 'package:lanlink/core/security/device_certificate.dart';
 import 'package:lanlink/core/models/file_info.dart';
 import 'package:lanlink/core/models/session.dart';
 import 'package:lanlink/core/protocol/constants.dart';
@@ -32,10 +34,13 @@ import 'e2e_sim/e2e_helpers.dart';
 /// One full app-side peer: settings + AppState + a live loopback Receiver
 /// wired through the same debug hooks the app shell uses.
 class _Peer {
-  _Peer(this.name, this.fingerprint);
+  _Peer(this.name, this.cert);
 
   final String name;
-  final String fingerprint;
+  final DeviceCertificate cert;
+
+  /// Protocol 2.1: a peer's fingerprint IS its TLS cert hash.
+  String get fingerprint => cert.fingerprint;
   late final AppSettings settings;
   late final AppState state;
   late final Receiver receiver;
@@ -49,6 +54,7 @@ class _Peer {
     settings = await AppSettings.load();
     state = AppState.forScreenshots(settings: settings);
     receiver = Receiver(
+      certificateProvider: () async => cert,
       // `receiver.port` is null until the server binds; 0 asks the OS for
       // an ephemeral port on first bind, afterwards it self-describes.
       localDeviceProvider: () => device(name, fingerprint, receiver.port ?? 0),
@@ -78,13 +84,13 @@ void main() {
 
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
-    a = _Peer('alice', 'fp-a');
+    a = _Peer('alice', testCertificate());
     await a.start();
     // Fresh prefs per state; AppSettings.load reads the same mock store but
     // pin/trust sets are keyed identically — reset between peers so each
     // side starts clean. (Both states share the mock store; assertions
     // below always check via each side's own settings handle.)
-    b = _Peer('bob', 'fp-b');
+    b = _Peer('bob', testCertificateB());
     await b.start();
   });
 
@@ -99,18 +105,18 @@ void main() {
   test('token pairing links and pins BOTH sides (symmetric trust)', () async {
     final peerB = await pair();
     expect(peerB, isNotNull);
-    expect(peerB!.fingerprint, 'fp-b');
+    expect(peerB!.fingerprint, b.fingerprint);
 
     // A side: linked + pinned (as before).
-    expect(a.state.isLinked('fp-b'), isTrue);
-    expect(a.settings.isPinned('fp-b'), isTrue);
+    expect(a.state.isLinked(b.fingerprint), isTrue);
+    expect(a.settings.isPinned(b.fingerprint), isTrue);
 
     // B side: the receiver linked + pinned the caller back — no re-scan
     // needed to send in the other direction.
-    await waitFor(() => b.state.isLinked('fp-a'));
-    await waitFor(() => b.settings.isPinned('fp-a'));
+    await waitFor(() => b.state.isLinked(a.fingerprint));
+    await waitFor(() => b.settings.isPinned(a.fingerprint));
     final linkedBack = b.state.linkedPeers.single;
-    expect(linkedBack.fingerprint, 'fp-a');
+    expect(linkedBack.fingerprint, a.fingerprint);
     expect(linkedBack.ip, '127.0.0.1');
     expect(linkedBack.port, a.port, reason: 'B must be able to dial A back');
   }, timeout: const Timeout(Duration(seconds: 30)));
@@ -120,7 +126,7 @@ void main() {
       'disconnects and pushes are rejected server-side until re-pair',
       () async {
     await pair();
-    await waitFor(() => b.state.isLinked('fp-a'));
+    await waitFor(() => b.state.isLinked(a.fingerprint));
 
     // A -> B.
     final tmp = await Directory.systemTemp.createTemp('lanlink_bidi_files');
@@ -152,16 +158,17 @@ void main() {
 
     // B disconnects; A is notified over /disconnect and clears too.
     await b.state.disconnectPeer(b.state.linkedPeers.single);
-    expect(b.state.isLinked('fp-a'), isFalse);
-    expect(b.state.isPeerDisconnected('fp-a'), isTrue);
-    expect(b.settings.isPinned('fp-a'), isFalse, reason: 'unpair clears pin');
-    await waitFor(() => !a.state.isLinked('fp-b'));
-    await waitFor(() => a.state.isPeerDisconnected('fp-b'));
+    expect(b.state.isLinked(a.fingerprint), isFalse);
+    expect(b.state.isPeerDisconnected(a.fingerprint), isTrue);
+    expect(b.settings.isPinned(a.fingerprint), isFalse,
+        reason: 'unpair clears pin');
+    await waitFor(() => !a.state.isLinked(b.fingerprint));
+    await waitFor(() => a.state.isPeerDisconnected(b.fingerprint));
 
     // Server-side enforcement: A's push to B is rejected before any prompt.
-    final dio = Dio(BaseOptions(validateStatus: (_) => true));
+    final dio = trustAllDio(BaseOptions(validateStatus: (_) => true));
     final resp = await dio.post<String>(
-      'http://127.0.0.1:${b.port}${LanLinkProtocol.routePrepareUpload}',
+      'https://127.0.0.1:${b.port}${LanLinkProtocol.routePrepareUpload}',
       data: {
         'info': a.self.toJson(),
         'files': {
@@ -180,9 +187,9 @@ void main() {
     // Re-pair with a fresh token: link restored, pushes flow again.
     final again = await pair();
     expect(again, isNotNull);
-    expect(a.state.isPeerDisconnected('fp-b'), isFalse);
-    await waitFor(() => b.state.isLinked('fp-a'));
-    expect(b.state.isPeerDisconnected('fp-a'), isFalse);
+    expect(a.state.isPeerDisconnected(b.fingerprint), isFalse);
+    await waitFor(() => b.state.isLinked(a.fingerprint));
+    expect(b.state.isPeerDisconnected(a.fingerprint), isFalse);
     final f3 = await writeDeterministicFile('${tmp.path}/again.bin', 4 * 1024,
         seed: 5);
     final s3 = await a.state.sendFiles(
@@ -197,23 +204,23 @@ void main() {
     test('stranger (unlinked fingerprint) gets 403 and tears nothing down',
         () async {
       await pair();
-      await waitFor(() => b.state.isLinked('fp-a'));
-      final dio = Dio(BaseOptions(validateStatus: (_) => true));
+      await waitFor(() => b.state.isLinked(a.fingerprint));
+      final dio = trustAllDio(BaseOptions(validateStatus: (_) => true));
       final resp = await dio.post<String>(
-        'http://127.0.0.1:${b.port}${LanLinkProtocol.routeDisconnect}',
+        'https://127.0.0.1:${b.port}${LanLinkProtocol.routeDisconnect}',
         data: device('evil', 'fp-evil', 999).toJson(),
       );
       expect(resp.statusCode, 403);
-      expect(b.state.isLinked('fp-a'), isTrue,
+      expect(b.state.isLinked(a.fingerprint), isTrue,
           reason: 'a stranger must not end someone else\'s session');
     }, timeout: const Timeout(Duration(seconds: 30)));
 
     test('oversized body is rejected (bounded control route)', () async {
-      final dio = Dio(BaseOptions(validateStatus: (_) => true));
+      final dio = trustAllDio(BaseOptions(validateStatus: (_) => true));
       int? status;
       try {
         final resp = await dio.post<String>(
-          'http://127.0.0.1:${b.port}${LanLinkProtocol.routeDisconnect}',
+          'https://127.0.0.1:${b.port}${LanLinkProtocol.routeDisconnect}',
           data: '{"padding": "${'A' * (65 * 1024)}"}',
           options: Options(contentType: 'application/json'),
         );
@@ -226,9 +233,9 @@ void main() {
     }, timeout: const Timeout(Duration(seconds: 30)));
 
     test('missing device info is a 400', () async {
-      final dio = Dio(BaseOptions(validateStatus: (_) => true));
+      final dio = trustAllDio(BaseOptions(validateStatus: (_) => true));
       final resp = await dio.post<String>(
-        'http://127.0.0.1:${b.port}${LanLinkProtocol.routeDisconnect}',
+        'https://127.0.0.1:${b.port}${LanLinkProtocol.routeDisconnect}',
         data: jsonEncode({'not': 'a device'}),
         options: Options(contentType: 'application/json'),
       );

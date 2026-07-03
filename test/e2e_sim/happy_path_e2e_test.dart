@@ -5,6 +5,7 @@
 //   * a folder with nested files,
 // verifying every received file is sha256-identical to its source.
 
+import '../tls_test_helpers.dart';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -31,7 +32,8 @@ void main() {
 
     // Peer instance A: real Receiver hosting an HTTP server on 127.0.0.1.
     receiver = Receiver(
-      localDeviceProvider: () => device('peer-a-receiver', 'fp-a', 0),
+      certificateProvider: testCertificateProvider,
+      localDeviceProvider: () => device('peer-a-receiver', receiverFp, 0),
       saveDirProvider: () async => saveDir,
       onAccept: (peer, files) async =>
           AcceptDecision.accept(files.map((f) => f.id).toSet()),
@@ -60,7 +62,7 @@ void main() {
     final stub = device('unknown', '', port);
     final learned = await sender.connectWithToken(stub, token);
     expect(learned, isNotNull, reason: 'connect handshake must succeed');
-    expect(learned!.fingerprint, 'fp-a');
+    expect(learned!.fingerprint, receiverFp);
     expect(learned.alias, 'peer-a-receiver');
   }, timeout: const Timeout(Duration(seconds: 30)));
 
@@ -69,7 +71,7 @@ void main() {
     await src.writeAsString('Hello from LanLink e2e.\nLine two — ünïcode ✓\n');
     final size = await src.length();
     final info = fileInfoFor(src, fileName: 'note.txt', size: size);
-    final peer = device('peer-a-receiver', 'fp-a', port);
+    final peer = device('peer-a-receiver', receiverFp, port);
     final session = sendSessionFor(peer, [info]);
 
     await sender.send(session: session, peer: peer, files: [info]);
@@ -89,7 +91,7 @@ void main() {
         p.join(tmpRoot.path, 'blob.bin'), size,
         seed: 42);
     final info = fileInfoFor(src, fileName: 'blob.bin', size: size);
-    final peer = device('peer-a-receiver', 'fp-a', port);
+    final peer = device('peer-a-receiver', receiverFp, port);
     final session = sendSessionFor(peer, [info]);
 
     final progress = <int>[];
@@ -131,7 +133,7 @@ void main() {
       fileInfoFor(p1, fileName: 'Trip/photos/p1.bin', size: 300 * 1024),
       fileInfoFor(p2, fileName: 'Trip/photos/raw/p2.bin', size: 700 * 1024),
     ];
-    final peer = device('peer-a-receiver', 'fp-a', port);
+    final peer = device('peer-a-receiver', receiverFp, port);
     final session = sendSessionFor(peer, infos);
 
     await sender.send(session: session, peer: peer, files: infos);
