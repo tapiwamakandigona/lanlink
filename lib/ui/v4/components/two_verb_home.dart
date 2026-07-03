@@ -161,9 +161,8 @@ class _VerbCard extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final bg = primary ? scheme.primary : scheme.surfaceContainerLowest;
     final fg = primary ? scheme.onPrimary : scheme.onSurface;
-    final sub = primary
-        ? scheme.onPrimary.withValues(alpha: 0.78)
-        : scheme.onSurfaceVariant;
+    final sub =
+        primary ? scheme.onPrimary.withOpacity(0.78) : scheme.onSurfaceVariant;
     return Material(
       color: bg,
       clipBehavior: Clip.antiAlias,
@@ -185,7 +184,7 @@ class _VerbCard extends StatelessWidget {
                 height: 40,
                 decoration: BoxDecoration(
                   color: primary
-                      ? scheme.onPrimary.withValues(alpha: 0.16)
+                      ? scheme.onPrimary.withOpacity(0.16)
                       : scheme.primaryContainer,
                   shape: BoxShape.circle,
                 ),

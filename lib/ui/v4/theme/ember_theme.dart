@@ -93,7 +93,7 @@ abstract final class EmberTheme {
             .merge(VType.heading)
             .copyWith(color: scheme.onSurface),
       ),
-      cardTheme: CardThemeData(
+      cardTheme: CardTheme(
         elevation: 0,
         color: scheme.surfaceContainerLowest,
         shape: RoundedRectangleBorder(
@@ -147,7 +147,7 @@ abstract final class EmberTheme {
         shape: const RoundedRectangleBorder(borderRadius: VRadius.sheetTop),
         showDragHandle: true,
       ),
-      dialogTheme: DialogThemeData(
+      dialogTheme: DialogTheme(
         backgroundColor: scheme.surfaceContainerLowest,
         surfaceTintColor: Colors.transparent,
         shape: const RoundedRectangleBorder(borderRadius: VRadius.lgAll),
@@ -165,7 +165,6 @@ abstract final class EmberTheme {
       progressIndicatorTheme: ProgressIndicatorThemeData(
         color: scheme.primary,
         linearTrackColor: scheme.surfaceContainerHigh,
-        borderRadius: BorderRadius.circular(VRadius.sm),
       ),
     );
   }
