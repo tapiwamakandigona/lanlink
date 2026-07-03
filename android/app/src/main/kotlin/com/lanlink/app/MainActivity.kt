@@ -1,5 +1,8 @@
 package com.lanlink.app
 
+import android.content.ClipData
+import android.content.ClipDescription
+import android.content.ClipboardManager
 import android.content.ComponentName
 import android.content.ContentUris
 import android.content.ContentValues
@@ -18,6 +21,7 @@ import android.os.Bundle
 import android.os.Environment
 import android.os.Handler
 import android.os.Looper
+import android.os.PersistableBundle
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.provider.Settings
@@ -552,11 +556,53 @@ class MainActivity : FlutterActivity() {
                             )
                             return@setMethodCallHandler
                         }
+                        // The MediaStore publish streams the whole received
+                        // file to Downloads; inline it would freeze the UI
+                        // (ANR) for multi-second copies, so run it off the
+                        // main thread like the other heavy handlers above.
+                        Thread {
+                            try {
+                                val published =
+                                    publishToDownloads(sourcePath, fileName, subDir)
+                                runOnUiThread { result.success(published) }
+                            } catch (e: Exception) {
+                                runOnUiThread {
+                                    result.error("PUBLISH_FAILED", e.message, null)
+                                }
+                            }
+                        }.start()
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+
+        // Clipboard writes that must carry the Android 13+ "sensitive"
+        // flag (ClipDescription.EXTRA_IS_SENSITIVE) so the WPA2 hotspot
+        // password isn't shown in the clipboard-preview overlay or leaked
+        // to clipboard listeners / cross-device clipboard sync. Flutter's
+        // Clipboard.setData cannot set the flag, hence this tiny channel.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "lanlink/clipboard")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "copySensitive" -> {
+                        val text = call.argument<String>("text")
+                        if (text == null) {
+                            result.error("ARGS", "copySensitive requires text", null)
+                            return@setMethodCallHandler
+                        }
                         try {
-                            val published = publishToDownloads(sourcePath, fileName, subDir)
-                            result.success(published)
+                            val clip = ClipData.newPlainText("", text)
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                clip.description.extras = PersistableBundle().apply {
+                                    putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true)
+                                }
+                            }
+                            val manager =
+                                getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+                            manager.setPrimaryClip(clip)
+                            result.success(true)
                         } catch (e: Exception) {
-                            result.error("PUBLISH_FAILED", e.message, null)
+                            result.error("COPY_FAILED", e.message, null)
                         }
                     }
                     else -> result.notImplemented()
