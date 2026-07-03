@@ -49,7 +49,15 @@ class Receiver {
     required this.onAccept,
     required this.onSessionStarted,
     this.onPeerSeen,
+    this.idleTimeout = const Duration(minutes: 5),
   });
+
+  /// How long a receive session may sit with no sender activity (no bytes,
+  /// no upload calls) before the idle reaper fails it. Without this, a
+  /// sender that dies right after prepare-upload leaves the session pending
+  /// forever — pinning the Android foreground service and the scan
+  /// throttle. Injectable so tests can shrink it.
+  final Duration idleTimeout;
 
   /// Returns the current local-device info (alias, port, fingerprint, etc.).
   /// We accept it as a provider so settings changes take effect without
@@ -90,6 +98,22 @@ class Receiver {
   /// Active receive sessions, keyed by sessionId.
   final Map<String, _PendingSession> _pending = {};
 
+  /// Part-file paths with a write currently in flight, so two sessions can
+  /// never interleave bytes into the same part file (the second writer is
+  /// answered 409 instead).
+  final Set<String> _activePartPaths = {};
+
+  /// Serializes the pick-unique-name + rename step at the end of an upload
+  /// (see the finalize comment in [_handleUpload]).
+  Future<void> _finalizeQueue = Future.value();
+
+  Future<T> _withFinalizeLock<T>(Future<T> Function() action) {
+    final prev = _finalizeQueue;
+    final done = Completer<void>();
+    _finalizeQueue = done.future;
+    return prev.then((_) => action()).whenComplete(done.complete);
+  }
+
   bool get isRunning => _httpServer != null;
   int? get port => _httpServer?.port;
 
@@ -112,6 +136,41 @@ class Receiver {
 
     final desired = localDeviceProvider().port;
     _httpServer = await _bindWithFallback(handler, desired);
+
+    // Conservative idle reaper (S6): sweep once a minute for sessions whose
+    // sender went silent. The check interval is coarse on purpose — the
+    // reaper is a safety net, not a liveness monitor.
+    _idleReaper?.cancel();
+    _idleReaper = Timer.periodic(
+      const Duration(minutes: 1),
+      (_) => reapIdleSessions(),
+    );
+  }
+
+  Timer? _idleReaper;
+
+  /// Fails (and forgets) every pending session with no sender activity —
+  /// no upload call, no bytes — for at least [idleTimeout]. Public and
+  /// clock-injectable so tests can drive it without waiting wall time.
+  void reapIdleSessions({DateTime? now}) {
+    final t = now ?? DateTime.now();
+    final stale = _pending.entries
+        .where((e) => t.difference(e.value.lastActivity) >= idleTimeout)
+        .map((e) => e.key)
+        .toList();
+    for (final id in stale) {
+      final ps = _pending.remove(id);
+      if (ps == null) continue;
+      for (final f in ps.session.files.values) {
+        if (f.status != TransferStatus.transferring &&
+            f.status != TransferStatus.awaitingAccept) {
+          continue;
+        }
+        ps.session.markFile(f.file.id, TransferStatus.failed,
+            error: 'No activity from sender — transfer timed out.');
+      }
+      ps.session.markStatus(TransferStatus.failed);
+    }
   }
 
   /// Binds the HTTP server on [desired], falling back to nearby ports and
@@ -141,6 +200,8 @@ class Receiver {
   }
 
   Future<void> stop() async {
+    _idleReaper?.cancel();
+    _idleReaper = null;
     final s = _httpServer;
     _httpServer = null;
     if (s != null) await s.close(force: true);
@@ -268,7 +329,7 @@ class Receiver {
     try {
       final saveDir = await saveDirProvider();
       for (final f in accepted) {
-        final part = await _partFileFor(saveDir, f);
+        final part = await _partFileFor(saveDir, peer, f);
         if (!await part.exists()) continue;
         final len = await part.length();
         if (len > 0 && len < f.size) {
@@ -307,6 +368,8 @@ class Receiver {
     if (ps.tokens[fileId] != token) return Response.forbidden('bad token');
     final info = ps.files[fileId];
     if (info == null) return Response.notFound('no such file');
+    // Any authenticated upload call counts as sender activity.
+    ps.touch();
     // Writes are only accepted while the session is actively transferring.
     // A cancelled/failed session must never accept more bytes.
     if (ps.session.status != TransferStatus.transferring) {
@@ -327,7 +390,7 @@ class Receiver {
     // byte offset we advertised in prepare-upload. The offset must match
     // the part file exactly — otherwise the sender restarts from zero.
     final offset = int.tryParse(req.url.queryParameters['offset'] ?? '0') ?? 0;
-    final partFile = await _partFileFor(saveDir, info);
+    final partFile = await _partFileFor(saveDir, ps.session.peer, info);
     if (offset > 0) {
       final have = await partFile.exists() ? await partFile.length() : 0;
       if (have != offset) {
@@ -347,19 +410,31 @@ class Receiver {
       return Response(401, body: 'upload token already used');
     }
 
+    // The single-use token above only protects within one session. Two
+    // *different* live sessions can still target the same part file (same
+    // peer re-offering the same file concurrently), so claim the part path
+    // exclusively for the duration of the write. Every exit below must
+    // release the claim.
+    if (!_activePartPaths.add(partFile.path)) {
+      return Response(409, body: 'file is already being received');
+    }
+
     IOSink? sink;
     try {
       sink = partFile.openWrite(
         mode: offset > 0 ? FileMode.append : FileMode.write,
       );
     } catch (e) {
+      _activePartPaths.remove(partFile.path);
       _failSession(sessionId, ps, fileId, 'Cannot open ${partFile.path}: $e');
       return Response.internalServerError(body: 'cannot open temp file: $e');
     }
 
     int received = offset;
+    int unflushed = 0;
     String finalPath;
     var aborted = false;
+    var oversized = false;
     var drainedAfterAbort = 0;
     try {
       await for (final chunk in req.read()) {
@@ -376,6 +451,16 @@ class Receiver {
             await sink.close();
           } catch (_) {}
         }
+        // Never write past the size the user consented to: a hostile or
+        // buggy sender that streams extra bytes gets its file failed and
+        // the rest of the body discarded under the same drain bound.
+        if (!aborted && received + chunk.length > info.size) {
+          aborted = true;
+          oversized = true;
+          try {
+            await sink.close();
+          } catch (_) {}
+        }
         if (aborted) {
           drainedAfterAbort += chunk.length;
           if (drainedAfterAbort > _maxDrainBytes) break;
@@ -383,7 +468,33 @@ class Receiver {
         }
         sink.add(chunk);
         received += chunk.length;
+        unflushed += chunk.length;
+        ps.touch();
+        // Backpressure: without periodic flushes every added chunk queues
+        // in memory until EOF, so on a fast network the heap grows toward
+        // the file size. Awaiting the flush pauses the request stream
+        // (`await for` propagates the pause), bounding buffered bytes.
+        if (unflushed >= _flushEveryBytes) {
+          unflushed = 0;
+          await sink.flush();
+        }
         ps.session.updateBytes(fileId, received);
+      }
+      if (oversized) {
+        // The part file now holds bytes we can't trust (the announced size
+        // was a lie); drop it so a later resume can't build on it.
+        try {
+          await partFile.delete();
+        } catch (_) {}
+        _activePartPaths.remove(partFile.path);
+        _failSession(
+            sessionId,
+            ps,
+            fileId,
+            'Sender streamed more bytes than the consented size '
+            '(${info.size}).');
+        return Response.badRequest(
+            body: 'body exceeds declared file size ${info.size}');
       }
       if (aborted || ps.session.status != TransferStatus.transferring) {
         throw const _SessionNoLongerActive();
@@ -401,8 +512,17 @@ class Receiver {
         );
         await targetDir.create(recursive: true);
       }
-      finalPath = await _uniqueOutputPath(targetDir, segments.last);
-      await partFile.rename(finalPath);
+      // Finalize under a lock: _uniqueOutputPath's exists-check and the
+      // rename are not atomic, so two sessions completing the same file
+      // name concurrently could both pick the same path and the second
+      // rename would silently overwrite the first file.
+      final destDir = targetDir;
+      finalPath = await _withFinalizeLock(() async {
+        final path = await _uniqueOutputPath(destDir, segments.last);
+        await partFile.rename(path);
+        return path;
+      });
+      _activePartPaths.remove(partFile.path);
     } on _SessionNoLongerActive {
       // Session was cancelled (or failed) while this upload streamed in.
       // Keep whatever made it to disk as a resume head start, but do not
@@ -410,6 +530,7 @@ class Receiver {
       try {
         await sink.close();
       } catch (_) {}
+      _activePartPaths.remove(partFile.path);
       return Response.forbidden('session cancelled');
     } catch (e) {
       // Keep the part file: whatever made it to disk is the head start for
@@ -417,6 +538,7 @@ class Receiver {
       try {
         await sink.close();
       } catch (_) {}
+      _activePartPaths.remove(partFile.path);
       _failSession(sessionId, ps, fileId, '$e');
       return Response.internalServerError(body: 'write failed: $e');
     }
@@ -471,6 +593,11 @@ class Receiver {
   /// The most a rejected/aborted upload body is ever drained before we
   /// stop reading, both pre-stream ([_drainAndReject]) and mid-stream.
   static const _maxDrainBytes = 32 * 1024 * 1024;
+
+  /// How many written bytes accumulate before the upload loop awaits a
+  /// [IOSink.flush] — the disk-backpressure interval. Large enough that
+  /// the flush overhead is negligible, small enough to bound the heap.
+  static const _flushEveryBytes = 8 * 1024 * 1024;
 
   /// Cap for `/prepare-upload` bodies. The largest legitimate control
   /// payload: a huge folder transfer sends one [FileInfo] JSON entry per
@@ -711,13 +838,22 @@ class Receiver {
   }
 
   /// Where partial data for [info] accumulates between attempts. Keyed by
-  /// sanitized file name + size inside a hidden subfolder of the save dir,
-  /// so a fresh session for the same file finds the earlier bytes.
-  Future<File> _partFileFor(Directory saveDir, FileInfo info) async {
+  /// the sender's fingerprint + sanitized file name + size inside a hidden
+  /// subfolder of the save dir, so a fresh session for the same file from
+  /// the same peer finds the earlier bytes (sender file ids are re-minted
+  /// per pick, so they can't key resume), while two peers concurrently
+  /// sending an identically named file can never write into each other's
+  /// part file.
+  Future<File> _partFileFor(
+      Directory saveDir, Device peer, FileInfo info) async {
     final partsDir = Directory(p.join(saveDir.path, '.lanlink_parts'));
     await partsDir.create(recursive: true);
-    final safe = info.fileName.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
-    return File(p.join(partsDir.path, '$safe.${info.size}.part'));
+    final unsafe = RegExp(r'[\\/:*?"<>|]');
+    final safe = info.fileName.replaceAll(unsafe, '_');
+    var fp = peer.fingerprint.replaceAll(unsafe, '_');
+    if (fp.length > 16) fp = fp.substring(0, 16);
+    if (fp.isEmpty) fp = 'anon';
+    return File(p.join(partsDir.path, '$fp.$safe.${info.size}.part'));
   }
 
   Future<String> _uniqueOutputPath(Directory dir, String fileName) async {
@@ -755,6 +891,12 @@ class _PendingSession {
   /// Upload tokens that have already begun a write. Single-use: a second
   /// request presenting the same token is rejected with 401.
   final Set<String> consumedTokens = {};
+
+  /// Last time the sender showed signs of life (session creation, an
+  /// upload call, bytes arriving). Read by the idle reaper.
+  DateTime lastActivity = DateTime.now();
+
+  void touch() => lastActivity = DateTime.now();
 }
 
 /// Internal control-flow signal: the session left the active state while an
