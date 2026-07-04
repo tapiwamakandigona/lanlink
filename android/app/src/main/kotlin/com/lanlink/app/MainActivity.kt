@@ -66,6 +66,10 @@ class MainActivity : FlutterActivity() {
     /// joined hotspot dropping) can be pushed to the Dart side.
     private var wifiChannel: MethodChannel? = null
 
+    /// Held while the Dart discovery service runs so inbound UDP multicast
+    /// announcements aren't filtered by the Wi-Fi driver.
+    private var multicastLock: android.net.wifi.WifiManager.MulticastLock? = null
+
     /// Result waiting for the Settings "Add networks" save panel (Tier-2
     /// join fallback, API 30+).
     private var addNetworkResult: MethodChannel.Result? = null
@@ -296,6 +300,10 @@ class MainActivity : FlutterActivity() {
             }
         }
         stopLocalHotspot()
+        try {
+            if (multicastLock?.isHeld == true) multicastLock?.release()
+        } catch (_: Exception) {
+        }
         super.onDestroy()
     }
 
@@ -511,6 +519,30 @@ class MainActivity : FlutterActivity() {
                 }
                 "leave" -> {
                     leaveHotspotNetwork()
+                    result.success(true)
+                }
+                // Without a MulticastLock most Android Wi-Fi drivers filter
+                // inbound multicast, silently killing announce-based
+                // discovery. Held while the Dart discovery service runs.
+                "acquireMulticastLock" -> {
+                    try {
+                        if (multicastLock == null) {
+                            val wm = applicationContext
+                                .getSystemService(android.net.wifi.WifiManager::class.java)
+                            multicastLock = wm.createMulticastLock("LanLink:discovery")
+                                .apply { setReferenceCounted(false) }
+                        }
+                        if (multicastLock?.isHeld != true) multicastLock?.acquire()
+                        result.success(true)
+                    } catch (_: Exception) {
+                        result.success(false)
+                    }
+                }
+                "releaseMulticastLock" -> {
+                    try {
+                        if (multicastLock?.isHeld == true) multicastLock?.release()
+                    } catch (_: Exception) {
+                    }
                     result.success(true)
                 }
                 else -> result.notImplemented()

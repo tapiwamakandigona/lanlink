@@ -326,12 +326,15 @@ class _SendPageState extends State<SendPage> with WidgetsBindingObserver {
             }
             if (mounted) {
               setState(() => _progressLine = 'Joined their link — connecting…');
-              // Just joined their link: force a fresh sweep of the new
-              // network (incl. hotspot prefixes) instead of piggybacking
-              // on a stale in-flight scan.
-              await context
-                  .read<AppState>()
-                  .refreshDiscovery(userInitiated: true);
+              // Just joined their link: kick a fresh sweep of the new
+              // network (incl. hotspot prefixes) in the background so the
+              // radar fills in. Deliberately NOT awaited — a full
+              // multi-subnet sweep can take minutes, and we already know
+              // the peer's ip:port answered the reachability probe above.
+              // Awaiting it here left users staring at a spinner long
+              // enough to force-restart the app.
+              unawaited(
+                  context.read<AppState>().refreshDiscovery(userInitiated: true));
             }
         }
       }
@@ -354,9 +357,21 @@ class _SendPageState extends State<SendPage> with WidgetsBindingObserver {
   /// file staging.
   Future<void> _completeConnect(AppState state, ConnectPayload payload) async {
     final token = payload.token;
-    final peer = token != null && token.isNotEmpty
-        ? await state.connectWithToken(payload.hostPort, token)
-        : await state.probeManualPeer(payload.hostPort);
+    // Right after a hotspot join the very first request routinely fails
+    // (ARP still resolving, TLS session warm-up, radio waking from
+    // power-save) — one shot made the QR flow a coin toss. Retry a couple
+    // of times with a short pause; the receiver keeps a same-IP replay
+    // grace on consumed tokens, so a retry after a lost response succeeds
+    // instead of dying on 401.
+    Device? peer;
+    for (var i = 0; i < 3; i++) {
+      peer = token != null && token.isNotEmpty
+          ? await state.connectWithToken(payload.hostPort, token)
+          : await state.probeManualPeer(payload.hostPort);
+      if (peer != null || !mounted) break;
+      await Future<void>.delayed(const Duration(milliseconds: 1200));
+      if (!mounted) return;
+    }
     if (!mounted) return;
     setState(() => _connecting = false);
     if (peer == null) {

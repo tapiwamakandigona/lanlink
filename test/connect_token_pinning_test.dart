@@ -58,7 +58,11 @@ void main() {
       } catch (_) {}
     });
 
-    test('token connects once, replay is rejected with 401', () async {
+    test(
+        'consumed token allows a same-IP grace replay (lost-response retry) '
+        'but re-mint fires only once', () async {
+      var redeemedCalls = 0;
+      receiver.onConnectTokenRedeemed = () => redeemedCalls++;
       final token = receiver.issueConnectToken();
       final sender =
           Sender(localDeviceProvider: () => _device('me', 'me-fp', 1));
@@ -68,18 +72,59 @@ void main() {
       expect(device, isNotNull, reason: 'first redemption must succeed');
       expect(device!.fingerprint, testCertificate().fingerprint);
 
-      // Replay: consumed token must be rejected.
+      // Retry with the SAME token from the same IP inside the grace
+      // window: must succeed, so a sender whose 200 got lost right after
+      // a hotspot join can recover without restarting the app.
       final replay = await sender.connectWithToken(stub, token);
-      expect(replay, isNull);
+      expect(replay, isNotNull,
+          reason: 'same-IP replay inside the grace window must succeed');
+      expect(redeemedCalls, 1,
+          reason: 'a grace replay must not re-mint the QR a second time');
+    });
 
-      // And the wire status for the replay is specifically 401.
-      final dio = trustAllDio(BaseOptions(validateStatus: (_) => true));
-      final resp = await dio.post<String>(
-        'https://127.0.0.1:$port${LanLinkProtocol.routeConnect}',
-        queryParameters: {'token': token},
-        data: _device('me', 'me-fp', 1).toJson(),
+    test('consumed token replay is rejected with 401 once the grace expires',
+        () async {
+      // A dedicated receiver with a zero grace window so "expired" is
+      // immediate and the test needs no wall-clock waiting.
+      final tmp2 =
+          await Directory.systemTemp.createTemp('lanlink_token_test2_');
+      final strict = Receiver(
+        certificateProvider: testCertificateProvider,
+        localDeviceProvider: () =>
+            _device('receiver', testCertificate().fingerprint, 0),
+        saveDirProvider: () async => tmp2,
+        onAccept: (peer, files) async => AcceptDecision.reject(),
+        onSessionStarted: (_) {},
+        connectTokenReplayGrace: Duration.zero,
       );
-      expect(resp.statusCode, 401);
+      await strict.start();
+      final strictPort = strict.port!;
+      try {
+        final token = strict.issueConnectToken();
+        final sender =
+            Sender(localDeviceProvider: () => _device('me', 'me-fp', 1));
+        final stub = _device('127.0.0.1', '', strictPort);
+
+        expect(await sender.connectWithToken(stub, token), isNotNull);
+
+        // Replay after the grace expired: rejected.
+        final replay = await sender.connectWithToken(stub, token);
+        expect(replay, isNull);
+
+        // And the wire status for the replay is specifically 401.
+        final dio = trustAllDio(BaseOptions(validateStatus: (_) => true));
+        final resp = await dio.post<String>(
+          'https://127.0.0.1:$strictPort${LanLinkProtocol.routeConnect}',
+          queryParameters: {'token': token},
+          data: _device('me', 'me-fp', 1).toJson(),
+        );
+        expect(resp.statusCode, 401);
+      } finally {
+        await strict.stop();
+        try {
+          await tmp2.delete(recursive: true);
+        } catch (_) {}
+      }
     });
 
     test('minting a new token invalidates the previous one (401)', () async {

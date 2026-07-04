@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 
 import '../models/device.dart';
 import '../protocol/constants.dart';
@@ -60,6 +61,11 @@ class MulticastDiscovery {
     } catch (e) {
       if (kDebugMode) debugPrint('[discovery] failed to bind socket: $e');
     }
+    // Android Wi-Fi drivers filter inbound multicast unless the app holds
+    // a MulticastLock (the manifest permission alone does nothing). Without
+    // it, peer announcements never arrive and discovery silently degrades
+    // to subnet scans only.
+    await _setMulticastLock(true);
     await _joinGroupOnCurrentInterfaces();
 
     // Send the first announce immediately, then on a timer.
@@ -81,6 +87,23 @@ class MulticastDiscovery {
       } catch (_) {}
     }
     _sockets.clear();
+    await _setMulticastLock(false);
+  }
+
+  /// Acquires/releases the Android multicast lock via the `lanlink/wifi`
+  /// channel. A no-op everywhere else (and under `flutter test`, where the
+  /// channel is not wired).
+  static const _wifiChannel = MethodChannel('lanlink/wifi');
+
+  Future<void> _setMulticastLock(bool acquire) async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _wifiChannel.invokeMethod<bool>(
+        acquire ? 'acquireMulticastLock' : 'releaseMulticastLock',
+      );
+    } catch (_) {
+      // Best-effort: discovery still works via subnet scans without it.
+    }
   }
 
   /// Triggers an immediate announce. Useful after settings change.

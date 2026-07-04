@@ -67,25 +67,49 @@ void main() {
   });
 
   test('(a) single-use connect token: reuse is rejected with 401', () async {
-    final token = receiver.issueConnectToken();
-    final sender =
-        Sender(localDeviceProvider: () => device('peer-b-sender', 'fp-b', 1));
-    final stub = device('unknown', '', port);
-
-    // First redemption over a real socket succeeds…
-    final first = await sender.connectWithToken(stub, token);
-    expect(first, isNotNull);
-    expect(first!.fingerprint, receiverFp);
-
-    // …the replay is rejected, specifically with a 401 on the wire.
-    expect(await sender.connectWithToken(stub, token), isNull);
-    final resp = await dio.post<String>(
-      LanLinkProtocol.routeConnect,
-      queryParameters: {'token': token},
-      data: device('peer-b-sender', 'fp-b', 1).toJson(),
+    // A dedicated receiver with a zero replay-grace window: the production
+    // default allows the ORIGINAL redeemer (same IP) to retry briefly so a
+    // lost 200 right after a hotspot join isn't fatal, which on loopback
+    // would make every replay look legitimate. Zero grace restores strict
+    // single-use so the security property stays observable.
+    final strict = Receiver(
+      certificateProvider: testCertificateProvider,
+      localDeviceProvider: () => device('peer-a-receiver', receiverFp, 0),
+      saveDirProvider: () async => saveDir,
+      onAccept: (peer, files) async =>
+          AcceptDecision.accept(files.map((f) => f.id).toSet()),
+      onSessionStarted: (_) {},
+      connectTokenReplayGrace: Duration.zero,
     );
-    expect(resp.statusCode, 401,
-        reason: 'a consumed connect token must be dead on replay');
+    await strict.start();
+    final strictPort = strict.port!;
+    final strictDio = trustAllDio(BaseOptions(
+      baseUrl: 'https://127.0.0.1:$strictPort',
+      validateStatus: (_) => true,
+    ));
+    try {
+      final token = strict.issueConnectToken();
+      final sender = Sender(
+          localDeviceProvider: () => device('peer-b-sender', 'fp-b', 1));
+      final stub = device('unknown', '', strictPort);
+
+      // First redemption over a real socket succeeds…
+      final first = await sender.connectWithToken(stub, token);
+      expect(first, isNotNull);
+      expect(first!.fingerprint, receiverFp);
+
+      // …the replay is rejected, specifically with a 401 on the wire.
+      expect(await sender.connectWithToken(stub, token), isNull);
+      final resp = await strictDio.post<String>(
+        LanLinkProtocol.routeConnect,
+        queryParameters: {'token': token},
+        data: device('peer-b-sender', 'fp-b', 1).toJson(),
+      );
+      expect(resp.statusCode, 401,
+          reason: 'a consumed connect token must be dead on replay');
+    } finally {
+      await strict.stop();
+    }
   }, timeout: const Timeout(Duration(seconds: 30)));
 
   test('(b) wrong-fingerprint peer is never treated as the pinned device',

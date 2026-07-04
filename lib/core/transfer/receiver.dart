@@ -52,6 +52,7 @@ class Receiver {
     this.onPeerSeen,
     this.idleTimeout = const Duration(minutes: 5),
     this.certificateProvider = DeviceCertificate.load,
+    this.connectTokenReplayGrace = const Duration(seconds: 45),
   });
 
   /// Supplies the TLS identity the server presents. Defaults to the
@@ -730,6 +731,20 @@ class Receiver {
   /// displayed (screenshotted, shoulder-surfed) QR is dead.
   final Set<String> _connectTokens = {};
 
+  /// Recently consumed connect tokens, kept briefly so a sender whose 200
+  /// response was lost in transit (fresh hotspot join, TLS warm-up, radio
+  /// power-save) can retry the SAME token instead of dying on 401 until
+  /// the user restarts both apps. Keyed by token; the value pins the
+  /// remote IP that consumed it plus an expiry, so only the original
+  /// redeemer — and only for a short window — may replay.
+  final Map<String, _RedeemedToken> _redeemedTokens = {};
+
+  /// How long a consumed connect token may be replayed by the same remote
+  /// IP. Long enough to cover a couple of client-side retry attempts,
+  /// short enough that a screenshotted QR stays effectively single-use.
+  /// Injectable so tests can shrink it.
+  final Duration connectTokenReplayGrace;
+
   /// Called after a connect token is successfully redeemed, so the UI can
   /// re-mint and keep the on-screen QR valid.
   void Function()? onConnectTokenRedeemed;
@@ -743,7 +758,13 @@ class Receiver {
     _connectTokens
       ..clear()
       ..add(token);
+    _pruneRedeemedTokens();
     return token;
+  }
+
+  void _pruneRedeemedTokens({DateTime? now}) {
+    final t = now ?? DateTime.now();
+    _redeemedTokens.removeWhere((_, v) => t.isAfter(v.expires));
   }
 
   /// Whether [token] is still redeemable (i.e. it is the newest minted,
@@ -755,11 +776,29 @@ class Receiver {
     if (token == null || token.isEmpty) {
       return Response.badRequest(body: 'missing token');
     }
-    if (!_connectTokens.remove(token)) {
-      return Response(401, body: 'invalid or already-used connect token');
+    final connInfo0 =
+        req.context['shelf.io.connection_info'] as HttpConnectionInfo?;
+    final remoteIp = connInfo0?.remoteAddress.address ?? '';
+    _pruneRedeemedTokens();
+    final fresh = _connectTokens.remove(token);
+    if (!fresh) {
+      // Grace replay: the original redeemer retrying because our earlier
+      // 200 never reached it. Anyone else (or an expired retry) gets 401.
+      final redeemed = _redeemedTokens[token];
+      final sameCaller = redeemed != null &&
+          redeemed.remoteIp.isNotEmpty &&
+          redeemed.remoteIp == remoteIp;
+      if (!sameCaller) {
+        return Response(401, body: 'invalid or already-used connect token');
+      }
+    } else {
+      _redeemedTokens[token] = _RedeemedToken(
+        remoteIp: remoteIp,
+        expires: DateTime.now().add(connectTokenReplayGrace),
+      );
+      // Token consumed: let the UI re-mint so the displayed QR stays valid.
+      onConnectTokenRedeemed?.call();
     }
-    // Token consumed: let the UI re-mint so the displayed QR stays valid.
-    onConnectTokenRedeemed?.call();
     // Token accepted (and consumed): behave like /info so the caller learns
     // who we are, and surface the caller as a peer like /register does.
     // Read outside the try: an oversized body aborts via a shelf
@@ -921,4 +960,13 @@ class _PendingSession {
 /// upload was streaming in, so the write must stop immediately.
 class _SessionNoLongerActive implements Exception {
   const _SessionNoLongerActive();
+}
+
+/// Bookkeeping for a consumed connect token still inside its replay-grace
+/// window (see [Receiver.connectTokenReplayGrace]).
+class _RedeemedToken {
+  const _RedeemedToken({required this.remoteIp, required this.expires});
+
+  final String remoteIp;
+  final DateTime expires;
 }
