@@ -51,6 +51,24 @@ class MainActivity : FlutterActivity() {
     /// hosting a direct link. Closing it tears the hotspot down.
     private var hotspotReservation: WifiManager.LocalOnlyHotspotReservation? = null
 
+    // ----- SAF document picker + zero-copy content streaming -----
+
+    /// Pending Dart result for an in-flight ACTION_OPEN_DOCUMENT round-trip.
+    private var pickFilesResult: MethodChannel.Result? = null
+
+    /// Open content streams for the sender, keyed by handle. Reads run on
+    /// [contentStreamExecutor] (a single thread — the Dart side awaits each
+    /// chunk sequentially) so the UI thread never blocks on disk I/O.
+    private val contentStreams = HashMap<Int, java.io.InputStream>()
+    private var nextStreamId = 1
+    private val contentStreamExecutor =
+        java.util.concurrent.Executors.newSingleThreadExecutor()
+
+    /// Bounded pool for thumbnail decodes: a Thread per request let a fast
+    /// scroll spawn dozens of concurrent decodes that starved disk I/O.
+    private val thumbnailExecutor =
+        java.util.concurrent.Executors.newFixedThreadPool(3)
+
     // ----- Programmatic hotspot join (Simple-mode one-scan connect) -----
 
     private var wifiNetworkCallback: android.net.ConnectivityManager.NetworkCallback? = null
@@ -238,6 +256,10 @@ class MainActivity : FlutterActivity() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == PICK_FILES_REQUEST) {
+            settlePickFiles(resultCode, data)
+            return
+        }
         if (requestCode != ADD_NETWORKS_REQUEST) return
         val pending = addNetworkResult ?: return
         addNetworkResult = null
@@ -279,6 +301,7 @@ class MainActivity : FlutterActivity() {
     companion object {
         private const val HOTSPOT_PERMISSION_REQUEST = 7431
         private const val ADD_NETWORKS_REQUEST = 7432
+        private const val PICK_FILES_REQUEST = 7433
         private const val JOIN_TIMEOUT_MS = 60_000L
     }
     private var shareChannel: MethodChannel? = null
@@ -374,14 +397,106 @@ class MainActivity : FlutterActivity() {
                             result.success(null)
                             return@setMethodCallHandler
                         }
-                        Thread {
+                        thumbnailExecutor.execute {
                             val bytes = try {
                                 mediaThumbnail(id, isVideo)
                             } catch (_: Exception) {
                                 null
                             }
                             runOnUiThread { result.success(bytes) }
-                        }.start()
+                        }
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+
+        // Storage Access Framework picker + zero-copy content streaming.
+        // Unlike the file_picker plugin — which copies every picked file
+        // into the app cache before returning (minutes of silent wait for a
+        // multi-GB video, plus a duplicate on disk) — this hands back the
+        // content URI immediately and lets the sender stream bytes straight
+        // from the source via openStream/readChunk/closeStream.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "lanlink/saf")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "pickFiles" -> launchPickFiles(result)
+                    "openStream" -> {
+                        val uri = call.argument<String>("uri")
+                        val offset = (call.argument<Number>("offset"))?.toLong() ?: 0L
+                        if (uri == null) {
+                            result.error("bad_args", "uri is required", null)
+                            return@setMethodCallHandler
+                        }
+                        contentStreamExecutor.execute {
+                            val opened: Pair<Int, String?> = try {
+                                val stream = contentResolver.openInputStream(Uri.parse(uri))
+                                if (stream == null) {
+                                    Pair(-1, "Could not open $uri")
+                                } else {
+                                    skipFully(stream, offset)
+                                    val id = synchronized(contentStreams) {
+                                        val id = nextStreamId++
+                                        contentStreams[id] = stream
+                                        id
+                                    }
+                                    Pair(id, null)
+                                }
+                            } catch (e: Exception) {
+                                Pair(-1, e.toString())
+                            }
+                            runOnUiThread {
+                                if (opened.first > 0) {
+                                    result.success(opened.first)
+                                } else {
+                                    result.error("open_failed", opened.second, null)
+                                }
+                            }
+                        }
+                    }
+                    "readChunk" -> {
+                        val id = (call.argument<Number>("id"))?.toInt()
+                        val max = (call.argument<Number>("max"))?.toInt() ?: 0
+                        val stream = id?.let { synchronized(contentStreams) { contentStreams[it] } }
+                        if (stream == null || max <= 0) {
+                            result.error("bad_args", "unknown stream or bad max", null)
+                            return@setMethodCallHandler
+                        }
+                        contentStreamExecutor.execute {
+                            val outcome: Pair<ByteArray?, String?> = try {
+                                val buf = ByteArray(max)
+                                var n = 0
+                                while (n < max) {
+                                    val r = stream.read(buf, n, max - n)
+                                    if (r < 0) break
+                                    n += r
+                                }
+                                when {
+                                    n == 0 -> Pair(null, null) // EOF
+                                    n == max -> Pair(buf, null)
+                                    else -> Pair(buf.copyOf(n), null)
+                                }
+                            } catch (e: Exception) {
+                                Pair(null, e.toString())
+                            }
+                            runOnUiThread {
+                                if (outcome.second != null) {
+                                    result.error("read_failed", outcome.second, null)
+                                } else {
+                                    result.success(outcome.first)
+                                }
+                            }
+                        }
+                    }
+                    "closeStream" -> {
+                        val id = (call.argument<Number>("id"))?.toInt()
+                        val stream = id?.let { synchronized(contentStreams) { contentStreams.remove(it) } }
+                        contentStreamExecutor.execute {
+                            try {
+                                stream?.close()
+                            } catch (_: Exception) {
+                            }
+                        }
+                        result.success(null)
                     }
                     else -> result.notImplemented()
                 }
@@ -691,10 +806,113 @@ class MainActivity : FlutterActivity() {
 
     // ----- Media library (photos + videos) for the share picker -----
 
-    /// Lists every image and video in MediaStore, newest first. Only items
-    /// whose backing file is directly readable are returned (the sender
-    /// streams from the file path), which is the normal case for the
-    /// primary external volume once the media permission is granted.
+    /// Launches the system document picker (ACTION_OPEN_DOCUMENT, multi-
+    /// select). Resolves with a list of {uri, name, size} maps — no bytes
+    /// are copied anywhere.
+    private fun launchPickFiles(result: MethodChannel.Result) {
+        // A second pick while one is in flight: settle the stale one empty.
+        pickFilesResult?.let { stale ->
+            pickFilesResult = null
+            try {
+                stale.success(emptyList<Map<String, Any>>())
+            } catch (_: Exception) {
+            }
+        }
+        pickFilesResult = result
+        try {
+            val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "*/*"
+                putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+            }
+            startActivityForResult(intent, PICK_FILES_REQUEST)
+        } catch (e: Exception) {
+            pickFilesResult = null
+            result.error("pick_failed", e.toString(), null)
+        }
+    }
+
+    private fun settlePickFiles(resultCode: Int, data: Intent?) {
+        val pending = pickFilesResult ?: return
+        pickFilesResult = null
+        if (resultCode != RESULT_OK || data == null) {
+            pending.success(emptyList<Map<String, Any>>())
+            return
+        }
+        val uris = mutableListOf<Uri>()
+        data.clipData?.let { clip ->
+            for (i in 0 until clip.itemCount) {
+                clip.getItemAt(i)?.uri?.let { uris.add(it) }
+            }
+        }
+        if (uris.isEmpty()) data.data?.let { uris.add(it) }
+        // Resolving names/sizes hits the ContentResolver — keep it off the
+        // UI thread (large multi-selects across slow providers).
+        Thread {
+            val out = mutableListOf<Map<String, Any>>()
+            for (uri in uris) {
+                try {
+                    // Keep read access across an activity restart so a queued
+                    // send still works. Best-effort: some providers refuse.
+                    contentResolver.takePersistableUriPermission(
+                        uri, Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                    )
+                } catch (_: Exception) {
+                }
+                var name = uri.lastPathSegment ?: "file"
+                var size = -1L
+                try {
+                    contentResolver.query(uri, null, null, null, null)?.use { c ->
+                        if (c.moveToFirst()) {
+                            val nameCol = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                            if (nameCol >= 0) c.getString(nameCol)?.let { name = it }
+                            val sizeCol = c.getColumnIndex(OpenableColumns.SIZE)
+                            if (sizeCol >= 0 && !c.isNull(sizeCol)) size = c.getLong(sizeCol)
+                        }
+                    }
+                } catch (_: Exception) {
+                }
+                if (size < 0) continue // unstreamable (e.g. virtual document)
+                out += mapOf(
+                    "uri" to uri.toString(),
+                    "name" to name,
+                    "size" to size,
+                )
+            }
+            runOnUiThread {
+                try {
+                    pending.success(out)
+                } catch (_: Exception) {
+                }
+            }
+        }.start()
+    }
+
+    /// InputStream.skip() may skip fewer bytes than asked; loop until the
+    /// requested offset is reached (resume support).
+    private fun skipFully(stream: java.io.InputStream, offset: Long) {
+        var remaining = offset
+        while (remaining > 0) {
+            val skipped = stream.skip(remaining)
+            if (skipped > 0) {
+                remaining -= skipped
+                continue
+            }
+            // skip() made no progress — fall back to reading into a scratch
+            // buffer so providers with non-seekable pipes still work.
+            val scratch = ByteArray(minOf(remaining, 64L * 1024L).toInt())
+            val r = stream.read(scratch)
+            if (r < 0) return
+            remaining -= r
+        }
+    }
+
+    /// Lists every image and video in MediaStore, newest first.
+    ///
+    /// Deliberately does NOT stat every backing file: File.exists()/canRead()
+    /// per row cost seconds on a multi-thousand-item library and made the
+    /// gallery feel stuck. Readability of the handful of *selected* items is
+    /// verified at staging time instead (share_picker_page).
     private fun listMediaItems(): List<Map<String, Any>> {
         val out = mutableListOf<Map<String, Any>>()
         out += queryMedia(
@@ -719,7 +937,8 @@ class MainActivity : FlutterActivity() {
             MediaStore.MediaColumns.BUCKET_DISPLAY_NAME,
         )
         val items = mutableListOf<Map<String, Any>>()
-        contentResolver.query(collection, projection, null, null, null)?.use { cursor ->
+        val sortOrder = "${MediaStore.MediaColumns.DATE_MODIFIED} DESC"
+        contentResolver.query(collection, projection, null, null, sortOrder)?.use { cursor ->
             val idCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
             val nameCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
             val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
@@ -728,13 +947,11 @@ class MainActivity : FlutterActivity() {
             val bucketCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.BUCKET_DISPLAY_NAME)
             while (cursor.moveToNext()) {
                 val path = cursor.getString(dataCol) ?: continue
-                val file = File(path)
-                if (!file.exists() || !file.canRead()) continue
-                val size = cursor.getLong(sizeCol).takeIf { it > 0 } ?: file.length()
+                val size = cursor.getLong(sizeCol)
                 if (size <= 0) continue
                 items += mapOf(
                     "id" to cursor.getLong(idCol),
-                    "name" to (cursor.getString(nameCol) ?: file.name),
+                    "name" to (cursor.getString(nameCol) ?: File(path).name),
                     "path" to path,
                     "size" to size,
                     "isVideo" to isVideo,

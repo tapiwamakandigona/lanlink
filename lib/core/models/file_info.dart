@@ -10,6 +10,7 @@ class FileInfo {
     this.sha256,
     this.preview,
     this.localPath,
+    this.contentUri,
   });
 
   /// Sender-chosen ID, unique within a session.
@@ -31,6 +32,11 @@ class FileInfo {
   /// fills in the eventual save path after acceptance.
   final String? localPath;
 
+  /// Android `content://` URI (sender-side alternative to [localPath]):
+  /// SAF picks stream straight from the source provider instead of copying
+  /// the file into the app cache first. Local-only — never on the wire.
+  final String? contentUri;
+
   Map<String, dynamic> toJson() => {
         'id': id,
         'fileName': fileName,
@@ -49,7 +55,7 @@ class FileInfo {
         preview: json['preview'] as String?,
       );
 
-  FileInfo copyWith({String? localPath}) => FileInfo(
+  FileInfo copyWith({String? localPath, String? contentUri}) => FileInfo(
         id: id,
         fileName: fileName,
         size: size,
@@ -57,6 +63,7 @@ class FileInfo {
         sha256: sha256,
         preview: preview,
         localPath: localPath ?? this.localPath,
+        contentUri: contentUri ?? this.contentUri,
       );
 }
 

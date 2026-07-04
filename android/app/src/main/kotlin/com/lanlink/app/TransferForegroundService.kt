@@ -100,7 +100,15 @@ class TransferForegroundService : Service() {
         try {
             if (wifiLock == null) {
                 val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-                val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                // WIFI_MODE_FULL_LOW_LATENCY is only honoured while the
+                // screen is on AND the acquiring app is in the foreground —
+                // exactly the opposite of a background transfer (user pockets
+                // the phone or watches the receiving PC), where Wi-Fi
+                // power-save then throttles throughput to tens of KB/s.
+                // HIGH_PERF disables power-save regardless of screen state.
+                // It is deprecated from API 34, where the platform treats it
+                // as LOW_LATENCY anyway, so use it everywhere below 34.
+                val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                     WifiManager.WIFI_MODE_FULL_LOW_LATENCY
                 } else {
                     @Suppress("DEPRECATION")
