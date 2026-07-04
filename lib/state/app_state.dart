@@ -1001,7 +1001,9 @@ class AppState extends ChangeNotifier {
       return false;
     }
     return session.files.values.any(
-      (p) => (p.file.localPath ?? '').isNotEmpty,
+      (p) =>
+          (p.file.localPath ?? '').isNotEmpty ||
+          (p.file.contentUri ?? '').isNotEmpty,
     );
   }
 
@@ -1012,7 +1014,8 @@ class AppState extends ChangeNotifier {
     if (session.direction != TransferDirection.send) return null;
     final files = session.files.values
         .map((p) => p.file)
-        .where((f) => (f.localPath ?? '').isNotEmpty)
+        .where((f) =>
+            (f.localPath ?? '').isNotEmpty || (f.contentUri ?? '').isNotEmpty)
         .toList();
     if (files.isEmpty) return null;
     EventLog.instance.add(
