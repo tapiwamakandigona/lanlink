@@ -333,8 +333,9 @@ class _SendPageState extends State<SendPage> with WidgetsBindingObserver {
               // the peer's ip:port answered the reachability probe above.
               // Awaiting it here left users staring at a spinner long
               // enough to force-restart the app.
-              unawaited(
-                  context.read<AppState>().refreshDiscovery(userInitiated: true));
+              unawaited(context
+                  .read<AppState>()
+                  .refreshDiscovery(userInitiated: true));
             }
         }
       }

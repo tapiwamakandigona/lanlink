@@ -89,8 +89,8 @@ void main() {
     ));
     try {
       final token = strict.issueConnectToken();
-      final sender = Sender(
-          localDeviceProvider: () => device('peer-b-sender', 'fp-b', 1));
+      final sender =
+          Sender(localDeviceProvider: () => device('peer-b-sender', 'fp-b', 1));
       final stub = device('unknown', '', strictPort);
 
       // First redemption over a real socket succeeds…
