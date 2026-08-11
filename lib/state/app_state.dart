@@ -574,6 +574,10 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  /// Public accessor for the effective save directory — used by the
+  /// consent flow's free-space check. Same resolution as receiving.
+  Future<Directory> resolveSaveDir() => _resolveSaveDir();
+
   Future<Directory> _resolveSaveDir() async {
     // Android always writes to the app's private external files dir first;
     // the receiver then republishes the finished file into the user-visible

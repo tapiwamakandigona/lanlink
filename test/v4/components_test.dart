@@ -416,6 +416,24 @@ void main() {
       expect(find.byType(VerifiedBadge), findsNothing);
     });
 
+    testWidgets('warning line renders when provided', (tester) async {
+      await tester.pumpWidget(_host(ConsentSheet(
+        data: const ConsentRequestData(
+          senderName: 'Sunny-Heron',
+          fileCount: 1,
+          totalSize: '1.2 GB',
+          warning: 'Low on space: only 800 MB free where files are saved.',
+        ),
+        onAccept: () {},
+        onDecline: () {},
+      )));
+      await tester.pump(); // let the warning FutureBuilder resolve
+      expect(find.textContaining('Low on space'), findsOneWidget);
+      expect(find.byIcon(Icons.warning_amber_rounded), findsOneWidget);
+      // Still a warning, not a block.
+      expect(find.text('Accept'), findsOneWidget);
+    });
+
     testWidgets('Accept and Decline fire their callbacks', (tester) async {
       var accepted = 0, declined = 0;
       await tester.pumpWidget(_host(ConsentSheet(
