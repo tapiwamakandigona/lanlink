@@ -73,6 +73,33 @@ void main() {
       expect(msg, contains('418'));
     });
   });
+
+  group('storage errors', () {
+    test('ENOSPC (posix 28) says out of space', () {
+      final msg = friendlyTransferError(const FileSystemException(
+          'write failed', '/sdcard/x', OSError('No space left on device', 28)));
+      expect(msg, contains('Not enough storage space'));
+    });
+
+    test('Windows disk full (112) says out of space', () {
+      final msg = friendlyTransferError(const FileSystemException(
+          'write failed', r'C:\x', OSError('There is not enough space', 112)));
+      expect(msg, contains('Not enough storage space'));
+    });
+
+    test('permission denied points to Settings', () {
+      final msg = friendlyTransferError(const FileSystemException(
+          'cannot open', '/root/x', OSError('Permission denied', 13)));
+      expect(msg, contains('save folder in Settings'));
+    });
+
+    test('other storage errors keep the OS detail', () {
+      final msg = friendlyTransferError(const FileSystemException(
+          'boom', '/x', OSError('Input/output error', 5)));
+      expect(msg, contains('storage error'));
+      expect(msg, contains('Input/output error'));
+    });
+  });
 }
 
 class _BlankError {
