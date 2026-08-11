@@ -136,12 +136,25 @@ class MulticastDiscovery {
     final peer = Device.fromJson(payload, ip: fromIp);
     onPeer(peer);
 
-    // If the peer didn't explicitly announce ("register" style), send them
-    // our own announce so they discover us too.
-    if (peer.announcement == false) {
-      _sendAnnounceTo(datagram.address, datagram.port);
+    // LocalSend register mechanism: a *fresh announcement* (announce=true)
+    // gets a unicast response so the newcomer learns us immediately instead
+    // of waiting up to announceInterval for our next periodic announce.
+    // The response carries announce=false, which is exactly why we must
+    // never reply to announce=false packets ourselves — replying to
+    // responses ping-pongs forever against a spec-compliant LocalSend.
+    //
+    // (Until 2026-08-11 this condition was inverted: we ignored fresh
+    // announcements — adding up to 5s of discovery latency — and replied
+    // to responses instead.)
+    if (shouldReplyTo(peer)) {
+      _sendResponseTo(datagram.address, datagram.port);
     }
   }
+
+  /// True when [peer]'s packet is a fresh announcement that deserves a
+  /// unicast response (never respond to responses — loop risk).
+  @visibleForTesting
+  bool shouldReplyTo(Device peer) => peer.announcement;
 
   /// The JSON payload every announcement carries. Built fresh from
   /// [selfDeviceProvider] on each call so the announced port always matches
@@ -175,8 +188,18 @@ class MulticastDiscovery {
     }
   }
 
-  void _sendAnnounceTo(InternetAddress addr, int port) {
-    final payload = utf8.encode(json.encode(announcementJson()));
+  /// The unicast reply to a fresh announcement: same device payload but
+  /// with `announce` unset (false), marking it a response per the LocalSend
+  /// v2 discovery flow.
+  @visibleForTesting
+  Map<String, dynamic> responseJson() {
+    final j = announcementJson();
+    j.remove('announce');
+    return j;
+  }
+
+  void _sendResponseTo(InternetAddress addr, int port) {
+    final payload = utf8.encode(json.encode(responseJson()));
     for (final s in _sockets) {
       try {
         s.send(payload, addr, port);

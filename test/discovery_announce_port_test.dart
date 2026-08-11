@@ -38,4 +38,45 @@ void main() {
             discovery.announcementJson()['announcement'],
         isNotNull);
   });
+  test(
+      'register mechanism: fresh announcements get a reply, responses do not '
+      '(inverted before 2026-08-11 — cost up to 5s of discovery latency and '
+      'risked a UDP reply loop against LocalSend)', () {
+    var port = 53317;
+    final discovery = MulticastDiscovery(
+      selfDeviceProvider: () => Device(
+        alias: 'me',
+        version: LanLinkProtocol.protocolVersion,
+        deviceModel: 'unit',
+        deviceType: LanLinkProtocol.deviceTypeHeadless,
+        fingerprint: 'fp-self',
+        port: port,
+        protocol: 'http',
+        ip: '',
+      ),
+      onPeer: (_) {},
+    );
+
+    Device packet({required bool announce}) => Device(
+          alias: 'them',
+          version: LanLinkProtocol.protocolVersion,
+          deviceModel: 'unit',
+          deviceType: LanLinkProtocol.deviceTypeHeadless,
+          fingerprint: 'fp-peer',
+          port: 53317,
+          protocol: 'http',
+          ip: '192.168.1.2',
+          announcement: announce,
+        );
+
+    expect(discovery.shouldReplyTo(packet(announce: true)), isTrue,
+        reason: 'a fresh announcement must be answered immediately');
+    expect(discovery.shouldReplyTo(packet(announce: false)), isFalse,
+        reason: 'never reply to a response — reply loop');
+
+    // And the reply itself must be marked as a response, not an announce.
+    expect(discovery.responseJson()['announce'], isNot(true));
+    expect(discovery.announcementJson()['announce'], isTrue);
+  });
+
 }
