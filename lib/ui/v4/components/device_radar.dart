@@ -186,14 +186,19 @@ class _EmptyRadar extends StatelessWidget {
                 size: 24, color: scheme.onSurfaceVariant),
           const SizedBox(height: VSpace.x3),
           Text(
-            searching ? 'Looking around…' : 'No devices nearby',
+            searching ? 'Looking around…' : 'No devices found yet',
             style: VType.bodyStrong.copyWith(color: scheme.onSurface),
           ),
           const SizedBox(height: VSpace.x1),
           Text(
             searching
                 ? 'Devices on your network will appear here.'
-                : 'Make sure the other device has LanLink open.',
+                // Passive discovery keeps listening even when no sweep is
+                // in flight — this state is "not found yet", not "gave
+                // up". Say what actually unblocks people.
+                : 'Make sure both devices are on the same Wi-Fi and the '
+                    'other device has LanLink open — or scan their code '
+                    'below.',
             style: VType.caption.copyWith(color: scheme.onSurfaceVariant),
             textAlign: TextAlign.center,
           ),

@@ -251,7 +251,9 @@ void main() {
         (tester) async {
       await tester.pumpWidget(_host(
           DeviceRadar(peers: const [], searching: false, onPeerTap: (_) {})));
-      expect(find.text('No devices nearby'), findsOneWidget);
+      expect(find.text('No devices found yet'), findsOneWidget);
+      // The empty state must coach, not dead-end: same Wi-Fi + QR escape.
+      expect(find.textContaining('same Wi-Fi'), findsOneWidget);
       expect(find.byType(CircularProgressIndicator), findsNothing);
     });
 
