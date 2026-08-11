@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:uuid/uuid.dart';
 
@@ -11,6 +12,7 @@ import '../../core/discovery/connect_payload.dart';
 import '../../core/models/device.dart';
 import '../../core/models/file_info.dart';
 import '../../core/platform/wifi_joiner.dart';
+import '../../core/util/text_payload.dart';
 import '../../state/app_state.dart';
 import '../picker/share_picker_page.dart';
 import '../widgets/desktop_drop_region.dart';
@@ -314,6 +316,45 @@ class _SendPageState extends State<SendPage> {
     ];
   }
 
+  /// "Send a message" — stages a typed snippet (link, password, note) as
+  /// a small .txt so it can travel over the same file pipeline.
+  Future<void> _composeMessage() async {
+    final ctrl = TextEditingController();
+    final text = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Send a message'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          minLines: 2,
+          maxLines: 6,
+          textInputAction: TextInputAction.newline,
+          decoration: const InputDecoration(
+            hintText: 'Type or paste a link, password, or note…',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(ctrl.text),
+            child: const Text('Stage message'),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    final trimmed = text?.trim() ?? '';
+    if (trimmed.isEmpty || !mounted) return;
+    final tempDir = await getTemporaryDirectory();
+    final info = await stageTextSnippet(trimmed, tempDir);
+    if (!mounted) return;
+    setState(() => _staged = [info]);
+  }
+
   void _showError(String message) {
     if (!mounted) return;
     setState(() {
@@ -348,7 +389,9 @@ class _SendPageState extends State<SendPage> {
                   if (_staged.isNotEmpty) ...[
                     Text(
                       _staged.length == 1
-                          ? 'Ready to send ${_staged.first.fileName}'
+                          ? (_staged.first.fileType == 'text'
+                              ? 'Ready to send your message'
+                              : 'Ready to send ${_staged.first.fileName}')
                           : 'Ready to send ${_staged.length} files',
                       style: VType.bodyStrong.copyWith(color: scheme.onSurface),
                       textAlign: TextAlign.center,
@@ -363,6 +406,19 @@ class _SendPageState extends State<SendPage> {
                     style:
                         VType.caption.copyWith(color: scheme.onSurfaceVariant),
                   ),
+                  if (_staged.isEmpty)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        onPressed: _busy ? null : () => _composeMessage(),
+                        icon: const Icon(Icons.chat_bubble_outline, size: 18),
+                        label: const Text('Send a message instead'),
+                        style: TextButton.styleFrom(
+                          padding: EdgeInsets.zero,
+                          visualDensity: VisualDensity.compact,
+                        ),
+                      ),
+                    ),
                   const SizedBox(height: VSpace.x4),
                   DeviceRadar(
                     peers: [
