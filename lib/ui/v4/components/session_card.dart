@@ -22,6 +22,7 @@ class SessionCard extends StatelessWidget {
     this.onRetry,
     this.onDismiss,
     this.onLocate,
+    this.onOpen,
   });
 
   /// What to render.
@@ -40,6 +41,11 @@ class SessionCard extends StatelessWidget {
   /// Optional "Where is it?" action for completed receives; shown only
   /// when non-null and the session finished successfully.
   final VoidCallback? onLocate;
+
+  /// Optional one-tap "Open" for a completed single-file receive on
+  /// platforms that can open it directly (desktop). Primary action when
+  /// present — AirDrop/Quick Share open the file straight away.
+  final VoidCallback? onOpen;
 
   @override
   Widget build(BuildContext context) {
@@ -205,6 +211,12 @@ class SessionCard extends StatelessWidget {
                     onPressed: onLocate,
                     icon: const Icon(Icons.folder_open_outlined, size: 18),
                     label: const Text('Where is it?'),
+                  ),
+                if (status == SessionStatus.sent && onOpen != null)
+                  FilledButton.tonalIcon(
+                    onPressed: onOpen,
+                    icon: const Icon(Icons.open_in_new, size: 18),
+                    label: const Text('Open'),
                   ),
                 if (status == SessionStatus.sent ||
                     status == SessionStatus.cancelled)
