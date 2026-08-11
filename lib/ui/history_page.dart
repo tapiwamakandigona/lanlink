@@ -6,6 +6,7 @@ import '../core/settings/app_settings.dart';
 import '../core/util/format.dart';
 import '../state/app_state.dart';
 import 'shell/saved_location.dart';
+import 'v4/v4.dart';
 
 class HistoryPage extends StatelessWidget {
   const HistoryPage({super.key});
@@ -90,7 +91,9 @@ class HistoryPage extends StatelessWidget {
         icon = isSend
             ? Icons.cloud_upload_outlined
             : Icons.cloud_download_outlined;
-        color = Colors.green;
+        // Single-green rule: terminal success uses the semantic palette.
+        color = theme.extension<EmberSemantics>()?.success ??
+            theme.colorScheme.primary;
         status = isSend ? 'Sent' : 'Received';
         break;
       case TransferStatus.failed:
@@ -126,18 +129,32 @@ class HistoryPage extends StatelessWidget {
                 label: const Text('Retry'),
                 onPressed: () => _retry(context, s),
               )
-            : (s.direction == TransferDirection.receive &&
+            : s.direction == TransferDirection.receive &&
                     s.status == TransferStatus.completed
                 ? TextButton.icon(
                     icon: const Icon(Icons.folder_open_outlined, size: 18),
                     label: const Text('Where is it?'),
                     onPressed: () => showSavedLocationDialog(context, s),
                   )
-                : null),
+                : _canSendAgain(s)
+                    ? TextButton.icon(
+                        icon: const Icon(Icons.send_outlined, size: 18),
+                        label: const Text('Send again'),
+                        onPressed: () => _retry(context, s),
+                      )
+                    : null,
         isThreeLine: false,
       ),
     );
   }
+
+  /// A completed outgoing send whose source files still exist can be
+  /// re-sent in one tap (ShareIt/Quick Share both offer this; re-picking
+  /// the same files is pure friction).
+  bool _canSendAgain(TransferSession s) =>
+      s.direction == TransferDirection.send &&
+      s.status == TransferStatus.completed &&
+      s.files.values.any((p) => (p.file.localPath ?? '').isNotEmpty);
 
   Future<void> _retry(BuildContext context, TransferSession s) async {
     final messenger = ScaffoldMessenger.of(context);
