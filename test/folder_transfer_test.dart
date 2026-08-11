@@ -1,3 +1,4 @@
+import 'tls_test_helpers.dart';
 import 'dart:convert';
 import 'dart:io';
 
@@ -28,6 +29,33 @@ void main() {
     test('sanitizes illegal filesystem characters', () {
       expect(
           splitSafeRelativePath('we?ird/na:me*.txt'), ['we_ird', 'na_me_.txt']);
+    });
+
+    test('strips control characters', () {
+      expect(splitSafeRelativePath('bad\x00name\x1f.txt'), ['badname.txt']);
+    });
+
+    test('neutralizes Windows reserved device names', () {
+      // A Windows receiver cannot create these — with or without extension,
+      // any case. They must arrive renamed, not fail the whole transfer.
+      expect(splitSafeRelativePath('CON'), ['_CON']);
+      expect(splitSafeRelativePath('con.txt'), ['_con.txt']);
+      expect(splitSafeRelativePath('Aux.log'), ['_Aux.log']);
+      expect(splitSafeRelativePath('COM1.dump/readme.md'),
+          ['_COM1.dump', 'readme.md']);
+      expect(splitSafeRelativePath('nul'), ['_nul']);
+      // Not reserved: COM10, CONS, console.txt.
+      expect(splitSafeRelativePath('COM10.txt'), ['COM10.txt']);
+      expect(splitSafeRelativePath('console.txt'), ['console.txt']);
+    });
+
+    test('strips trailing dots and spaces (invalid on Windows)', () {
+      expect(splitSafeRelativePath('report.'), ['report']);
+      expect(splitSafeRelativePath('notes... '), ['notes']);
+      expect(splitSafeRelativePath('dir./file.txt'), ['dir', 'file.txt']);
+      // Replacement of an illegal char can leave a non-dot tail; only
+      // genuine trailing dots/spaces are stripped.
+      expect(splitSafeRelativePath('evil.<'), ['evil._']);
     });
   });
 
@@ -64,6 +92,7 @@ void main() {
       tmp = await Directory.systemTemp.createTemp('lanlink_recv_folder_');
       saveDir = Directory('${tmp.path}/saved');
       receiver = Receiver(
+        certificateProvider: testCertificateProvider,
         localDeviceProvider: () => Device(
           alias: 'r',
           version: LanLinkProtocol.protocolVersion,
@@ -71,7 +100,7 @@ void main() {
           deviceType: LanLinkProtocol.deviceTypeHeadless,
           fingerprint: 'r-fp',
           port: 0,
-          protocol: 'http',
+          protocol: 'https',
           ip: '127.0.0.1',
         ),
         saveDirProvider: () async => saveDir,
@@ -81,7 +110,7 @@ void main() {
       );
       await receiver.start();
       port = receiver.port!;
-      client = HttpClient();
+      client = trustAllHttpClient();
     });
 
     tearDown(() async {
@@ -92,7 +121,7 @@ void main() {
 
     Future<void> sendFile(FileInfo file, List<int> bytes) async {
       final prepReq = await client.postUrl(Uri.parse(
-          'http://127.0.0.1:$port${LanLinkProtocol.routePrepareUpload}'));
+          'https://127.0.0.1:$port${LanLinkProtocol.routePrepareUpload}'));
       prepReq.headers.contentType = ContentType.json;
       prepReq.write(json.encode({
         'info': {
@@ -102,7 +131,7 @@ void main() {
           'deviceType': LanLinkProtocol.deviceTypeHeadless,
           'fingerprint': 's-fp',
           'port': 1,
-          'protocol': 'http',
+          'protocol': 'https',
         },
         'files': {
           file.id: {
@@ -119,7 +148,7 @@ void main() {
           as Map<String, dynamic>;
       final token = (prep['files'] as Map)[file.id] as String;
       final upReq = await client.postUrl(Uri.parse(
-          'http://127.0.0.1:$port${LanLinkProtocol.routeUpload}'
+          'https://127.0.0.1:$port${LanLinkProtocol.routeUpload}'
           '?sessionId=${prep['sessionId']}&fileId=${file.id}&token=$token'));
       upReq.headers.contentType = ContentType.binary;
       upReq.contentLength = bytes.length;

@@ -4,6 +4,7 @@
 //   * the transfer streams: peak RSS growth during the transfer stays far
 //     below the file size (no full-file buffering on either side).
 
+import '../tls_test_helpers.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -24,7 +25,8 @@ void main() {
     TransferSession? receiveSession;
 
     final receiver = Receiver(
-      localDeviceProvider: () => device('peer-a-receiver', 'fp-a', 0),
+      certificateProvider: testCertificateProvider,
+      localDeviceProvider: () => device('peer-a-receiver', receiverFp, 0),
       saveDirProvider: () async => saveDir,
       onAccept: (peer, files) async =>
           AcceptDecision.accept(files.map((f) => f.id).toSet()),
@@ -43,7 +45,7 @@ void main() {
       final srcHash = await sha256OfFile(src.path);
 
       final info = fileInfoFor(src, fileName: 'big.bin', size: size);
-      final peer = device('peer-a-receiver', 'fp-a', port);
+      final peer = device('peer-a-receiver', receiverFp, port);
       final session = sendSessionFor(peer, [info]);
 
       // Sample RSS every 50ms while the transfer runs. Both sender and

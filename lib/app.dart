@@ -5,6 +5,7 @@ import 'core/models/device.dart';
 import 'core/models/file_info.dart';
 import 'core/settings/app_settings.dart';
 import 'core/transfer/receiver.dart';
+import 'core/util/free_space.dart';
 import 'core/util/format.dart';
 import 'state/app_state.dart';
 import 'ui/about_page.dart';
@@ -52,6 +53,10 @@ class _LanLinkAppState extends State<LanLinkApp> {
     final name = state.settings.nicknameFor(peer.fingerprint) ??
         (peer.alias.trim().isEmpty ? 'Unnamed device' : peer.alias.trim());
     final totalSize = files.fold<int>(0, (sum, f) => sum + f.size);
+    // Best-effort low-space caution, computed WITHOUT delaying the sheet:
+    // the probe runs while the sheet is already on screen (FutureBuilder
+    // inside ConsentSheet). Null = no warning.
+    final warningFuture = _lowSpaceWarning(state, totalSize);
     // "Always accept from this device" pins trust to the LOCALLY resolved
     // fingerprint (peer pipeline / pin store), never the identity the
     // sender claimed in the offer. No local resolution => no trust option.
@@ -71,6 +76,7 @@ class _LanLinkAppState extends State<LanLinkApp> {
             verified: verified,
             previewFileNames: [for (final f in files) f.fileName],
           ),
+          warningFuture: warningFuture,
           onAccept: () => Navigator.of(ctx).pop(true),
           onDecline: () => Navigator.of(ctx).pop(false),
           onTrustChanged: canTrust ? (v) => trustRequested = v : null,
@@ -81,7 +87,28 @@ class _LanLinkAppState extends State<LanLinkApp> {
     if (trustRequested && canTrust) {
       await state.settings.trust(localFingerprint, alias: name);
     }
+    // Transfer progress lives on Home (session strips): if the user was
+    // sitting on the Receive page, take them back so they can watch it.
+    // Any hotspot the page was hosting is handed off to AppState in its
+    // dispose, so the direct link survives the pop.
+    nav.popUntil(
+      (route) => route.isFirst || route.settings.name != ReceivePage.routeName,
+    );
     return AcceptDecision.accept({for (final f in files) f.id});
+  }
+
+  /// Warns (never blocks) when accepting [totalSize] bytes would leave
+  /// under ~200 MB free on the save volume. Null = no warning / unknown.
+  Future<String?> _lowSpaceWarning(AppState state, int totalSize) async {
+    try {
+      final saveDir = await state.resolveSaveDir();
+      final free = await freeSpaceBytes(saveDir.path);
+      if (free != null && totalSize > free - 200 * 1024 * 1024) {
+        return 'Low on space: only ${formatBytes(free)} free where '
+            'files are saved.';
+      }
+    } catch (_) {}
+    return null;
   }
 
   // Built once per process: AppSettings notifies on every write (nickname,
@@ -124,7 +151,7 @@ class _LanLinkAppState extends State<LanLinkApp> {
           darkTheme: _darkTheme,
           home: const _FirstRunGate(),
           routes: {
-            '/receive': (_) => const ReceivePage(),
+            ReceivePage.routeName: (_) => const ReceivePage(),
             '/send': (_) => const SendPage(),
             '/settings': (_) => const SettingsPage(),
             '/history': (_) => const HistoryPage(),

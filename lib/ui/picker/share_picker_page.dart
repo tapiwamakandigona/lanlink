@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
@@ -7,10 +8,12 @@ import 'package:uuid/uuid.dart';
 
 import '../../core/models/file_info.dart';
 import '../../core/platform/android_apps.dart';
+import '../../core/platform/content_streams.dart';
 import '../../core/platform/media_library.dart';
 import '../../core/platform/media_permissions.dart';
 import '../../core/util/format.dart';
 import '../../core/util/picker_filter.dart';
+import '../v4/components/file_glyph.dart';
 import '../v4/theme/tokens.dart';
 
 const _uuid = Uuid();
@@ -36,6 +39,7 @@ class SharePickerPage extends StatefulWidget {
     this.requestMediaAccess = MediaPermissions.request,
     this.openSettings = MediaPermissions.openSettings,
     this.pickAnyFiles = _defaultPickAnyFiles,
+    this.mediaPathExists = _defaultMediaPathExists,
   });
 
   final SharePickerTab initialTab;
@@ -62,10 +66,40 @@ class SharePickerPage extends StatefulWidget {
   static Future<Uint8List?> _defaultThumbnail(MediaItem item) =>
       MediaLibrary.thumbnail(item.id, isVideo: item.isVideo);
 
+  /// Whether a selected media item's backing file is still present —
+  /// injectable so widget tests can stage fake paths.
+  final bool Function(String path) mediaPathExists;
+
+  static bool _defaultMediaPathExists(String path) => File(path).existsSync();
+
   /// System document picker: any file type, multi-select. Picked URIs
   /// need no storage permission (Storage Access Framework).
+  ///
+  /// On Android this uses the native SAF channel, which returns content
+  /// URIs *instantly* — the old file_picker route copied every file into
+  /// the app cache first, so picking a multi-GB video meant minutes of
+  /// silent wait (and a duplicate copy on disk). The sender streams the
+  /// bytes straight from the source instead. file_picker remains as a
+  /// fallback if the native picker fails.
   static Future<List<FileInfo>> _defaultPickAnyFiles() async {
-    final result = await FilePicker.platform.pickFiles(
+    if (ContentStreams.isSupported) {
+      try {
+        final picked = await ContentStreams.pickFiles();
+        return [
+          for (final f in picked)
+            FileInfo(
+              id: _uuid.v4(),
+              fileName: f.name,
+              size: f.size,
+              fileType: fileTypeForName(f.name),
+              contentUri: f.uri,
+            ),
+        ];
+      } catch (_) {
+        // Fall through to the copying picker below.
+      }
+    }
+    final result = await FilePicker.pickFiles(
       allowMultiple: true,
       withData: false,
     );
@@ -229,14 +263,19 @@ class _SharePickerPageState extends State<SharePickerPage>
 
   List<FileInfo> _buildSelection() {
     return [
+      // listMedia no longer stats every row on load (that made the gallery
+      // crawl on big libraries), so verify just the handful of *selected*
+      // items here: a stale MediaStore row for a deleted file would
+      // otherwise fail the whole send session.
       for (final item in _selectedMedia.values)
-        FileInfo(
-          id: _uuid.v4(),
-          fileName: item.name,
-          size: item.size,
-          fileType: fileTypeForName(item.name),
-          localPath: item.path,
-        ),
+        if (widget.mediaPathExists(item.path))
+          FileInfo(
+            id: _uuid.v4(),
+            fileName: item.name,
+            size: item.size,
+            fileType: fileTypeForName(item.name),
+            localPath: item.path,
+          ),
       for (final app in _selectedApps.values)
         FileInfo(
           id: _uuid.v4(),
@@ -592,7 +631,7 @@ class _SharePickerPageState extends State<SharePickerPage>
     if (!mounted || picked.isEmpty) return;
     setState(() {
       for (final file in picked) {
-        final key = file.localPath ?? file.fileName;
+        final key = file.contentUri ?? file.localPath ?? file.fileName;
         _pickedFiles[key] = file;
         _selectedFiles[key] = file; // picked ⇒ selected, one less tap
       }
@@ -653,7 +692,7 @@ class _SharePickerPageState extends State<SharePickerPage>
             itemCount: files.length,
             itemBuilder: (context, i) {
               final file = files[i];
-              final key = file.localPath ?? file.fileName;
+              final key = file.contentUri ?? file.localPath ?? file.fileName;
               final selected = _selectedFiles.containsKey(key);
               return CheckboxListTile(
                 key: Key('file-$key'),
@@ -665,7 +704,7 @@ class _SharePickerPageState extends State<SharePickerPage>
                     _selectedFiles.remove(key);
                   }
                 }),
-                secondary: const Icon(Icons.insert_drive_file_outlined),
+                secondary: Icon(fileGlyphFor(file.fileName)),
                 title: Text(file.fileName, overflow: TextOverflow.ellipsis),
                 subtitle: Text(formatBytes(file.size)),
               );

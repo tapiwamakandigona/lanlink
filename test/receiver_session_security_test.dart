@@ -4,6 +4,7 @@
 //    writing and must not flip the session back to completed;
 //  * failed sessions are dropped from the pending map so their tokens die.
 
+import 'tls_test_helpers.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -25,7 +26,7 @@ Device _device(String alias, String fp, int port) => Device(
       deviceType: LanLinkProtocol.deviceTypeHeadless,
       fingerprint: fp,
       port: port,
-      protocol: 'http',
+      protocol: 'https',
       ip: '127.0.0.1',
     );
 
@@ -48,6 +49,7 @@ void main() {
     lastReceiveSession = null;
 
     receiver = Receiver(
+      certificateProvider: testCertificateProvider,
       localDeviceProvider: () => _device('receiver', 'receiver-fp', 0),
       saveDirProvider: () =>
           saveDirOverride != null ? saveDirOverride!() : Future.value(saveDir),
@@ -57,8 +59,8 @@ void main() {
     );
     await receiver.start();
     port = receiver.port!;
-    dio = Dio(BaseOptions(
-      baseUrl: 'http://127.0.0.1:$port',
+    dio = trustAllDio(BaseOptions(
+      baseUrl: 'https://127.0.0.1:$port',
       responseType: ResponseType.plain,
       validateStatus: (s) => s != null,
     ));

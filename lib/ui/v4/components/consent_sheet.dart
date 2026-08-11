@@ -3,9 +3,10 @@ import 'package:flutter/material.dart';
 import '../models.dart';
 import '../theme/tokens.dart';
 import 'device_radar.dart';
+import 'file_glyph.dart';
 import 'verified_badge.dart';
 
-/// The receive prompt: "<Name> wants to send you N files (total size)".
+/// The receive prompt: "`<Name>` wants to send you N files (total size)".
 ///
 /// Friendly and calm — sender identity is a name plus an optional Verified
 /// badge; there are no hashes or addresses. Designed to be hosted inside a
@@ -17,6 +18,7 @@ class ConsentSheet extends StatefulWidget {
     required this.onAccept,
     required this.onDecline,
     this.onTrustChanged,
+    this.warningFuture,
   });
 
   /// What to render.
@@ -33,12 +35,23 @@ class ConsentSheet extends StatefulWidget {
   /// decides what trusting means; the sheet only collects the choice.
   final ValueChanged<bool>? onTrustChanged;
 
+  /// Optional async caution (e.g. a free-space probe). Resolving to a
+  /// non-null string shows the warning row; the sheet never waits for it.
+  final Future<String?>? warningFuture;
+
   @override
   State<ConsentSheet> createState() => _ConsentSheetState();
 }
 
 class _ConsentSheetState extends State<ConsentSheet> {
   bool _trust = false;
+  late final Future<String?> _warning;
+
+  @override
+  void initState() {
+    super.initState();
+    _warning = widget.warningFuture ?? Future.value(widget.data.warning);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -120,7 +133,7 @@ class _ConsentSheetState extends State<ConsentSheet> {
                       padding: const EdgeInsets.symmetric(vertical: VSpace.x1),
                       child: Row(
                         children: [
-                          Icon(Icons.insert_drive_file_outlined,
+                          Icon(fileGlyphFor(name),
                               size: 16, color: scheme.onSurfaceVariant),
                           const SizedBox(width: VSpace.x2),
                           Expanded(
@@ -148,6 +161,30 @@ class _ConsentSheetState extends State<ConsentSheet> {
               ),
             ),
           ],
+          FutureBuilder<String?>(
+            future: _warning,
+            builder: (ctx, snap) {
+              final warning = snap.data;
+              if (warning == null) return const SizedBox.shrink();
+              return Padding(
+                padding: const EdgeInsets.only(top: VSpace.x4),
+                child: Row(
+                  children: [
+                    Icon(Icons.warning_amber_rounded,
+                        size: 18, color: context.ember.danger),
+                    const SizedBox(width: VSpace.x2),
+                    Expanded(
+                      child: Text(
+                        warning,
+                        style: VType.caption
+                            .copyWith(color: scheme.onSurfaceVariant),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
           if (widget.onTrustChanged != null) ...[
             const SizedBox(height: VSpace.x4),
             CheckboxListTile(

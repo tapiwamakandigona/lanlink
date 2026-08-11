@@ -33,21 +33,26 @@ class HotspotInfo {
 }
 
 /// Dart bridge to the `lanlink/hotspot` platform channel that wraps
-/// Android's `WifiManager.startLocalOnlyHotspot`.
+/// Android's `WifiManager.startLocalOnlyHotspot` and, on Windows, the
+/// Mobile Hotspot (`NetworkOperatorTetheringManager`) API.
 ///
-/// LocalOnlyHotspot creates a phone-hosted Wi-Fi network with an
-/// auto-generated SSID/passphrase and no internet — perfect for moving
-/// files when there's no router around. The OS requires a location /
+/// The hosted network is a device-local Wi-Fi network with an
+/// SSID/passphrase and no internet — perfect for moving files when
+/// there's no router around. Android requires a location /
 /// nearby-devices runtime permission before it hands the credentials
-/// over, hence the explicit permission helpers.
+/// over, hence the explicit permission helpers; Windows has no runtime
+/// permission concept, so those short-circuit to true there.
 class LocalHotspot {
   LocalHotspot._();
 
   static const MethodChannel _channel = MethodChannel('lanlink/hotspot');
 
-  /// True when the platform can host a LocalOnlyHotspot (Android 8+).
+  /// Platforms where an in-app hotspot host exists (Android 8+, Windows).
+  static bool get _platformHasHost => Platform.isAndroid || Platform.isWindows;
+
+  /// True when the platform can host an in-app hotspot.
   static Future<bool> isSupported() async {
-    if (!Platform.isAndroid) return false;
+    if (!_platformHasHost) return false;
     try {
       return await _channel.invokeMethod<bool>('isSupported') ?? false;
     } on MissingPluginException {
@@ -58,7 +63,9 @@ class LocalHotspot {
   }
 
   /// Whether the runtime permission gating hotspot creation is granted.
+  /// Windows has no such permission — always granted there.
   static Future<bool> hasPermission() async {
+    if (Platform.isWindows) return true;
     if (!Platform.isAndroid) return false;
     try {
       return await _channel.invokeMethod<bool>('hasPermission') ?? false;
@@ -70,8 +77,9 @@ class LocalHotspot {
   }
 
   /// Shows the OS permission dialog if needed. Resolves to whether the
-  /// permission ended up granted.
+  /// permission ended up granted. A no-op success on Windows.
   static Future<bool> requestPermission() async {
+    if (Platform.isWindows) return true;
     if (!Platform.isAndroid) return false;
     try {
       return await _channel.invokeMethod<bool>('requestPermission') ?? false;
@@ -86,7 +94,7 @@ class LocalHotspot {
   /// refused — most commonly location services being switched off or
   /// regular tethering already active.
   static Future<HotspotInfo?> start() async {
-    if (!Platform.isAndroid) return null;
+    if (!_platformHasHost) return null;
     try {
       final raw = await _channel.invokeMapMethod<String, Object?>('start');
       if (raw == null) return null;
@@ -106,7 +114,7 @@ class LocalHotspot {
 
   /// Tears the hotspot down. Safe to call when none is running.
   static Future<void> stop() async {
-    if (!Platform.isAndroid) return;
+    if (!_platformHasHost) return;
     try {
       await _channel.invokeMethod<void>('stop');
     } on PlatformException {
@@ -118,7 +126,7 @@ class LocalHotspot {
 
   /// Whether a LanLink-hosted hotspot is currently up.
   static Future<bool> isRunning() async {
-    if (!Platform.isAndroid) return false;
+    if (!_platformHasHost) return false;
     try {
       return await _channel.invokeMethod<bool>('isRunning') ?? false;
     } on PlatformException {

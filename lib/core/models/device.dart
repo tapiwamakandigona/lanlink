@@ -39,7 +39,8 @@ class Device {
   /// HTTP port the peer is listening on.
   final int port;
 
-  /// Wire protocol — `"http"` or `"https"`. v2.0 ships HTTP only.
+  /// Wire protocol — `"http"` or `"https"`. Since protocol 2.1 every
+  /// LanLink peer serves HTTPS with a self-signed pinned certificate.
   final String protocol;
 
   /// IP address we use to talk to this peer.
@@ -90,19 +91,25 @@ class Device {
           (json['deviceType'] as String?) ?? LanLinkProtocol.deviceTypeHeadless,
       fingerprint: (json['fingerprint'] as String?) ?? '',
       port: (json['port'] as int?) ?? LanLinkProtocol.defaultPort,
-      protocol: (json['protocol'] as String?) ?? 'http',
+      protocol: (json['protocol'] as String?) ?? 'https',
       ip: ip,
       announcement: json['announce'] == true,
       download: json['download'] == true,
     );
   }
 
-  Device copyWith({String? ip, bool? announcement, bool? verified}) => Device(
+  Device copyWith({
+    String? ip,
+    bool? announcement,
+    bool? verified,
+    String? fingerprint,
+  }) =>
+      Device(
         alias: alias,
         version: version,
         deviceModel: deviceModel,
         deviceType: deviceType,
-        fingerprint: fingerprint,
+        fingerprint: fingerprint ?? this.fingerprint,
         port: port,
         protocol: protocol,
         ip: ip ?? this.ip,

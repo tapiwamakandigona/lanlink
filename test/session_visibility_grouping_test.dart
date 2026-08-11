@@ -21,7 +21,7 @@ Device _device(String alias, String fp) => Device(
       deviceType: LanLinkProtocol.deviceTypeHeadless,
       fingerprint: fp,
       port: 53317,
-      protocol: 'http',
+      protocol: 'https',
       ip: '127.0.0.1',
     );
 

@@ -6,6 +6,7 @@ library;
 
 export 'components/consent_sheet.dart';
 export 'components/device_radar.dart';
+export 'components/file_glyph.dart';
 export 'components/qr_panel.dart';
 export 'components/session_card.dart';
 export 'components/two_verb_home.dart';

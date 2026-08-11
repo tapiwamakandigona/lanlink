@@ -9,11 +9,14 @@ import 'package:lanlink/core/protocol/constants.dart';
 import 'package:lanlink/core/transfer/sender.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'tls_test_helpers.dart';
+
 Future<HttpServer> _spinUpFakePeer({
   required String alias,
   required String fingerprint,
 }) async {
-  final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+  final server = await HttpServer.bindSecure(
+      InternetAddress.loopbackIPv4, 0, testCertificate().securityContext());
   unawaited(_serveInfo(server, alias, fingerprint));
   return server;
 }
@@ -34,7 +37,7 @@ Future<void> _serveInfo(
         'deviceType': LanLinkProtocol.deviceTypeHeadless,
         'fingerprint': fingerprint,
         'port': server.port,
-        'protocol': 'http',
+        'protocol': 'https',
       }));
       await req.response.close();
     } else {
@@ -66,7 +69,7 @@ void main() {
         deviceType: LanLinkProtocol.deviceTypeHeadless,
         fingerprint: 'me',
         port: fake.port,
-        protocol: 'http',
+        protocol: 'https',
         ip: '127.0.0.1',
       ),
     );
@@ -77,7 +80,7 @@ void main() {
       onPeer: (peer) {
         seen ??= peer;
       },
-      port: fake.port,
+      ports: [fake.port],
       perHostTimeout: const Duration(seconds: 2),
       parallelProbes: 8,
     );
@@ -87,7 +90,9 @@ void main() {
     await scanner.scan(localIps: ['127.0.0.0']);
     expect(seen, isNotNull);
     expect(seen!.alias, 'unit-test-peer');
-    expect(seen!.fingerprint, 'abc123');
+    // Protocol 2.1: the fingerprint reported for a discovered peer is the
+    // hash of the TLS certificate it presented, not its self-reported JSON.
+    expect(seen!.fingerprint, testCertificate().fingerprint);
   });
 
   test('well-known hotspot prefixes cover the common OEM gateways', () {
@@ -103,5 +108,91 @@ void main() {
           '192.168.137', // Windows mobile hotspot
           '172.20.10', // iOS Personal Hotspot
         }));
+  });
+  test(
+      'SubnetScanner finds a peer on a receiver fallback port '
+      '(default+1) without being told', () async {
+    // Reserve the "default" port with a dumb socket that never answers
+    // /info, and park the fake peer on the next port up — the situation
+    // after Receiver._bindWithFallback loses the default port to another
+    // instance.
+    final blocker = await ServerSocket.bind('127.0.0.1', 0);
+    addTearDown(blocker.close);
+    final fake = await _spinUpFakePeer(
+      alias: 'fallback-peer',
+      fingerprint: 'fp-fallback',
+    );
+    addTearDown(() => fake.close(force: true));
+
+    final sender = Sender(
+      localDeviceProvider: () => Device(
+        alias: 'me',
+        version: LanLinkProtocol.protocolVersion,
+        deviceModel: 'me',
+        deviceType: LanLinkProtocol.deviceTypeHeadless,
+        fingerprint: 'me',
+        port: fake.port,
+        protocol: 'http',
+        ip: '127.0.0.1',
+      ),
+    );
+
+    Device? seen;
+    final scanner = SubnetScanner(
+      sender: sender,
+      onPeer: (peer) => seen ??= peer,
+      // Simulate: default port answers nothing, peer sits on "default+1".
+      ports: [blocker.port, fake.port],
+      perHostTimeout: const Duration(seconds: 2),
+      parallelProbes: 8,
+    );
+
+    await scanner.scan(localIps: ['127.0.0.1'], force: true);
+
+    expect(seen, isNotNull,
+        reason: 'peer on the fallback port must be discovered');
+    expect(seen!.alias, 'fallback-peer');
+    expect(seen!.port, fake.port);
+  });
+
+  test(
+      'throttle: unforced scan within minScanInterval is a no-op, '
+      'force bypasses it', () async {
+    final sender = Sender(
+      localDeviceProvider: () => Device(
+        alias: 'me',
+        version: LanLinkProtocol.protocolVersion,
+        deviceModel: 'me',
+        deviceType: LanLinkProtocol.deviceTypeHeadless,
+        fingerprint: 'me',
+        port: 53317,
+        protocol: 'http',
+        ip: '127.0.0.1',
+      ),
+    );
+    final scanner = SubnetScanner(
+      sender: sender,
+      onPeer: (_) {},
+      // Empty localIps + no fallbacks reachable: sweep is instant.
+      ports: const [1],
+      perHostTimeout: const Duration(milliseconds: 50),
+      parallelProbes: 4,
+      minScanInterval: const Duration(minutes: 5),
+    );
+
+    await scanner.scan(localIps: const [], force: true);
+    final first = scanner.lastScanStartedAt;
+    expect(first, isNotNull);
+
+    // Within the interval: unforced re-kick (the periodic UI cadence)
+    // must not start a new sweep.
+    await scanner.scan(localIps: const []);
+    expect(scanner.lastScanStartedAt, first,
+        reason: 'unforced scan inside minScanInterval must be skipped');
+
+    // An explicit user refresh does start one.
+    await scanner.scan(localIps: const [], force: true);
+    expect(scanner.lastScanStartedAt!.isAfter(first!), isTrue,
+        reason: 'force must bypass the throttle');
   });
 }

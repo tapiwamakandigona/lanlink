@@ -9,6 +9,7 @@
 //   (c) oversized control payloads are rejected, and the post-cancel upload
 //       drain is bounded at 32MB so a flooding peer cannot pin the handler.
 
+import '../tls_test_helpers.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -42,7 +43,8 @@ void main() {
     await saveDir.create(recursive: true);
     receiveSession = null;
     receiver = Receiver(
-      localDeviceProvider: () => device('peer-a-receiver', 'fp-a', 0),
+      certificateProvider: testCertificateProvider,
+      localDeviceProvider: () => device('peer-a-receiver', receiverFp, 0),
       saveDirProvider: () async => saveDir,
       onAccept: (peer, files) async =>
           AcceptDecision.accept(files.map((f) => f.id).toSet()),
@@ -50,8 +52,8 @@ void main() {
     );
     await receiver.start();
     port = receiver.port!;
-    dio = Dio(BaseOptions(
-      baseUrl: 'http://127.0.0.1:$port',
+    dio = trustAllDio(BaseOptions(
+      baseUrl: 'https://127.0.0.1:$port',
       responseType: ResponseType.plain,
       validateStatus: (s) => s != null,
     ));
@@ -65,25 +67,49 @@ void main() {
   });
 
   test('(a) single-use connect token: reuse is rejected with 401', () async {
-    final token = receiver.issueConnectToken();
-    final sender =
-        Sender(localDeviceProvider: () => device('peer-b-sender', 'fp-b', 1));
-    final stub = device('unknown', '', port);
-
-    // First redemption over a real socket succeeds…
-    final first = await sender.connectWithToken(stub, token);
-    expect(first, isNotNull);
-    expect(first!.fingerprint, 'fp-a');
-
-    // …the replay is rejected, specifically with a 401 on the wire.
-    expect(await sender.connectWithToken(stub, token), isNull);
-    final resp = await dio.post<String>(
-      LanLinkProtocol.routeConnect,
-      queryParameters: {'token': token},
-      data: device('peer-b-sender', 'fp-b', 1).toJson(),
+    // A dedicated receiver with a zero replay-grace window: the production
+    // default allows the ORIGINAL redeemer (same IP) to retry briefly so a
+    // lost 200 right after a hotspot join isn't fatal, which on loopback
+    // would make every replay look legitimate. Zero grace restores strict
+    // single-use so the security property stays observable.
+    final strict = Receiver(
+      certificateProvider: testCertificateProvider,
+      localDeviceProvider: () => device('peer-a-receiver', receiverFp, 0),
+      saveDirProvider: () async => saveDir,
+      onAccept: (peer, files) async =>
+          AcceptDecision.accept(files.map((f) => f.id).toSet()),
+      onSessionStarted: (_) {},
+      connectTokenReplayGrace: Duration.zero,
     );
-    expect(resp.statusCode, 401,
-        reason: 'a consumed connect token must be dead on replay');
+    await strict.start();
+    final strictPort = strict.port!;
+    final strictDio = trustAllDio(BaseOptions(
+      baseUrl: 'https://127.0.0.1:$strictPort',
+      validateStatus: (_) => true,
+    ));
+    try {
+      final token = strict.issueConnectToken();
+      final sender =
+          Sender(localDeviceProvider: () => device('peer-b-sender', 'fp-b', 1));
+      final stub = device('unknown', '', strictPort);
+
+      // First redemption over a real socket succeeds…
+      final first = await sender.connectWithToken(stub, token);
+      expect(first, isNotNull);
+      expect(first!.fingerprint, receiverFp);
+
+      // …the replay is rejected, specifically with a 401 on the wire.
+      expect(await sender.connectWithToken(stub, token), isNull);
+      final resp = await strictDio.post<String>(
+        LanLinkProtocol.routeConnect,
+        queryParameters: {'token': token},
+        data: device('peer-b-sender', 'fp-b', 1).toJson(),
+      );
+      expect(resp.statusCode, 401,
+          reason: 'a consumed connect token must be dead on replay');
+    } finally {
+      await strict.stop();
+    }
   }, timeout: const Timeout(Duration(seconds: 30)));
 
   test('(b) wrong-fingerprint peer is never treated as the pinned device',
@@ -98,8 +124,8 @@ void main() {
     final token = receiver.issueConnectToken();
     final real = await state.connectWithToken('127.0.0.1:$port', token);
     expect(real, isNotNull);
-    expect(settings.isPinned('fp-a'), isTrue);
-    expect(state.peers['fp-a']!.verified, isTrue);
+    expect(settings.isPinned(receiverFp), isTrue);
+    expect(state.peers[receiverFp]!.verified, isTrue);
 
     // An impostor announcing the same alias under a different fingerprint
     // must be a separate, UNverified peer — never the pinned device.
@@ -107,7 +133,7 @@ void main() {
     expect(state.peers['fp-evil']!.verified, isFalse,
         reason: 'wrong fingerprint must not inherit verified status');
     expect(settings.isPinned('fp-evil'), isFalse);
-    expect(state.peers['fp-evil'], isNot(same(state.peers['fp-a'])));
+    expect(state.peers['fp-evil'], isNot(same(state.peers[receiverFp])));
   }, timeout: const Timeout(Duration(seconds: 30)));
 
   test(

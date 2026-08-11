@@ -74,17 +74,32 @@ class HotspotHostController extends ChangeNotifier {
     final supported = await _isSupported();
     if (_disposed) return;
     if (!supported) {
-      _fail("This device can't create a hotspot from an app "
-          '(needs Android 8 or newer).');
+      _fail(_unsupportedMessage());
       return;
     }
-    final granted = await _hasPermission();
-    if (_disposed) return;
-    if (!granted) {
-      _set(HotspotHostPhase.needsPermission);
-      return;
+    // Windows has no runtime permission gating hotspots — go straight to
+    // start instead of dead-ending in a permission phase that can never
+    // show a dialog.
+    if (defaultTargetPlatform != TargetPlatform.windows) {
+      final granted = await _hasPermission();
+      if (_disposed) return;
+      if (!granted) {
+        _set(HotspotHostPhase.needsPermission);
+        return;
+      }
     }
     await _startHotspot();
+  }
+
+  /// Why "No shared Wi-Fi" can't run here, in words that fit the device
+  /// the user is actually looking at.
+  static String _unsupportedMessage() {
+    if (defaultTargetPlatform == TargetPlatform.windows) {
+      return "This PC can't start a hotspot right now. It may not have "
+          'a Wi-Fi adapter, or the adapter may be turned off.';
+    }
+    return "This device can't create a hotspot from an app "
+        '(needs Android 8 or newer).';
   }
 
   /// Runs the OS permission dialog, then starts the hotspot on grant.
@@ -109,8 +124,11 @@ class HotspotHostController extends ChangeNotifier {
       return;
     }
     if (info == null) {
-      _fail('Could not start the direct link. Check that Location is on '
-          'and that regular hotspot/tethering is off, then try again.');
+      _fail(defaultTargetPlatform == TargetPlatform.windows
+          ? 'Could not start the direct link. Check that Wi-Fi is turned '
+              'on, then try again.'
+          : 'Could not start the direct link. Check that Location is on '
+              'and that regular hotspot/tethering is off, then try again.');
       return;
     }
     _info = info;

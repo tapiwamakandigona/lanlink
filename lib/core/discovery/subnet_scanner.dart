@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
 import '../models/device.dart';
@@ -20,7 +21,7 @@ class SubnetScanner {
   SubnetScanner({
     required this.sender,
     required this.onPeer,
-    this.port = LanLinkProtocol.defaultPort,
+    this.ports = defaultProbePorts,
     this.perHostTimeout = const Duration(seconds: 2),
     this.parallelProbes = 32,
     this.minScanInterval = const Duration(seconds: 20),
@@ -28,7 +29,21 @@ class SubnetScanner {
 
   final Sender sender;
   final void Function(Device peer) onPeer;
-  final int port;
+
+  /// Ports probed on every host, in order. The receiver binds the default
+  /// port when free but falls back to defaultPort+1..+9 (and finally an
+  /// ephemeral port) when another LanLink/LocalSend instance got there
+  /// first — a hotspot peer on a fallback port used to be undiscoverable
+  /// by the sweep. Probing the first few fallbacks keeps the sweep cheap
+  /// (2 extra sockets per host) while finding the common collision cases.
+  final List<int> ports;
+
+  /// Default port + the first two receiver fallback ports.
+  static const List<int> defaultProbePorts = [
+    LanLinkProtocol.defaultPort,
+    LanLinkProtocol.defaultPort + 1,
+    LanLinkProtocol.defaultPort + 2,
+  ];
   final Duration perHostTimeout;
   final int parallelProbes;
 
@@ -41,6 +56,11 @@ class SubnetScanner {
   bool _running = false;
   int _generation = 0;
   DateTime? _lastScanStarted;
+
+  /// When the last accepted sweep started; null before the first one.
+  /// Test-visible so throttle behavior can be asserted without sockets.
+  @visibleForTesting
+  DateTime? get lastScanStartedAt => _lastScanStarted;
   bool _transfersActive = false;
 
   bool get isRunning => _running;
@@ -50,11 +70,20 @@ class SubnetScanner {
   /// transfer I/O and progress frames.
   set transfersActive(bool active) => _transfersActive = active;
 
+  /// Dio cancel tokens for probes currently in flight, so [cancel] can
+  /// abort their sockets instead of merely abandoning the futures.
+  final Set<CancelToken> _activeProbes = {};
+
   /// Synchronously bumps the generation so any in-flight scan stops as soon
-  /// as the next host slot picks it up.
+  /// as the next host slot picks it up, and aborts the probes already in
+  /// flight so their sockets close now rather than at the connect timeout.
   void cancel() {
     _generation += 1;
     _running = false;
+    for (final token in _activeProbes.toList()) {
+      token.cancel('scan cancelled');
+    }
+    _activeProbes.clear();
   }
 
   /// Scans every /24 derived from [localIps] plus the well-known Android
@@ -158,26 +187,50 @@ class SubnetScanner {
   }
 
   Future<void> _probe(String ip, int gen) async {
-    if (_generation != gen) return;
-    final stub = Device(
-      alias: ip,
-      version: LanLinkProtocol.protocolVersion,
-      deviceModel: '',
-      deviceType: LanLinkProtocol.deviceTypeHeadless,
-      fingerprint: '',
-      port: port,
-      protocol: 'http',
-      ip: ip,
-    );
-    try {
-      final probed = await sender.probe(stub).timeout(perHostTimeout);
+    // Probe the default port plus the receiver's fallback ports: a peer
+    // whose 53317 was taken listens on +1/+2 (my earlier finding), and a
+    // host that answers on one port needs no further probing.
+    for (final port in ports) {
       if (_generation != gen) return;
-      if (probed != null) {
-        onPeer(probed);
-      }
-    } catch (e) {
-      if (kDebugMode && e is! TimeoutException && e is! SocketException) {
-        debugPrint('[scan] probe $ip failed: $e');
+      final stub = Device(
+        alias: ip,
+        version: LanLinkProtocol.protocolVersion,
+        deviceModel: '',
+        deviceType: LanLinkProtocol.deviceTypeHeadless,
+        fingerprint: '',
+        port: port,
+        protocol: 'https',
+        ip: ip,
+      );
+      // A per-probe cancel token: `.timeout` alone abandons the future but
+      // the socket keeps dialing for the full dio connect timeout (10 s),
+      // piling up ~160 lingering sockets on a dead subnet. Cancelling the
+      // token on timeout (or an external [cancel]) closes the socket now.
+      // Passing [perHostTimeout] down also aligns the receive budget with
+      // this probe's deadline.
+      final cancelToken = CancelToken();
+      _activeProbes.add(cancelToken);
+      try {
+        final probed = await sender
+            .probe(stub, cancelToken: cancelToken, timeout: perHostTimeout)
+            .timeout(perHostTimeout);
+        if (_generation != gen) return;
+        if (probed != null) {
+          onPeer(probed);
+          // One LanLink instance per host answered — stop probing further
+          // ports on this IP. (Two instances on one machine is possible
+          // but rare; multicast still finds those.)
+          return;
+        }
+      } catch (e) {
+        if (e is TimeoutException && !cancelToken.isCancelled) {
+          cancelToken.cancel('probe timeout');
+        }
+        if (kDebugMode && e is! TimeoutException && e is! SocketException) {
+          debugPrint('[scan] probe $ip:$port failed: $e');
+        }
+      } finally {
+        _activeProbes.remove(cancelToken);
       }
     }
   }

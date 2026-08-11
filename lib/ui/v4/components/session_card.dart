@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models.dart';
 import '../theme/tokens.dart';
+import 'file_glyph.dart';
 
 /// One transfer session: file summary, size, progress, live speed + ETA,
 /// a status chip, and state-appropriate actions.
@@ -73,7 +74,10 @@ class SessionCard extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _LeadingIcon(status: status),
+              _LeadingIcon(
+                status: status,
+                fileName: data.fileCount == 1 ? data.title : null,
+              ),
               const SizedBox(width: VSpace.x3),
               Expanded(
                 child: Column(
@@ -281,7 +285,11 @@ class SessionStatusChip extends StatelessWidget {
 }
 
 class _LeadingIcon extends StatelessWidget {
-  const _LeadingIcon({required this.status});
+  const _LeadingIcon({required this.status, this.fileName});
+
+  /// When the session is a single file, its name — picks a per-type glyph
+  /// for the neutral states instead of the generic document icon.
+  final String? fileName;
 
   final SessionStatus status;
 
@@ -306,7 +314,9 @@ class _LeadingIcon extends StatelessWidget {
           scheme.onSurfaceVariant,
         ),
       _ => (
-          Icons.description_outlined,
+          fileName == null
+              ? Icons.description_outlined
+              : fileGlyphFor(fileName!),
           scheme.secondaryContainer,
           scheme.onSecondaryContainer,
         ),

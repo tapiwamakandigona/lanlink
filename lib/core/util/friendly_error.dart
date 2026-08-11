@@ -20,6 +20,9 @@ String friendlyTransferError(Object error, {String? peerName}) {
       case DioExceptionType.connectionTimeout:
       case DioExceptionType.sendTimeout:
       case DioExceptionType.receiveTimeout:
+      // transformTimeout (dio >= 5.10) fires when decoding a response body
+      // exceeds its budget — to the user that is the same "it timed out".
+      case DioExceptionType.transformTimeout:
         return 'Timed out reaching $who. Make sure both devices are on '
             'the same Wi-Fi or hotspot and try again.';
       case DioExceptionType.connectionError:
@@ -48,9 +51,26 @@ String friendlyTransferError(Object error, {String? peerName}) {
     return 'Timed out talking to $who. Move the devices closer and try again.';
   }
   if (error is FileSystemException) {
-    final detail = error.osError?.message ?? error.message;
-    return 'Couldn\'t read a file from storage'
-        '${detail.isEmpty ? '' : ' ($detail)'}.';
+    final os = error.osError;
+    final combined = '${error.message} ${os?.message ?? ''}'.toLowerCase();
+    // ENOSPC: 28 (Linux/Android/macOS), 112 (Windows ERROR_DISK_FULL).
+    if (os?.errorCode == 28 ||
+        os?.errorCode == 112 ||
+        combined.contains('no space left') ||
+        combined.contains('disk full')) {
+      return 'Not enough storage space to save the files. '
+          'Free up some space and try again.';
+    }
+    // EACCES/EPERM: 13/1 (POSIX), 5 (Windows ERROR_ACCESS_DENIED).
+    if (os?.errorCode == 13 ||
+        combined.contains('permission denied') ||
+        combined.contains('access is denied')) {
+      return "LanLink isn't allowed to use that folder. Pick a different "
+          'save folder in Settings and try again.';
+    }
+    final detail = os?.message ?? error.message;
+    return 'A storage error interrupted the transfer'
+        '${detail.isEmpty ? '' : ' ($detail)'}. Try again.';
   }
 
   // Fall back to the raw message but keep it short and never blank.

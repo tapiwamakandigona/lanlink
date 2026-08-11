@@ -32,7 +32,7 @@ void main() {
         deviceType: LanLinkProtocol.deviceTypeDesktop,
         fingerprint: 'abc-123',
         port: 53317,
-        protocol: 'http',
+        protocol: 'https',
         ip: '192.168.1.10',
       );
       final back = Device.fromJson(dev.toJson(), ip: '192.168.1.10');

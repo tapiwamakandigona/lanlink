@@ -160,8 +160,11 @@ class _SettingsPageState extends State<SettingsPage> {
           _kv(
               context,
               'Listening on',
-              '${state.localIps.isEmpty ? "no LAN interface" : state.localIps.join(", ")}'
-                  ' : ${state.port ?? "?"}'),
+              state.localIps.isEmpty
+                  ? 'no LAN interface'
+                  : state.port == null
+                      ? '${state.localIps.join(", ")} — not receiving'
+                      : '${state.localIps.join(", ")}:${state.port}'),
           Row(
             children: [
               Expanded(
@@ -297,7 +300,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Future<void> _pickFolder() async {
     final state = context.read<AppState>();
-    final path = await FilePicker.platform.getDirectoryPath();
+    final path = await FilePicker.getDirectoryPath();
     if (path == null) return;
     // Validate we can actually write to it on desktop platforms.
     if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {

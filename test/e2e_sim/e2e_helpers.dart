@@ -16,6 +16,13 @@ import 'package:lanlink/core/models/session.dart';
 import 'package:lanlink/core/protocol/constants.dart';
 import 'package:uuid/uuid.dart';
 
+import '../tls_test_helpers.dart';
+
+/// Fingerprint of the shared test receiver certificate — protocol 2.1
+/// fingerprints are cert hashes, so the receiver's identity must match the
+/// certificate its HTTPS server presents.
+String get receiverFp => testCertificate().fingerprint;
+
 const uuid = Uuid();
 
 Device device(String alias, String fp, int port) => Device(
@@ -25,7 +32,7 @@ Device device(String alias, String fp, int port) => Device(
       deviceType: LanLinkProtocol.deviceTypeHeadless,
       fingerprint: fp,
       port: port,
-      protocol: 'http',
+      protocol: 'https',
       ip: '127.0.0.1',
     );
 

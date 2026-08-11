@@ -14,6 +14,7 @@ class TwoVerbHome extends StatelessWidget {
     required this.onSend,
     required this.onReceive,
     this.visible = true,
+    this.onRetryVisibility,
     this.sessionStrip,
   });
 
@@ -28,6 +29,9 @@ class TwoVerbHome extends StatelessWidget {
 
   /// Whether this device is currently discoverable on the network.
   final bool visible;
+
+  /// Forwarded to [VisibilityStatusLine.onRetry] when [visible] is false.
+  final VoidCallback? onRetryVisibility;
 
   /// Optional inline session strip (e.g. a compact [SessionCard]) shown
   /// under the verbs while a transfer is running.
@@ -59,15 +63,22 @@ class TwoVerbHome extends StatelessWidget {
             ),
           ),
         ];
+        // Fixed 180/300px boxes clip the verb labels as soon as the user
+        // runs a large accessibility text scale, so grow the card area with
+        // the text scaler. Clamped: past 2x the cards would swallow the
+        // whole screen and the labels already fit comfortably.
+        final heightScale = MediaQuery.textScalerOf(context)
+            .clamp(maxScaleFactor: 2.0)
+            .scale(1.0);
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           mainAxisSize: MainAxisSize.min,
           children: [
             if (wide)
-              SizedBox(height: 180, child: Row(children: verbs))
+              SizedBox(height: 180 * heightScale, child: Row(children: verbs))
             else
               SizedBox(
-                height: 300,
+                height: 300 * heightScale,
                 child: Column(
                   children: [
                     Expanded(child: Row(children: [verbs[0]])),
@@ -77,7 +88,11 @@ class TwoVerbHome extends StatelessWidget {
                 ),
               ),
             const SizedBox(height: VSpace.x4),
-            VisibilityStatusLine(deviceName: deviceName, visible: visible),
+            VisibilityStatusLine(
+              deviceName: deviceName,
+              visible: visible,
+              onRetry: onRetryVisibility,
+            ),
             if (sessionStrip != null) ...[
               const SizedBox(height: VSpace.x4),
               sessionStrip!,
@@ -89,12 +104,13 @@ class TwoVerbHome extends StatelessWidget {
   }
 }
 
-/// The "You're visible as <name>" line under the home verbs.
+/// The "You're visible as `<name>`" line under the home verbs.
 class VisibilityStatusLine extends StatelessWidget {
   const VisibilityStatusLine({
     super.key,
     required this.deviceName,
     this.visible = true,
+    this.onRetry,
   });
 
   /// This device's friendly name, e.g. "Purple-Otter".
@@ -103,11 +119,18 @@ class VisibilityStatusLine extends StatelessWidget {
   /// When false the line says the device is hidden.
   final bool visible;
 
+  /// When the device is hidden and this is non-null, the line becomes
+  /// tappable and reads "tap to retry" — hidden almost always means the
+  /// receiver failed to bind a port, which a retry often fixes (network
+  /// stack was still coming up, the conflicting app has since quit).
+  final VoidCallback? onRetry;
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final dotColor = visible ? scheme.primary : scheme.outline;
-    return Row(
+    final retryable = !visible && onRetry != null;
+    final line = Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
         Container(
@@ -131,12 +154,38 @@ class VisibilityStatusLine extends StatelessWidget {
                         ),
                       ),
                     ]
-                  : [const TextSpan(text: "You're hidden right now")],
+                  : [
+                      const TextSpan(text: "You're hidden right now"),
+                      if (retryable)
+                        TextSpan(
+                          text: ' — tap to retry',
+                          style: VType.bodyStrong.copyWith(
+                            fontSize: 15,
+                            color: scheme.primary,
+                          ),
+                        ),
+                    ],
             ),
             overflow: TextOverflow.ellipsis,
           ),
         ),
       ],
+    );
+    if (!retryable) return line;
+    return Semantics(
+      button: true,
+      label: "You're hidden right now. Retry becoming visible",
+      child: InkWell(
+        onTap: onRetry,
+        borderRadius: BorderRadius.circular(VRadius.md),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: VSpace.x2,
+            vertical: VSpace.x1,
+          ),
+          child: line,
+        ),
+      ),
     );
   }
 }
@@ -161,46 +210,52 @@ class _VerbCard extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final bg = primary ? scheme.primary : scheme.surfaceContainerLowest;
     final fg = primary ? scheme.onPrimary : scheme.onSurface;
-    final sub =
-        primary ? scheme.onPrimary.withOpacity(0.78) : scheme.onSurfaceVariant;
-    return Material(
-      color: bg,
-      clipBehavior: Clip.antiAlias,
-      shape: RoundedRectangleBorder(
-        borderRadius: VRadius.lgAll,
-        side: primary
-            ? BorderSide.none
-            : BorderSide(color: scheme.outlineVariant),
-      ),
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(VSpace.x5),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: primary
-                      ? scheme.onPrimary.withOpacity(0.16)
-                      : scheme.primaryContainer,
-                  shape: BoxShape.circle,
+    final sub = primary
+        ? scheme.onPrimary.withValues(alpha: 0.78)
+        : scheme.onSurfaceVariant;
+    return Semantics(
+      button: true,
+      label: '$label. $caption',
+      child: Material(
+        color: bg,
+        clipBehavior: Clip.antiAlias,
+        shape: RoundedRectangleBorder(
+          borderRadius: VRadius.lgAll,
+          side: primary
+              ? BorderSide.none
+              : BorderSide(color: scheme.outlineVariant),
+        ),
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(VSpace.x5),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: primary
+                        ? scheme.onPrimary.withValues(alpha: 0.16)
+                        : scheme.primaryContainer,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(icon,
+                      size: 22,
+                      color: primary ? fg : scheme.onPrimaryContainer),
                 ),
-                child: Icon(icon,
-                    size: 22, color: primary ? fg : scheme.onPrimaryContainer),
-              ),
-              const Spacer(),
-              Text(label, style: VType.heading.copyWith(color: fg)),
-              const SizedBox(height: VSpace.x1),
-              Text(
-                caption,
-                style: VType.caption.copyWith(color: sub),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ],
+                const Spacer(),
+                Text(label, style: VType.heading.copyWith(color: fg)),
+                const SizedBox(height: VSpace.x1),
+                Text(
+                  caption,
+                  style: VType.caption.copyWith(color: sub),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
           ),
         ),
       ),

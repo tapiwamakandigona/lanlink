@@ -1,15 +1,19 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/models/file_info.dart';
 import '../../core/platform/incoming_share.dart';
 import '../../state/app_state.dart';
+import '../v4/direct_connect/network_mode_switch.dart';
 import '../v4/v4.dart';
 import '../widgets/connected_peer_card.dart';
+import '../widgets/desktop_drop_region.dart';
 import '../widgets/live_session_card.dart';
 import '../widgets/update_available_banner.dart';
+import 'receive_page.dart';
 import 'send_page.dart';
 import 'session_display.dart';
 
@@ -55,94 +59,190 @@ class _HomePageState extends State<HomePage> {
     final hasFinished = visible.any((s) => s.isTerminal);
     final update = state.updateChecker.availableUpdate;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('LanLink'),
-        actions: [
-          IconButton(
-            tooltip: 'History',
-            icon: const Icon(Icons.history),
-            onPressed: () => Navigator.of(context).pushNamed('/history'),
-          ),
-          IconButton(
-            tooltip: 'Settings',
-            icon: const Icon(Icons.settings_outlined),
-            onPressed: () => Navigator.of(context).pushNamed('/settings'),
-          ),
-          PopupMenuButton<String>(
-            tooltip: 'More',
-            onSelected: (route) => Navigator.of(context).pushNamed(route),
-            itemBuilder: (context) => const [
-              PopupMenuItem(value: '/help', child: Text('Help')),
-              PopupMenuItem(value: '/about', child: Text('About')),
-            ],
-          ),
-        ],
-      ),
-      body: SafeArea(
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 720),
-            child: ListView(
-              padding: const EdgeInsets.all(VSpace.x4),
-              children: [
-                if (update != null &&
-                    state.settings.skippedUpdateVersion != update.tagName)
-                  UpdateAvailableBanner(
-                    release: update,
-                    onDismiss: () =>
-                        state.settings.setSkippedUpdateVersion(update.tagName),
-                  ),
-                TwoVerbHome(
-                  deviceName: state.displayAlias,
-                  visible: state.port != null,
-                  onSend: () => Navigator.of(context).pushNamed('/send'),
-                  onReceive: () => Navigator.of(context).pushNamed('/receive'),
-                ),
-                // Symmetric sessions (F3): every linked peer gets a strip
-                // with "Send files" (no re-scan needed) and Disconnect.
-                if (state.linkedPeers.isNotEmpty) ...[
-                  const SizedBox(height: VSpace.x6),
-                  for (final peer in state.linkedPeers) ...[
-                    ConnectedPeerCard(
-                      peerName: displayPeerName(state.settings, peer),
-                      verified: state.settings.isPinned(peer.fingerprint),
-                      onSendFiles: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => SendPage(targetPeer: peer),
-                        ),
-                      ),
-                      onDisconnect: () => unawaited(state.disconnectPeer(peer)),
-                    ),
-                    const SizedBox(height: VSpace.x3),
-                  ],
-                ],
-                if (clusters.isNotEmpty) ...[
-                  const SizedBox(height: VSpace.x6),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          'Transfers',
-                          style:
-                              VType.heading.copyWith(color: scheme.onSurface),
-                        ),
-                      ),
-                      if (hasFinished)
-                        TextButton(
-                          onPressed: state.dismissFinishedSessions,
-                          child: const Text('Clear finished'),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: VSpace.x2),
-                  for (final cluster in clusters) ...[
-                    _ClusterView(cluster: cluster, state: state),
-                    const SizedBox(height: VSpace.x3),
-                  ],
-                ],
+    return DesktopDropRegion(
+      onFiles: (files) => Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => SendPage(prestagedFiles: files),
+      )),
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('LanLink'),
+          actions: [
+            IconButton(
+              tooltip: 'History',
+              icon: const Icon(Icons.history),
+              onPressed: () => Navigator.of(context).pushNamed('/history'),
+            ),
+            IconButton(
+              tooltip: 'Settings',
+              icon: const Icon(Icons.settings_outlined),
+              onPressed: () => Navigator.of(context).pushNamed('/settings'),
+            ),
+            PopupMenuButton<String>(
+              tooltip: 'More',
+              onSelected: (route) => Navigator.of(context).pushNamed(route),
+              itemBuilder: (context) => const [
+                PopupMenuItem(value: '/help', child: Text('Help')),
+                PopupMenuItem(value: '/about', child: Text('About')),
               ],
             ),
+          ],
+        ),
+        body: SafeArea(
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 720),
+              child: ListView(
+                padding: const EdgeInsets.all(VSpace.x4),
+                children: [
+                  if (update != null &&
+                      state.settings.skippedUpdateVersion != update.tagName)
+                    UpdateAvailableBanner(
+                      release: update,
+                      onDismiss: () => state.settings
+                          .setSkippedUpdateVersion(update.tagName),
+                    ),
+                  TwoVerbHome(
+                    deviceName: state.displayAlias,
+                    visible: state.port != null,
+                    onRetryVisibility: () => state.retryReceiver(),
+                    onSend: () => Navigator.of(context).pushNamed('/send'),
+                    onReceive: () =>
+                        Navigator.of(context).pushNamed('/receive'),
+                  ),
+                  // Windows only: this PC can host its own hotspot, so a
+                  // phone can link up even with no router around. One tap
+                  // opens Receive with "No shared Wi-Fi" already running.
+                  if (defaultTargetPlatform == TargetPlatform.windows) ...[
+                    const SizedBox(height: VSpace.x4),
+                    _ConnectToPhoneTile(
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          settings: const RouteSettings(
+                            name: ReceivePage.routeName,
+                          ),
+                          builder: (_) => const ReceivePage(
+                            initialMode: NetworkMode.directLink,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                  // Symmetric sessions (F3): every linked peer gets a strip
+                  // with "Send files" (no re-scan needed) and Disconnect.
+                  if (state.linkedPeers.isNotEmpty) ...[
+                    const SizedBox(height: VSpace.x6),
+                    for (final peer in state.linkedPeers) ...[
+                      ConnectedPeerCard(
+                        peerName: displayPeerName(state.settings, peer),
+                        verified: state.settings.isPinned(peer.fingerprint),
+                        onSendFiles: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => SendPage(targetPeer: peer),
+                          ),
+                        ),
+                        onDisconnect: () =>
+                            unawaited(state.disconnectPeer(peer)),
+                      ),
+                      const SizedBox(height: VSpace.x3),
+                    ],
+                  ],
+                  if (clusters.isNotEmpty) ...[
+                    const SizedBox(height: VSpace.x6),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Transfers',
+                            style:
+                                VType.heading.copyWith(color: scheme.onSurface),
+                          ),
+                        ),
+                        if (hasFinished)
+                          TextButton(
+                            onPressed: state.dismissFinishedSessions,
+                            child: const Text('Clear finished'),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: VSpace.x2),
+                    for (final cluster in clusters) ...[
+                      _ClusterView(cluster: cluster, state: state),
+                      const SizedBox(height: VSpace.x3),
+                    ],
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The Windows-only home entry point for hosting a direct link: quieter
+/// than the two verbs, but discoverable — an outlined row tile in the
+/// same Ember language as the secondary verb card.
+class _ConnectToPhoneTile extends StatelessWidget {
+  const _ConnectToPhoneTile({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: scheme.surfaceContainerLowest,
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(
+        borderRadius: VRadius.lgAll,
+        side: BorderSide(color: scheme.outlineVariant),
+      ),
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: VSpace.x4,
+            vertical: VSpace.x3,
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: scheme.primaryContainer,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.phonelink_ring,
+                  size: 22,
+                  color: scheme.onPrimaryContainer,
+                ),
+              ),
+              const SizedBox(width: VSpace.x4),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Connect to phone',
+                      style: VType.bodyStrong.copyWith(color: scheme.onSurface),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'No Wi-Fi around? Link a phone straight to this PC.',
+                      style: VType.caption
+                          .copyWith(color: scheme.onSurfaceVariant),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: VSpace.x2),
+              Icon(Icons.chevron_right, color: scheme.onSurfaceVariant),
+            ],
           ),
         ),
       ),

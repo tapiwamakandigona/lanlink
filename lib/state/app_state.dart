@@ -150,6 +150,43 @@ class AppState extends ChangeNotifier {
   final Map<String, Device> _peers = {};
   Map<String, Device> get peers => Map.unmodifiable(_peers);
 
+  /// When each peer (by fingerprint) was last seen alive — announce, probe
+  /// reply, register, or connect. Drives both the stale-only re-probing in
+  /// [refreshDiscovery] and ghost-peer pruning, so devices that left the
+  /// network drop off the Send radar instead of lingering as
+  /// guaranteed-timeout targets.
+  final Map<String, DateTime> _peerLastSeen = {};
+  Timer? _peerPruneTimer;
+
+  /// Peers unseen for this long are dropped from the radar. Announcements
+  /// arrive every 5s and hotspot sweeps at least every ~20s, so 45s means
+  /// several consecutive misses — genuinely gone, not one lost datagram.
+  static const peerTtl = Duration(seconds: 45);
+
+  /// Removes peers not seen within [peerTtl]. Peers with a live (non
+  /// terminal) session are kept: sweeps pause during transfers, so silence
+  /// while bytes are flowing is expected, not absence.
+  @visibleForTesting
+  void prunePeersNow({DateTime? now}) => _prunePeers(now: now);
+
+  void _prunePeers({DateTime? now}) {
+    final cutoff = (now ?? DateTime.now()).subtract(peerTtl);
+    final active = <String>{
+      for (final s in _sessions)
+        if (!s.isTerminal) s.peer.fingerprint,
+    };
+    var changed = false;
+    _peers.removeWhere((fp, _) {
+      if (active.contains(fp)) return false;
+      final seen = _peerLastSeen[fp];
+      if (seen != null && seen.isAfter(cutoff)) return false;
+      _peerLastSeen.remove(fp);
+      changed = true;
+      return true;
+    });
+    if (changed) notifyListeners();
+  }
+
   // ─── Symmetric sessions (F3) ───────────────────────────────────────────
   //
   // Once two devices pair (QR token, Direct Link probe, or an accepted
@@ -191,13 +228,39 @@ class AppState extends ChangeNotifier {
     _hotspotTeardown = teardown;
   }
 
+  /// Final-disposal hook for a hotspot controller adopted from the Receive
+  /// page (accept → home handoff); called after Disconnect stops the link.
+  void Function()? _adoptedHotspotDispose;
+
+  /// Adopts a live hosted hotspot from a closing surface so the link (and
+  /// any transfer riding on it) survives that surface's dispose. Keeps
+  /// [teardown] registered for the Disconnect path and takes over calling
+  /// [dispose] once the link is torn down.
+  void adoptHotspot({
+    required Future<void> Function() teardown,
+    required void Function() dispose,
+  }) {
+    _adoptedHotspotDispose?.call();
+    _adoptedHotspotDispose = dispose;
+    _hotspotTeardown = teardown;
+  }
+
   /// True after this device joined a peer-hosted hotspot as a guest and
   /// handed the network binding off to the session (F1 contract): the
   /// Disconnect path then releases it via [WifiJoiner.leave].
   bool _joinedHotspotAsGuest = false;
 
-  /// Marks that the session now owns a guest-side hotspot binding.
-  void markJoinedHotspotAsGuest() => _joinedHotspotAsGuest = true;
+  /// Marks that the session now owns a guest-side hotspot binding, and
+  /// takes over the network-lost callback from the Send page (the joined
+  /// network can drop mid-session — the OS unbinds; we surface it).
+  void markJoinedHotspotAsGuest() {
+    _joinedHotspotAsGuest = true;
+    WifiJoiner.setOnNetworkLost(() {
+      if (!_joinedHotspotAsGuest) return;
+      EventLog.instance.add('Direct link network was lost');
+      notifyListeners();
+    });
+  }
 
   /// Records (or refreshes) a symmetric link with [peer]. When [pin] is
   /// true the fingerprint is also pinned (verified badge + trust), which is
@@ -271,7 +334,16 @@ class AppState extends ChangeNotifier {
       final sender = _sender;
       if (sender != null) await sender.notifyDisconnect(peer);
     }
-    await _teardownDirectConnect();
+    // Scope the Direct Connect teardown: the hotspot / guest binding is
+    // shared infrastructure, not per-peer. Tearing it down while another
+    // linked peer (or an in-flight session with another peer) still rides
+    // the link would kill their transfers too — only drop the link once
+    // nobody else depends on it.
+    final linkStillNeeded = _linkedPeers.isNotEmpty ||
+        _sessions.any((s) => !s.isTerminal && s.peer.fingerprint != fp);
+    if (!linkStillNeeded) {
+      await _teardownDirectConnect();
+    }
     notifyListeners();
   }
 
@@ -279,7 +351,11 @@ class AppState extends ChangeNotifier {
   /// via the registered controller stop path, and release a guest-side
   /// join via [WifiJoiner.leave].
   Future<void> _teardownDirectConnect() async {
+    // Null out the hooks *before* invoking them: a second disconnect (or a
+    // race with the owning surface's dispose) must never re-invoke a stale
+    // teardown over an already-disposed hotspot controller.
     final teardown = _hotspotTeardown;
+    _hotspotTeardown = null;
     if (teardown != null) {
       try {
         await teardown();
@@ -287,8 +363,14 @@ class AppState extends ChangeNotifier {
         // Teardown is best-effort; the OS reclaims the reservation anyway.
       }
     }
+    final adoptedDispose = _adoptedHotspotDispose;
+    if (adoptedDispose != null) {
+      _adoptedHotspotDispose = null;
+      adoptedDispose();
+    }
     if (_joinedHotspotAsGuest) {
       _joinedHotspotAsGuest = false;
+      WifiJoiner.setOnNetworkLost(null);
       if (!_networkSilent) await WifiJoiner.leave();
     }
   }
@@ -326,6 +408,32 @@ class AppState extends ChangeNotifier {
 
   /// Local listening port (may differ from settings if it was in use).
   int? get port => _receiver?.port;
+
+  /// Retries starting the receiver after a failed boot (e.g. every candidate
+  /// port was taken, or the OS refused the bind while the network stack was
+  /// still coming up). No-op when the receiver is already listening.
+  /// Returns true when the device is discoverable afterwards.
+  Future<bool> retryReceiver() async {
+    if (_networkSilent) return false;
+    final receiver = _receiver;
+    if (receiver == null) return false;
+    if (receiver.port != null) return true;
+    try {
+      await receiver.start();
+      EventLog.instance.add(
+        'Receiver recovered: listening on '
+        '${_localIps.join(", ")}:${receiver.port}',
+      );
+      // Fresh announcement so peers learn the newly bound port immediately.
+      _discovery?.poke();
+      notifyListeners();
+      return true;
+    } catch (e) {
+      EventLog.instance.add('Receiver retry failed: $e');
+      notifyListeners();
+      return false;
+    }
+  }
 
   /// IPv4 addresses we're listening on (for the Settings screen).
   List<String> get localIps => List.unmodifiable(_localIps);
@@ -406,6 +514,10 @@ class AppState extends ChangeNotifier {
     if (settings.autoUpdateCheck) {
       unawaited(state._updateChecker.initialize());
     }
+    state._peerPruneTimer = Timer.periodic(
+      const Duration(seconds: 15),
+      (_) => state._prunePeers(),
+    );
     return state;
   }
 
@@ -432,18 +544,37 @@ class AppState extends ChangeNotifier {
     return gateways.contains(ip);
   }
 
+  /// Peers should not be re-probed while a recent sighting (announce or
+  /// probe reply) proves they are alive — re-dialling every known peer on
+  /// every 6 s refresh tick is pure battery/radio churn.
+  static const _peerProbeStaleAfter = Duration(seconds: 15);
+
   /// Pokes multicast announce and kicks off a fresh subnet sweep. Wired to
   /// the refresh button in the home page and the mode-switch handler so
   /// changing modes immediately rediscovers peers.
-  Future<void> refreshDiscovery() async {
+  ///
+  /// [userInitiated] marks an explicit user moment (opening the radar,
+  /// pressing refresh, joining a hotspot): only then is a healthy in-flight
+  /// sweep cancelled and restarted, and only then does the sweep bypass the
+  /// scanner's 20s throttle. The periodic UI re-kick passes false so a
+  /// running sweep reaches the hotspot prefixes at the end.
+  Future<void> refreshDiscovery({bool userInitiated = false}) async {
     if (_networkSilent) return;
     _discovery?.poke();
-    // Re-probe peers we already know about (including manually-added ones)
-    // so renamed devices show their current alias instead of a stale one.
+    // Re-probe known peers (including manually-added ones) whose last
+    // sighting has gone stale, so renamed devices show their current alias
+    // without re-dialling every live peer on every tick.
+    final now = DateTime.now();
     final known = _peers.values.toList();
     final sender = _sender;
     if (sender != null) {
       for (final peer in known) {
+        final seen = _peerLastSeen[peer.fingerprint];
+        if (!userInitiated &&
+            seen != null &&
+            now.difference(seen) < _peerProbeStaleAfter) {
+          continue;
+        }
         unawaited(sender.probe(peer).then((fresh) {
           if (fresh != null) _onPeerSeen(fresh);
         }));
@@ -455,24 +586,38 @@ class AppState extends ChangeNotifier {
       ..addAll(ips);
     if (settings.connectivityMode == ConnectivityMode.hotspot ||
         settings.connectivityMode == ConnectivityMode.lan) {
-      await _kickSubnetScan();
+      await _kickSubnetScan(userInitiated: userInitiated);
     }
   }
 
-  Future<void> _kickSubnetScan() async {
-    if (_scanning) {
-      _subnetScanner?.cancel();
-    }
+  /// Starts a subnet sweep. A sweep already in flight is left alone unless
+  /// [userInitiated] is set (explicit refresh / mode change): the periodic
+  /// tick used to cancel it and the replacement then no-op'd inside the
+  /// scanner's min-scan-interval debounce, so sweeps restarted forever and
+  /// rarely reached the well-known hotspot prefixes at the end. A
+  /// user-initiated sweep also bypasses that debounce outright.
+  Future<void> _kickSubnetScan({bool userInitiated = false}) async {
     final scanner = _subnetScanner;
     if (scanner == null) return;
-    _scanning = true;
-    notifyListeners();
-    try {
-      await scanner.scan(localIps: _localIps);
-    } finally {
-      _scanning = false;
-      notifyListeners();
+    if (_scanning) {
+      if (!userInitiated) return;
+      scanner.cancel();
     }
+    _setScanning(true);
+    try {
+      await scanner.scan(localIps: _localIps, force: userInitiated);
+    } finally {
+      _setScanning(false);
+    }
+  }
+
+  /// Flips the scanning flag, notifying only on an actual change — the
+  /// kick path runs on a 6 s tick and two unconditional global notifies
+  /// per tick kept idle pages rebuilding forever.
+  void _setScanning(bool value) {
+    if (_scanning == value) return;
+    _scanning = value;
+    notifyListeners();
   }
 
   void installIncomingPrompt(IncomingTransferPrompt prompt) {
@@ -490,7 +635,7 @@ class AppState extends ChangeNotifier {
       deviceType: detectDeviceType(),
       fingerprint: _fingerprint,
       port: _receiver?.port ?? settings.port,
-      protocol: 'http',
+      protocol: 'https',
       ip: _localIps.isEmpty ? '0.0.0.0' : _localIps.first,
     );
   }
@@ -504,6 +649,10 @@ class AppState extends ChangeNotifier {
       return 'LanLink device';
     }
   }
+
+  /// Public accessor for the effective save directory — used by the
+  /// consent flow's free-space check. Same resolution as receiving.
+  Future<Directory> resolveSaveDir() => _resolveSaveDir();
 
   Future<Directory> _resolveSaveDir() async {
     // Android always writes to the app's private external files dir first;
@@ -626,7 +775,14 @@ class AppState extends ChangeNotifier {
     unawaited(TransferForegroundService.instance.sync(active));
     // Throttle the subnet sweep while bytes are moving: active transfers
     // deserve the bandwidth, and discovery still works via multicast.
-    _subnetScanner?.transfersActive = active > 0;
+    // Gating only NEW scans is not enough — a 254-host sweep already in
+    // flight competes with transfer I/O for its whole duration, so cancel
+    // it too the moment a transfer becomes active.
+    final busy = active > 0;
+    _subnetScanner?.transfersActive = busy;
+    if (busy && (_subnetScanner?.isRunning ?? false)) {
+      _subnetScanner?.cancel();
+    }
   }
 
   /// Wires a session to the history store so it gets persisted as soon as
@@ -714,6 +870,7 @@ class AppState extends ChangeNotifier {
     }
     final existing = _peers[peer.fingerprint];
     _peers[peer.fingerprint] = peer;
+    _peerLastSeen[peer.fingerprint] = DateTime.now();
     // Only notify when something the UI renders (or dials) actually
     // changed. Peers re-announce every 5s and probes re-run every 6s, so an
     // unconditional notify here kept idle pages rebuilding forever.
@@ -732,7 +889,9 @@ class AppState extends ChangeNotifier {
     // change only needs a fresh announcement.
     _discovery?.poke();
     if (settings.connectivityMode == ConnectivityMode.hotspot && !_scanning) {
-      unawaited(_kickSubnetScan());
+      // A settings/mode change is an explicit trigger: restart the sweep
+      // so the new mode's subnets are covered immediately.
+      unawaited(_kickSubnetScan(userInitiated: true));
     }
     notifyListeners();
   }
@@ -910,7 +1069,9 @@ class AppState extends ChangeNotifier {
       return false;
     }
     return session.files.values.any(
-      (p) => (p.file.localPath ?? '').isNotEmpty,
+      (p) =>
+          (p.file.localPath ?? '').isNotEmpty ||
+          (p.file.contentUri ?? '').isNotEmpty,
     );
   }
 
@@ -921,7 +1082,8 @@ class AppState extends ChangeNotifier {
     if (session.direction != TransferDirection.send) return null;
     final files = session.files.values
         .map((p) => p.file)
-        .where((f) => (f.localPath ?? '').isNotEmpty)
+        .where((f) =>
+            (f.localPath ?? '').isNotEmpty || (f.contentUri ?? '').isNotEmpty)
         .toList();
     if (files.isEmpty) return null;
     EventLog.instance.add(
@@ -1011,7 +1173,7 @@ class AppState extends ChangeNotifier {
       deviceType: LanLinkProtocol.deviceTypeHeadless,
       fingerprint: '',
       port: port,
-      protocol: 'http',
+      protocol: 'https',
       ip: host,
     );
   }
@@ -1049,6 +1211,7 @@ class AppState extends ChangeNotifier {
     settings.removeListener(_onSettingsChanged);
     _updateChecker.removeListener(notifyListeners);
     _updateChecker.dispose();
+    _peerPruneTimer?.cancel();
     _subnetScanner?.cancel();
     _discovery?.stop();
     _receiver?.stop();

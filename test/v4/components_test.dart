@@ -105,6 +105,71 @@ void main() {
       );
     });
 
+    testWidgets(
+        'hidden + onRetryVisibility: shows "tap to retry" and fires the '
+        'callback on tap', (tester) async {
+      var retried = 0;
+      await tester.pumpWidget(_host(TwoVerbHome(
+        deviceName: 'Marmalade-Fox',
+        visible: false,
+        onRetryVisibility: () => retried++,
+        onSend: () {},
+        onReceive: () {},
+      )));
+      expect(
+        find.textContaining('tap to retry', findRichText: true),
+        findsOneWidget,
+      );
+      await tester.tap(find.byType(VisibilityStatusLine));
+      expect(retried, 1);
+    });
+
+    testWidgets('hidden without retry callback stays non-interactive',
+        (tester) async {
+      await tester.pumpWidget(_host(TwoVerbHome(
+        deviceName: 'Marmalade-Fox',
+        visible: false,
+        onSend: () {},
+        onReceive: () {},
+      )));
+      expect(
+        find.textContaining('tap to retry', findRichText: true),
+        findsNothing,
+      );
+      expect(
+        find.descendant(
+          of: find.byType(VisibilityStatusLine),
+          matching: find.byType(InkWell),
+        ),
+        findsNothing,
+      );
+    });
+
+    testWidgets('verb cards and retry line expose button semantics',
+        (tester) async {
+      final handle = tester.ensureSemantics();
+      await tester.pumpWidget(_host(TwoVerbHome(
+        deviceName: 'Marmalade-Fox',
+        visible: false,
+        onRetryVisibility: () {},
+        onSend: () {},
+        onReceive: () {},
+      )));
+      expect(
+        find.bySemanticsLabel(RegExp('Send. Pick files')),
+        findsOneWidget,
+      );
+      expect(
+        find.bySemanticsLabel(RegExp('Receive. Show a code')),
+        findsOneWidget,
+      );
+      expect(
+        find.bySemanticsLabel(RegExp('Retry becoming visible')),
+        findsOneWidget,
+      );
+      handle.dispose();
+    });
+
     testWidgets('renders the inline session strip slot', (tester) async {
       const marker = Key('strip');
       await tester.pumpWidget(_host(TwoVerbHome(
@@ -128,6 +193,25 @@ void main() {
           width: width,
         ));
         expect(tester.takeException(), isNull, reason: 'width $width');
+      }
+    });
+
+    testWidgets('verb cards grow at 2x accessibility text scale (no clip)',
+        (tester) async {
+      // Regression: fixed 180/300px card heights overflowed as soon as the
+      // user ran a large system font. Heights now scale with the text scaler.
+      for (final width in [390.0, 1200.0]) {
+        tester.view.physicalSize = Size(width, 1600);
+        tester.view.devicePixelRatio = 1;
+        tester.platformDispatcher.textScaleFactorTestValue = 2.0;
+        addTearDown(tester.view.reset);
+        addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+        await tester.pumpWidget(_host(
+          TwoVerbHome(
+              deviceName: 'Marmalade-Fox', onSend: () {}, onReceive: () {}),
+          width: width,
+        ));
+        expect(tester.takeException(), isNull, reason: 'width $width @2x');
       }
     });
   });
@@ -186,7 +270,9 @@ void main() {
         (tester) async {
       await tester.pumpWidget(_host(
           DeviceRadar(peers: const [], searching: false, onPeerTap: (_) {})));
-      expect(find.text('No devices nearby'), findsOneWidget);
+      expect(find.text('No devices found yet'), findsOneWidget);
+      // The empty state must coach, not dead-end: same Wi-Fi + QR escape.
+      expect(find.textContaining('same Wi-Fi'), findsOneWidget);
       expect(find.byType(CircularProgressIndicator), findsNothing);
     });
 
@@ -347,6 +433,24 @@ void main() {
       )));
       expect(find.text('wants to send you 1 file (1.2 GB)'), findsOneWidget);
       expect(find.byType(VerifiedBadge), findsNothing);
+    });
+
+    testWidgets('warning line renders when provided', (tester) async {
+      await tester.pumpWidget(_host(ConsentSheet(
+        data: const ConsentRequestData(
+          senderName: 'Sunny-Heron',
+          fileCount: 1,
+          totalSize: '1.2 GB',
+          warning: 'Low on space: only 800 MB free where files are saved.',
+        ),
+        onAccept: () {},
+        onDecline: () {},
+      )));
+      await tester.pump(); // let the warning FutureBuilder resolve
+      expect(find.textContaining('Low on space'), findsOneWidget);
+      expect(find.byIcon(Icons.warning_amber_rounded), findsOneWidget);
+      // Still a warning, not a block.
+      expect(find.text('Accept'), findsOneWidget);
     });
 
     testWidgets('Accept and Decline fire their callbacks', (tester) async {

@@ -153,6 +153,7 @@ class ConsentRequestData {
     required this.totalSize,
     this.verified = false,
     this.previewFileNames = const [],
+    this.warning,
   });
 
   /// Friendly name of the sender, e.g. "Purple-Otter".
@@ -169,4 +170,9 @@ class ConsentRequestData {
 
   /// Up to a few filenames to preview (the sheet truncates the rest).
   final List<String> previewFileNames;
+
+  /// Optional caution line (e.g. "Low on space: only 1.2 GB free") shown
+  /// above the actions. Accepting stays possible — it's a warning, not a
+  /// block, because the free-space probe is best-effort.
+  final String? warning;
 }

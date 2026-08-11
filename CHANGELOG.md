@@ -1,5 +1,69 @@
 # Changelog
 
+## 4.3.0 (+17) — "Gauntlet"
+
+This release folds together two lines of work: the security + hotspot
+hardening that shipped as the v4.2.0 tag but never landed on `main`, and a
+long polish pass across speed, usability, UI and platform support.
+
+### Security and transport (from the 4.2.0 line)
+- **HTTPS-only transport.** Every peer serves its own per-install
+  self-signed certificate; connections are trusted by certificate-hash
+  pinning (trust-on-first-use, then pinned), never by CA. Plain HTTP is
+  gone from the wire.
+- **Zero-copy sending on Android.** Files picked through the system
+  document picker stream straight from their `content://` source instead of
+  being copied into the cache first.
+- Receiver hardening: consented-size enforcement, isolated part files per
+  peer, an idle-session reaper, and disk backpressure.
+- Hotspot mode: fixed transfer stalls and flaky QR connects, cancellable
+  join waits, post-join readiness polling, and abortable subnet probes.
+
+### Speed
+- **Pipelined uploads** (up to 3 files in flight): ~2× faster on
+  many-small-file batches over a realistic 25 ms RTT link, with single-file
+  transfers unchanged.
+- Rolling 5-second speed window, so live speed and ETA stop jumping.
+- Announce burst on start and on every poke (0 / 400 ms / 1.2 s), plus a
+  broadcast fallback and periodic multicast re-join — devices show up
+  almost immediately instead of on the second scan.
+- Subnet sweeps also probe the receiver's fallback ports, and an explicit
+  user refresh bypasses the 20-second sweep throttle.
+
+### Usability
+- **Send a message**: type or paste a link, password or note and send it as
+  a text snippet; the receiver sees it inline with a **Copy message**
+  button.
+- Drag and drop onto the desktop window or the Send page.
+- One-tap **Open file** for single-file receives and **Open folder** for the
+  rest; **Send again** on completed sends; **Clear** on the staged banner.
+- History rows name the file (with its type glyph) instead of "1 file".
+- The Direct Link address is a tap-to-copy chip.
+- Per-type file glyphs in the picker, consent sheet and session cards.
+- Low-space warning before you accept a transfer that wouldn't fit.
+- Actionable errors for disk-full and permission failures, an honest
+  "You're hidden — tap to retry" state, and coaching empty states.
+- Ghost peers disappear from the radar after 45 s of silence.
+- Button semantics for screen readers on the home verb cards.
+
+### Reliability and platform
+- Fixed a data-loss race where two same-named files uploaded in parallel
+  could overwrite each other; finalization now happens under a lock with
+  in-memory name reservation.
+- Windows-safe filename sanitization on the receive path.
+- Stale `.part` files are pruned after 7 days.
+- Desktop window management: sane default size and a minimum floor.
+- Toolchain: Flutter 3.44.9, Gradle 8.14.3, AGP 8.11.1, Kotlin 2.2.20,
+  Android compileSdk 36; file_picker 11, mobile_scanner 7, dio 5.11.
+
+### Known limitations
+- HTTPS costs throughput on weak single-core hardware: a loopback benchmark
+  in the CI-class sandbox measures ~15 MB/s for one large file versus
+  ~190 MB/s over the old plain-HTTP path. Real-world Wi-Fi is usually the
+  narrower bottleneck, but TLS is no longer free.
+- Hotspot SSID/password are OS-randomized per session and the guest has no
+  internet while joined (Android platform rule for all non-system apps).
+
 ## 4.1.0 (+15) — "Seamless Direct"
 
 ### Direct Connect — works without shared Wi-Fi

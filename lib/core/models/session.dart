@@ -146,12 +146,39 @@ class TransferSession extends ChangeNotifier {
     notifyListeners();
   }
 
-  void _recomputeSpeed() {
-    final elapsed =
-        DateTime.now().difference(startedAt).inMilliseconds / 1000.0;
-    if (elapsed <= 0) return;
-    speedBytesPerSec = transferredBytes / elapsed;
+  /// (timestamp, transferredBytes) samples inside the trailing window.
+  final List<(DateTime, int)> _speedSamples = [];
+
+  /// Trailing window for the live speed estimate. A lifetime average lies
+  /// after any speed change (a mid-transfer Wi-Fi dip kept the display —
+  /// and the ETA computed from it — wrong for minutes); a short window
+  /// tracks what the link does *now* while still smoothing chunk jitter.
+  static const speedWindow = Duration(seconds: 5);
+
+  void _recomputeSpeed({DateTime? now}) {
+    final at = now ?? DateTime.now();
+    final total = transferredBytes;
+    _speedSamples.add((at, total));
+    final cutoff = at.subtract(speedWindow);
+    while (
+        _speedSamples.length > 1 && _speedSamples.first.$1.isBefore(cutoff)) {
+      _speedSamples.removeAt(0);
+    }
+    final (firstAt, firstBytes) = _speedSamples.first;
+    final dt = at.difference(firstAt).inMilliseconds / 1000.0;
+    if (dt < 0.2) {
+      // Not enough window yet (transfer just started): lifetime average is
+      // the best available estimate and avoids a wild first reading.
+      final elapsed = at.difference(startedAt).inMilliseconds / 1000.0;
+      if (elapsed > 0) speedBytesPerSec = total / elapsed;
+      return;
+    }
+    speedBytesPerSec = (total - firstBytes) / dt;
   }
+
+  /// Test hook: recompute the speed as if called at [now].
+  @visibleForTesting
+  void recomputeSpeedAt(DateTime now) => _recomputeSpeed(now: now);
 
   /// Snapshot the terminal state of this session as a JSON-serializable map
   /// suitable for persisting to history. Only finished sessions
@@ -202,7 +229,7 @@ class TransferSession extends ChangeNotifier {
           LanLinkProtocol.deviceTypeHeadless,
       fingerprint: (peerJson['fingerprint'] as String?) ?? '',
       port: (peerJson['port'] as num?)?.toInt() ?? LanLinkProtocol.defaultPort,
-      protocol: (peerJson['protocol'] as String?) ?? 'http',
+      protocol: (peerJson['protocol'] as String?) ?? 'https',
       ip: (peerJson['ip'] as String?) ?? '0.0.0.0',
     );
     final filesJson = (json['files'] as List?) ?? const [];

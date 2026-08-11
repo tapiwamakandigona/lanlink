@@ -6,6 +6,7 @@ import '../core/settings/app_settings.dart';
 import '../core/util/format.dart';
 import '../state/app_state.dart';
 import 'shell/saved_location.dart';
+import 'v4/v4.dart';
 
 class HistoryPage extends StatelessWidget {
   const HistoryPage({super.key});
@@ -90,7 +91,9 @@ class HistoryPage extends StatelessWidget {
         icon = isSend
             ? Icons.cloud_upload_outlined
             : Icons.cloud_download_outlined;
-        color = Colors.green;
+        // The single semantic green lives in EmberSemantics; a literal
+        // Colors.green here would reintroduce the v3 competing-greens bug.
+        color = context.ember.success;
         status = isSend ? 'Sent' : 'Received';
         break;
       case TransferStatus.failed:
@@ -109,16 +112,33 @@ class HistoryPage extends StatelessWidget {
         status = 'In progress';
     }
     final total = s.files.values.fold<int>(0, (a, b) => a + b.file.size);
+    // Single-file rows name the file (and show its type glyph) instead of
+    // the useless "1 file" — that's the one thing you scan history for.
+    final single = s.files.length == 1 ? s.files.values.first.file : null;
+    final whatLabel =
+        single != null ? single.fileName : '${s.files.length} files';
     final peerLabel = settings.nicknameFor(s.peer.fingerprint) ??
         (s.peer.alias.isEmpty ? 'Unknown device' : s.peer.alias);
     return Card(
       child: ListTile(
         leading: Icon(icon, color: color),
         title: Text('$status • $peerLabel', overflow: TextOverflow.ellipsis),
-        subtitle: Text(
-          '${s.files.length} file${s.files.length == 1 ? "" : "s"} • '
-          '${formatBytes(total)} • ${_timeAgo(s.finishedAt ?? s.startedAt)}',
-          style: theme.textTheme.bodySmall,
+        subtitle: Row(
+          children: [
+            if (single != null) ...[
+              Icon(fileGlyphFor(single.fileName),
+                  size: 14, color: theme.colorScheme.onSurfaceVariant),
+              const SizedBox(width: 4),
+            ],
+            Expanded(
+              child: Text(
+                '$whatLabel • ${formatBytes(total)} • '
+                '${_timeAgo(s.finishedAt ?? s.startedAt)}',
+                style: theme.textTheme.bodySmall,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
         ),
         trailing: AppState.canRetry(s)
             ? TextButton.icon(
@@ -126,18 +146,32 @@ class HistoryPage extends StatelessWidget {
                 label: const Text('Retry'),
                 onPressed: () => _retry(context, s),
               )
-            : (s.direction == TransferDirection.receive &&
+            : s.direction == TransferDirection.receive &&
                     s.status == TransferStatus.completed
                 ? TextButton.icon(
                     icon: const Icon(Icons.folder_open_outlined, size: 18),
                     label: const Text('Where is it?'),
                     onPressed: () => showSavedLocationDialog(context, s),
                   )
-                : null),
+                : _canSendAgain(s)
+                    ? TextButton.icon(
+                        icon: const Icon(Icons.send_outlined, size: 18),
+                        label: const Text('Send again'),
+                        onPressed: () => _retry(context, s),
+                      )
+                    : null,
         isThreeLine: false,
       ),
     );
   }
+
+  /// A completed outgoing send whose source files still exist can be
+  /// re-sent in one tap (ShareIt/Quick Share both offer this; re-picking
+  /// the same files is pure friction).
+  bool _canSendAgain(TransferSession s) =>
+      s.direction == TransferDirection.send &&
+      s.status == TransferStatus.completed &&
+      s.files.values.any((p) => (p.file.localPath ?? '').isNotEmpty);
 
   Future<void> _retry(BuildContext context, TransferSession s) async {
     final messenger = ScaffoldMessenger.of(context);
