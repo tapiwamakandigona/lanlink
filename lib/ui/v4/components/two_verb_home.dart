@@ -203,8 +203,9 @@ class _VerbCard extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final bg = primary ? scheme.primary : scheme.surfaceContainerLowest;
     final fg = primary ? scheme.onPrimary : scheme.onSurface;
-    final sub =
-        primary ? scheme.onPrimary.withValues(alpha: 0.78) : scheme.onSurfaceVariant;
+    final sub = primary
+        ? scheme.onPrimary.withValues(alpha: 0.78)
+        : scheme.onSurfaceVariant;
     return Semantics(
       button: true,
       label: '$label. $caption',

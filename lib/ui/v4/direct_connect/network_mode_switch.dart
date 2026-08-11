@@ -107,7 +107,8 @@ class _Segment extends StatelessWidget {
               style: VType.label.copyWith(
                 color: selected
                     ? scheme.onSurface
-                    : scheme.onSurfaceVariant.withValues(alpha: enabled ? 1.0 : 0.5),
+                    : scheme.onSurfaceVariant
+                        .withValues(alpha: enabled ? 1.0 : 0.5),
               ),
             ),
           ),
