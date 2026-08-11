@@ -150,6 +150,41 @@ class AppState extends ChangeNotifier {
   final Map<String, Device> _peers = {};
   Map<String, Device> get peers => Map.unmodifiable(_peers);
 
+  /// When each peer was last observed (announcement, probe, or manual add).
+  /// Drives ghost-peer pruning so devices that left the network drop off
+  /// the Send radar instead of lingering as guaranteed-timeout targets.
+  final Map<String, DateTime> _peerLastSeen = {};
+  Timer? _peerPruneTimer;
+
+  /// Peers unseen for this long are dropped from the radar. Announcements
+  /// arrive every 5s and hotspot sweeps at least every ~20s, so 45s means
+  /// several consecutive misses — genuinely gone, not one lost datagram.
+  static const peerTtl = Duration(seconds: 45);
+
+  /// Removes peers not seen within [peerTtl]. Peers with a live (non
+  /// terminal) session are kept: sweeps pause during transfers, so silence
+  /// while bytes are flowing is expected, not absence.
+  @visibleForTesting
+  void prunePeersNow({DateTime? now}) => _prunePeers(now: now);
+
+  void _prunePeers({DateTime? now}) {
+    final cutoff = (now ?? DateTime.now()).subtract(peerTtl);
+    final active = <String>{
+      for (final s in _sessions)
+        if (!s.isTerminal) s.peer.fingerprint,
+    };
+    var changed = false;
+    _peers.removeWhere((fp, _) {
+      if (active.contains(fp)) return false;
+      final seen = _peerLastSeen[fp];
+      if (seen != null && seen.isAfter(cutoff)) return false;
+      _peerLastSeen.remove(fp);
+      changed = true;
+      return true;
+    });
+    if (changed) notifyListeners();
+  }
+
   // ─── Symmetric sessions (F3) ───────────────────────────────────────────
   //
   // Once two devices pair (QR token, Direct Link probe, or an accepted
@@ -432,6 +467,10 @@ class AppState extends ChangeNotifier {
     if (settings.autoUpdateCheck) {
       unawaited(state._updateChecker.initialize());
     }
+    state._peerPruneTimer = Timer.periodic(
+      const Duration(seconds: 15),
+      (_) => state._prunePeers(),
+    );
     return state;
   }
 
@@ -740,6 +779,7 @@ class AppState extends ChangeNotifier {
     }
     final existing = _peers[peer.fingerprint];
     _peers[peer.fingerprint] = peer;
+    _peerLastSeen[peer.fingerprint] = DateTime.now();
     // Only notify when something the UI renders (or dials) actually
     // changed. Peers re-announce every 5s and probes re-run every 6s, so an
     // unconditional notify here kept idle pages rebuilding forever.
@@ -1075,6 +1115,7 @@ class AppState extends ChangeNotifier {
     settings.removeListener(_onSettingsChanged);
     _updateChecker.removeListener(notifyListeners);
     _updateChecker.dispose();
+    _peerPruneTimer?.cancel();
     _subnetScanner?.cancel();
     _discovery?.stop();
     _receiver?.stop();
