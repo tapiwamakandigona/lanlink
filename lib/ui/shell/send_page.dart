@@ -13,6 +13,7 @@ import '../../core/models/file_info.dart';
 import '../../core/platform/wifi_joiner.dart';
 import '../../state/app_state.dart';
 import '../picker/share_picker_page.dart';
+import '../widgets/desktop_drop_region.dart';
 import '../v4/direct_connect/connect_router.dart';
 import '../v4/v4.dart';
 import 'session_display.dart';
@@ -328,117 +329,122 @@ class _SendPageState extends State<SendPage> {
     final hasScanner =
         widget.scannerBuilder != null || SendPage.cameraSupported;
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Send')),
-      body: SafeArea(
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 560),
-            child: ListView(
-              padding: const EdgeInsets.all(VSpace.x5),
-              children: [
-                if (_staged.isNotEmpty) ...[
+    return DesktopDropRegion(
+      hint: 'Drop to stage for sending',
+      onFiles: (files) => setState(() => _staged = List.of(files)),
+      child: Scaffold(
+        appBar: AppBar(title: const Text('Send')),
+        body: SafeArea(
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 560),
+              child: ListView(
+                padding: const EdgeInsets.all(VSpace.x5),
+                children: [
+                  if (_staged.isNotEmpty) ...[
+                    Text(
+                      _staged.length == 1
+                          ? 'Ready to send ${_staged.first.fileName}'
+                          : 'Ready to send ${_staged.length} files',
+                      style: VType.bodyStrong.copyWith(color: scheme.onSurface),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: VSpace.x4),
+                  ],
+                  Text('Nearby devices',
+                      style: VType.heading.copyWith(color: scheme.onSurface)),
+                  const SizedBox(height: VSpace.x1),
                   Text(
-                    _staged.length == 1
-                        ? 'Ready to send ${_staged.first.fileName}'
-                        : 'Ready to send ${_staged.length} files',
-                    style: VType.bodyStrong.copyWith(color: scheme.onSurface),
-                    textAlign: TextAlign.center,
+                    'Tap a device to choose files and send.',
+                    style:
+                        VType.caption.copyWith(color: scheme.onSurfaceVariant),
                   ),
                   const SizedBox(height: VSpace.x4),
-                ],
-                Text('Nearby devices',
-                    style: VType.heading.copyWith(color: scheme.onSurface)),
-                const SizedBox(height: VSpace.x1),
-                Text(
-                  'Tap a device to choose files and send.',
-                  style: VType.caption.copyWith(color: scheme.onSurfaceVariant),
-                ),
-                const SizedBox(height: VSpace.x4),
-                DeviceRadar(
-                  peers: [
-                    for (final p in peers) radarPeerData(state.settings, p),
-                  ],
-                  // Real discovery state (perf S3): the radar's spinner
-                  // only animates while a sweep is actually in flight, so
-                  // an idle screen stops repainting every frame.
-                  searching: state.isScanning,
-                  onPeerTap: (tapped) {
-                    if (_busy) return;
-                    // Resolve by fingerprint, never by display name:
-                    // aliases collide (or can be spoofed), and the peer
-                    // list mutates under a 6s discovery refresh. No match
-                    // => the device left; never fall back to an arbitrary
-                    // peer.
-                    final peer = state.peers[tapped.id];
-                    if (peer == null) {
-                      _showError('That device just went offline. '
-                          'Wait for it to reappear, then tap it again.');
-                      return;
-                    }
-                    unawaited(_sendTo(peer));
-                  },
-                ),
-                if (_connecting) ...[
-                  const SizedBox(height: VSpace.x4),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      // RepaintBoundary: the looping spinner repaints every
-                      // frame — keep that off the rest of the page's layer.
-                      RepaintBoundary(
-                        child: SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2.5,
-                            color: scheme.primary,
+                  DeviceRadar(
+                    peers: [
+                      for (final p in peers) radarPeerData(state.settings, p),
+                    ],
+                    // Real discovery state (perf S3): the radar's spinner
+                    // only animates while a sweep is actually in flight, so
+                    // an idle screen stops repainting every frame.
+                    searching: state.isScanning,
+                    onPeerTap: (tapped) {
+                      if (_busy) return;
+                      // Resolve by fingerprint, never by display name:
+                      // aliases collide (or can be spoofed), and the peer
+                      // list mutates under a 6s discovery refresh. No match
+                      // => the device left; never fall back to an arbitrary
+                      // peer.
+                      final peer = state.peers[tapped.id];
+                      if (peer == null) {
+                        _showError('That device just went offline. '
+                            'Wait for it to reappear, then tap it again.');
+                        return;
+                      }
+                      unawaited(_sendTo(peer));
+                    },
+                  ),
+                  if (_connecting) ...[
+                    const SizedBox(height: VSpace.x4),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        // RepaintBoundary: the looping spinner repaints every
+                        // frame — keep that off the rest of the page's layer.
+                        RepaintBoundary(
+                          child: SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2.5,
+                              color: scheme.primary,
+                            ),
                           ),
                         ),
+                        const SizedBox(width: VSpace.x3),
+                        Text(
+                          _progressLine ?? 'Connecting…',
+                          style: VType.body
+                              .copyWith(color: scheme.onSurfaceVariant),
+                        ),
+                      ],
+                    ),
+                  ],
+                  if (_error != null) ...[
+                    const SizedBox(height: VSpace.x4),
+                    Text(
+                      _error!,
+                      style: VType.body.copyWith(color: context.ember.danger),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                  const SizedBox(height: VSpace.x6),
+                  if (hasScanner) ...[
+                    if (_scanning) ...[
+                      QrScanFrame(child: _buildScanner()),
+                      const SizedBox(height: VSpace.x2),
+                      TextButton(
+                        onPressed: _toggleScanner,
+                        child: const Text('Hide camera'),
                       ),
-                      const SizedBox(width: VSpace.x3),
-                      Text(
-                        _progressLine ?? 'Connecting…',
-                        style:
-                            VType.body.copyWith(color: scheme.onSurfaceVariant),
+                    ] else
+                      OutlinedButton.icon(
+                        onPressed: _busy ? null : _toggleScanner,
+                        icon: const Icon(Icons.qr_code_scanner),
+                        label: const Text('Scan their code'),
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size.fromHeight(52),
+                        ),
                       ),
-                    ],
+                    const SizedBox(height: VSpace.x4),
+                  ],
+                  _DirectLinkField(
+                    controller: _hostPortCtrl,
+                    busy: _busy,
+                    onConnect: _connectDirect,
                   ),
                 ],
-                if (_error != null) ...[
-                  const SizedBox(height: VSpace.x4),
-                  Text(
-                    _error!,
-                    style: VType.body.copyWith(color: context.ember.danger),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-                const SizedBox(height: VSpace.x6),
-                if (hasScanner) ...[
-                  if (_scanning) ...[
-                    QrScanFrame(child: _buildScanner()),
-                    const SizedBox(height: VSpace.x2),
-                    TextButton(
-                      onPressed: _toggleScanner,
-                      child: const Text('Hide camera'),
-                    ),
-                  ] else
-                    OutlinedButton.icon(
-                      onPressed: _busy ? null : _toggleScanner,
-                      icon: const Icon(Icons.qr_code_scanner),
-                      label: const Text('Scan their code'),
-                      style: OutlinedButton.styleFrom(
-                        minimumSize: const Size.fromHeight(52),
-                      ),
-                    ),
-                  const SizedBox(height: VSpace.x4),
-                ],
-                _DirectLinkField(
-                  controller: _hostPortCtrl,
-                  busy: _busy,
-                  onConnect: _connectDirect,
-                ),
-              ],
+              ),
             ),
           ),
         ),
