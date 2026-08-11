@@ -37,3 +37,39 @@ List<String>? revealCommandFor(String os, String folder) {
       return null;
   }
 }
+
+/// Opens [file] with the platform's default application (desktop only).
+///
+/// AirDrop and Quick Share open a just-received file in one tap; this is
+/// the desktop equivalent. Mobile returns false — the Downloads publish
+/// (Android) and share sheet cover it there.
+Future<bool> openFile(String file) async {
+  final cmd = openFileCommandFor(Platform.operatingSystem, file);
+  if (cmd == null) return false;
+  try {
+    await Process.start(
+      cmd.first,
+      cmd.sublist(1),
+      mode: ProcessStartMode.detached,
+    );
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+/// The default-app open command for [os], or null when unsupported. On
+/// Windows `explorer <file>` opens it with the associated app without
+/// needing a shell (`start` is a cmd builtin). Pure for unit tests.
+List<String>? openFileCommandFor(String os, String file) {
+  switch (os) {
+    case 'windows':
+      return ['explorer', file];
+    case 'macos':
+      return ['open', file];
+    case 'linux':
+      return ['xdg-open', file];
+    default:
+      return null;
+  }
+}
