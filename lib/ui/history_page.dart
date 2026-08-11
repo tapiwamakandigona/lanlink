@@ -112,16 +112,33 @@ class HistoryPage extends StatelessWidget {
         status = 'In progress';
     }
     final total = s.files.values.fold<int>(0, (a, b) => a + b.file.size);
+    // Single-file rows name the file (and show its type glyph) instead of
+    // the useless "1 file" — that's the one thing you scan history for.
+    final single = s.files.length == 1 ? s.files.values.first.file : null;
+    final whatLabel =
+        single != null ? single.fileName : '${s.files.length} files';
     final peerLabel = settings.nicknameFor(s.peer.fingerprint) ??
         (s.peer.alias.isEmpty ? 'Unknown device' : s.peer.alias);
     return Card(
       child: ListTile(
         leading: Icon(icon, color: color),
         title: Text('$status • $peerLabel', overflow: TextOverflow.ellipsis),
-        subtitle: Text(
-          '${s.files.length} file${s.files.length == 1 ? "" : "s"} • '
-          '${formatBytes(total)} • ${_timeAgo(s.finishedAt ?? s.startedAt)}',
-          style: theme.textTheme.bodySmall,
+        subtitle: Row(
+          children: [
+            if (single != null) ...[
+              Icon(fileGlyphFor(single.fileName),
+                  size: 14, color: theme.colorScheme.onSurfaceVariant),
+              const SizedBox(width: 4),
+            ],
+            Expanded(
+              child: Text(
+                '$whatLabel • ${formatBytes(total)} • '
+                '${_timeAgo(s.finishedAt ?? s.startedAt)}',
+                style: theme.textTheme.bodySmall,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
         ),
         trailing: AppState.canRetry(s)
             ? TextButton.icon(
