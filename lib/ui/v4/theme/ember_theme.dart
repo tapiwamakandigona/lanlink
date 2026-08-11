@@ -93,7 +93,7 @@ abstract final class EmberTheme {
             .merge(VType.heading)
             .copyWith(color: scheme.onSurface),
       ),
-      cardTheme: CardTheme(
+      cardTheme: CardThemeData(
         elevation: 0,
         color: scheme.surfaceContainerLowest,
         shape: RoundedRectangleBorder(
@@ -147,7 +147,7 @@ abstract final class EmberTheme {
         shape: const RoundedRectangleBorder(borderRadius: VRadius.sheetTop),
         showDragHandle: true,
       ),
-      dialogTheme: DialogTheme(
+      dialogTheme: DialogThemeData(
         backgroundColor: scheme.surfaceContainerLowest,
         surfaceTintColor: Colors.transparent,
         shape: const RoundedRectangleBorder(borderRadius: VRadius.lgAll),

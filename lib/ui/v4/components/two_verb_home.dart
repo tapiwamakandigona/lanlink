@@ -204,7 +204,7 @@ class _VerbCard extends StatelessWidget {
     final bg = primary ? scheme.primary : scheme.surfaceContainerLowest;
     final fg = primary ? scheme.onPrimary : scheme.onSurface;
     final sub =
-        primary ? scheme.onPrimary.withOpacity(0.78) : scheme.onSurfaceVariant;
+        primary ? scheme.onPrimary.withValues(alpha: 0.78) : scheme.onSurfaceVariant;
     return Semantics(
       button: true,
       label: '$label. $caption',
@@ -229,7 +229,7 @@ class _VerbCard extends StatelessWidget {
                   height: 40,
                   decoration: BoxDecoration(
                     color: primary
-                        ? scheme.onPrimary.withOpacity(0.16)
+                        ? scheme.onPrimary.withValues(alpha: 0.16)
                         : scheme.primaryContainer,
                     shape: BoxShape.circle,
                   ),

@@ -148,7 +148,7 @@ class _HelpPageState extends State<HelpPage> {
       other: _other!,
     );
     return Card(
-      color: theme.colorScheme.primaryContainer.withOpacity(0.35),
+      color: theme.colorScheme.primaryContainer.withValues(alpha: 0.35),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
