@@ -114,6 +114,34 @@ class Receiver {
     _httpServer = await _bindWithFallback(handler, desired);
   }
 
+  /// Age limit after which an orphaned .part file stops being useful as a
+  /// resume head start and only wastes disk.
+  static const partFileTtl = Duration(days: 7);
+
+  /// Whether stale-part pruning already ran for this receiver instance.
+  bool _partsPruned = false;
+
+  /// Deletes stale partial files left by transfers that never completed.
+  /// Fresh parts stay: they are the resume head start for a retry. Runs
+  /// lazily (once per instance) off the first part-file access, so it adds
+  /// no startup I/O and no extra saveDirProvider calls; failures are
+  /// irrelevant.
+  @visibleForTesting
+  Future<void> prunePartFiles(Directory saveDir) async {
+    try {
+      final partsDir = Directory(p.join(saveDir.path, '.lanlink_parts'));
+      if (!await partsDir.exists()) return;
+      final cutoff = DateTime.now().subtract(partFileTtl);
+      await for (final entity in partsDir.list()) {
+        if (entity is! File) continue;
+        try {
+          final stat = await entity.stat();
+          if (stat.modified.isBefore(cutoff)) await entity.delete();
+        } catch (_) {}
+      }
+    } catch (_) {}
+  }
+
   /// Binds the HTTP server on [desired], falling back to nearby ports and
   /// finally an OS-assigned ephemeral port. Another LanLink (or LocalSend)
   /// instance on the same machine must not take the whole app down.
@@ -718,6 +746,10 @@ class Receiver {
   /// sanitized file name + size inside a hidden subfolder of the save dir,
   /// so a fresh session for the same file finds the earlier bytes.
   Future<File> _partFileFor(Directory saveDir, FileInfo info) async {
+    if (!_partsPruned) {
+      _partsPruned = true;
+      unawaited(prunePartFiles(saveDir));
+    }
     final partsDir = Directory(p.join(saveDir.path, '.lanlink_parts'));
     await partsDir.create(recursive: true);
     final safe = info.fileName.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
