@@ -401,8 +401,12 @@ class Receiver {
         );
         await targetDir.create(recursive: true);
       }
-      finalPath = await _uniqueOutputPath(targetDir, segments.last);
-      await partFile.rename(finalPath);
+      finalPath = await uniqueOutputPath(targetDir, segments.last);
+      try {
+        await partFile.rename(finalPath);
+      } finally {
+        _releaseReservedPath(finalPath);
+      }
     } on _SessionNoLongerActive {
       // Session was cancelled (or failed) while this upload streamed in.
       // Keep whatever made it to disk as a resume head start, but do not
@@ -720,24 +724,43 @@ class Receiver {
     return File(p.join(partsDir.path, '$safe.${info.size}.part'));
   }
 
-  Future<String> _uniqueOutputPath(Directory dir, String fileName) async {
+  /// Paths handed out by [uniqueOutputPath] whose rename has not completed
+  /// yet. With pipelined parallel uploads, two same-named files can both
+  /// pass the on-disk existence check before either rename lands; the
+  /// synchronous check-and-add on this set is what makes the reservation
+  /// race-free within the event loop.
+  final Set<String> _reservedPaths = {};
+
+  @visibleForTesting
+  Future<String> uniqueOutputPath(Directory dir, String fileName) async {
     final base = p.basenameWithoutExtension(fileName);
     final ext = p.extension(fileName);
     String candidate = p.join(dir.path, fileName);
     int i = 1;
-    while (await File(candidate).exists() ||
-        await File('$candidate.lanlink-part').exists()) {
-      candidate = p.join(dir.path, '$base ($i)$ext');
-      i++;
+    while (true) {
+      final taken = await File(candidate).exists() ||
+          await File('$candidate.lanlink-part').exists() ||
+          // No await between this check and the add below: reservation is
+          // atomic within the event loop.
+          !_reservedPaths.add(candidate);
+      if (!taken) return candidate;
       if (i > 9999) {
         candidate = p.join(
           dir.path,
           '$base-${Random().nextInt(1 << 32).toRadixString(36)}$ext',
         );
-        break;
+        _reservedPaths.add(candidate);
+        return candidate;
       }
+      candidate = p.join(dir.path, '$base ($i)$ext');
+      i++;
     }
-    return candidate;
+  }
+
+  /// Releases a reservation once the file exists on disk (or the write
+  /// failed and the path will not be used).
+  void _releaseReservedPath(String? path) {
+    if (path != null) _reservedPaths.remove(path);
   }
 }
 
