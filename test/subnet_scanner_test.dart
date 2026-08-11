@@ -149,4 +149,45 @@ void main() {
     expect(seen!.alias, 'fallback-peer');
     expect(seen!.port, fake.port);
   });
+
+  test(
+      'throttle: unforced scan within minScanInterval is a no-op, '
+      'force bypasses it', () async {
+    final sender = Sender(
+      localDeviceProvider: () => Device(
+        alias: 'me',
+        version: LanLinkProtocol.protocolVersion,
+        deviceModel: 'me',
+        deviceType: LanLinkProtocol.deviceTypeHeadless,
+        fingerprint: 'me',
+        port: 53317,
+        protocol: 'http',
+        ip: '127.0.0.1',
+      ),
+    );
+    final scanner = SubnetScanner(
+      sender: sender,
+      onPeer: (_) {},
+      // Empty localIps + no fallbacks reachable: sweep is instant.
+      ports: const [1],
+      perHostTimeout: const Duration(milliseconds: 50),
+      parallelProbes: 4,
+      minScanInterval: const Duration(minutes: 5),
+    );
+
+    await scanner.scan(localIps: const [], force: true);
+    final first = scanner.lastScanStartedAt;
+    expect(first, isNotNull);
+
+    // Within the interval: unforced re-kick (the periodic UI cadence)
+    // must not start a new sweep.
+    await scanner.scan(localIps: const []);
+    expect(scanner.lastScanStartedAt, first,
+        reason: 'unforced scan inside minScanInterval must be skipped');
+
+    // An explicit user refresh does start one.
+    await scanner.scan(localIps: const [], force: true);
+    expect(scanner.lastScanStartedAt!.isAfter(first!), isTrue,
+        reason: 'force must bypass the throttle');
+  });
 }

@@ -55,6 +55,11 @@ class SubnetScanner {
   bool _running = false;
   int _generation = 0;
   DateTime? _lastScanStarted;
+
+  /// When the last accepted sweep started; null before the first one.
+  /// Test-visible so throttle behavior can be asserted without sockets.
+  @visibleForTesting
+  DateTime? get lastScanStartedAt => _lastScanStarted;
   bool _transfersActive = false;
 
   bool get isRunning => _running;

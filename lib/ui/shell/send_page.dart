@@ -90,7 +90,9 @@ class _SendPageState extends State<SendPage> {
     super.initState();
     _staged = List.of(widget.prestagedFiles ?? const []);
     final state = context.read<AppState>();
-    unawaited(state.refreshDiscovery());
+    // Opening the radar is an explicit user moment: bypass the sweep
+    // throttle so "open Send, see devices" is as fast as we can make it.
+    unawaited(state.refreshDiscovery(force: true));
     _rescan = Timer.periodic(const Duration(seconds: 6), (_) {
       if (!mounted) return;
       unawaited(context.read<AppState>().refreshDiscovery());
@@ -189,7 +191,9 @@ class _SendPageState extends State<SendPage> {
             }
             // Give the freshly bound network a beat before connecting.
             await Future<void>.delayed(const Duration(milliseconds: 800));
-            if (mounted) await context.read<AppState>().refreshDiscovery();
+            if (mounted) {
+              await context.read<AppState>().refreshDiscovery(force: true);
+            }
         }
       }
       if (!mounted) return;

@@ -500,7 +500,11 @@ class AppState extends ChangeNotifier {
   /// Pokes multicast announce and kicks off a fresh subnet sweep. Wired to
   /// the refresh button in the home page and the mode-switch handler so
   /// changing modes immediately rediscovers peers.
-  Future<void> refreshDiscovery() async {
+  ///
+  /// [force] bypasses the scanner's 20s throttle — pass it for explicit
+  /// user moments (opening the radar, joining a hotspot), never for the
+  /// periodic UI re-kick.
+  Future<void> refreshDiscovery({bool force = false}) async {
     if (_networkSilent) return;
     _discovery?.poke();
     // Re-probe peers we already know about (including manually-added ones)
@@ -520,11 +524,11 @@ class AppState extends ChangeNotifier {
       ..addAll(ips);
     if (settings.connectivityMode == ConnectivityMode.hotspot ||
         settings.connectivityMode == ConnectivityMode.lan) {
-      await _kickSubnetScan();
+      await _kickSubnetScan(force: force);
     }
   }
 
-  Future<void> _kickSubnetScan() async {
+  Future<void> _kickSubnetScan({bool force = false}) async {
     if (_scanning) {
       _subnetScanner?.cancel();
     }
@@ -533,7 +537,7 @@ class AppState extends ChangeNotifier {
     _scanning = true;
     notifyListeners();
     try {
-      await scanner.scan(localIps: _localIps);
+      await scanner.scan(localIps: _localIps, force: force);
     } finally {
       _scanning = false;
       notifyListeners();
