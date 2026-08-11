@@ -163,7 +163,9 @@ class _SettingsPageState extends State<SettingsPage> {
               state.localIps.isEmpty
                   ? 'no LAN interface'
                   : state.port == null
-                      ? '${state.localIps.join(", ")} — not receiving'
+                      ? // "hidden" matches the home line ("You're hidden right
+                      // now") — one word for one state everywhere.
+                      '${state.localIps.join(", ")} — hidden'
                       : '${state.localIps.join(", ")}:${state.port}'),
           // Show a short prefix of the fingerprint instead of the raw
           // 64-char SHA-256, which wrapped to ~5 lines of hex on phones.
