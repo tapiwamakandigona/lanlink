@@ -65,7 +65,7 @@ class SharePickerPage extends StatefulWidget {
   /// System document picker: any file type, multi-select. Picked URIs
   /// need no storage permission (Storage Access Framework).
   static Future<List<FileInfo>> _defaultPickAnyFiles() async {
-    final result = await FilePicker.platform.pickFiles(
+    final result = await FilePicker.pickFiles(
       allowMultiple: true,
       withData: false,
     );

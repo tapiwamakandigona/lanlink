@@ -287,7 +287,7 @@ class _SendPageState extends State<SendPage> {
     }
     FilePickerResult? result;
     try {
-      result = await FilePicker.platform.pickFiles(
+      result = await FilePicker.pickFiles(
         allowMultiple: true,
         withData: false,
       );
