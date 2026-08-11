@@ -40,7 +40,6 @@ Dio delayedDio(Duration rtt) {
 }
 
 Future<void> main() async {
-
   late Directory tmp;
   late Directory saveDir;
   late Receiver receiver;
@@ -90,15 +89,15 @@ Future<void> main() async {
         '= ${mbs.toStringAsFixed(1)} MB/s');
   });
 
-  test('bench: 60 x 64KB files with 25ms simulated RTT, '
+  test(
+      'bench: 60 x 64KB files with 25ms simulated RTT, '
       'sequential vs pipelined', () async {
     const n = 60;
     const size = 64 * 1024;
     const rtt = Duration(milliseconds: 25);
     final files = <FileInfo>[];
     for (var i = 0; i < n; i++) {
-      final f = await writeDeterministicFile(
-          '${tmp.path}/rtt_$i.bin', size,
+      final f = await writeDeterministicFile('${tmp.path}/rtt_$i.bin', size,
           seed: i + 500);
       files.add(fileInfoFor(f, fileName: 'rtt_$i.bin', size: size));
     }
@@ -134,8 +133,7 @@ Future<void> main() async {
     const size = 256 * 1024;
     final files = <FileInfo>[];
     for (var i = 0; i < n; i++) {
-      final f = await writeDeterministicFile(
-          '${tmp.path}/small_$i.bin', size,
+      final f = await writeDeterministicFile('${tmp.path}/small_$i.bin', size,
           seed: i);
       files.add(fileInfoFor(f, fileName: 'small_$i.bin', size: size));
     }

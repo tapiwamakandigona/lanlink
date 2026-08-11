@@ -149,5 +149,4 @@ void main() {
     expect(seen!.alias, 'fallback-peer');
     expect(seen!.port, fake.port);
   });
-
 }

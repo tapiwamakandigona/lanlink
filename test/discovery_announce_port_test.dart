@@ -78,5 +78,4 @@ void main() {
     expect(discovery.responseJson()['announce'], isNot(true));
     expect(discovery.announcementJson()['announce'], isTrue);
   });
-
 }

@@ -322,8 +322,7 @@ class Sender {
     }
 
     final workers = <Future<void>>[
-      for (var i = 0; i < maxParallelUploads && i < queue.length; i++)
-        worker(),
+      for (var i = 0; i < maxParallelUploads && i < queue.length; i++) worker(),
     ];
     await Future.wait(workers);
 
