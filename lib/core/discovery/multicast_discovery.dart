@@ -62,12 +62,12 @@ class MulticastDiscovery {
       if (kDebugMode) debugPrint('[discovery] failed to bind socket: $e');
     }
 
-    // Send the first announce immediately, then on a timer. Every few
-    // ticks, re-join the multicast group on any newly appeared interface
-    // (hotspot toggled on, Wi-Fi reconnected, VPN dropped) — a socket only
-    // receives group traffic on interfaces it joined, and the set at bind
-    // time goes stale on mobile.
-    _announce();
+    // Send the first announces as a short burst, then steady on a timer.
+    // Every few ticks, re-join the multicast group on any newly appeared
+    // interface (hotspot toggled on, Wi-Fi reconnected, VPN dropped) — a
+    // socket only receives group traffic on interfaces it joined, and the
+    // set at bind time goes stale on mobile.
+    _announceBurst();
     var tick = 0;
     _announceTimer = Timer.periodic(
       LanLinkProtocol.announceInterval,
@@ -124,6 +124,10 @@ class MulticastDiscovery {
     _running = false;
     _announceTimer?.cancel();
     _announceTimer = null;
+    for (final t in _burstTimers) {
+      t.cancel();
+    }
+    _burstTimers.clear();
     for (final s in _sockets) {
       try {
         s.close();
@@ -133,8 +137,28 @@ class MulticastDiscovery {
     _joinedInterfaces.clear();
   }
 
-  /// Triggers an immediate announce. Useful after settings change.
-  void poke() => _announce();
+  /// Triggers an immediate announce burst. Useful after settings change.
+  void poke() => _announceBurst();
+
+  /// One announce now plus two quick follow-ups. A single UDP datagram is
+  /// routinely lost right after a radio wakes from power-save (the classic
+  /// "second scan finds it" bug); a 0/400ms/1200ms burst keeps
+  /// time-to-first-peer near-instant without meaningfully raising chatter.
+  /// Delays are test-visible via [burstDelays].
+  static const burstDelays = [
+    Duration(milliseconds: 400),
+    Duration(milliseconds: 1200),
+  ];
+
+  final List<Timer> _burstTimers = [];
+
+  void _announceBurst() {
+    _announce();
+    _burstTimers.removeWhere((t) => !t.isActive);
+    for (final delay in burstDelays) {
+      _burstTimers.add(Timer(delay, _announce));
+    }
+  }
 
   void _bindSocketHandlers(RawDatagramSocket socket) {
     socket.listen((event) {
@@ -207,7 +231,13 @@ class MulticastDiscovery {
     ).toJson();
   }
 
+  /// Total announces attempted; lets tests observe burst behavior without
+  /// real sockets.
+  @visibleForTesting
+  int announcesSent = 0;
+
   void _announce() {
+    announcesSent += 1;
     final payload = utf8.encode(json.encode(announcementJson()));
     for (final s in _sockets) {
       for (final target in announceTargets()) {
