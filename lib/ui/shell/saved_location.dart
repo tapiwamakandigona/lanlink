@@ -5,8 +5,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 
+import '../../core/models/file_info.dart';
 import '../../core/models/session.dart';
 import '../../core/platform/reveal_folder.dart';
+import '../../core/util/text_payload.dart';
 
 /// The folder a completed receive [session] landed in, derived from the
 /// first saved file's path. Null when no file recorded a saved path.
@@ -32,6 +34,20 @@ String? singleSavedFileFor(TransferSession session) {
   return only;
 }
 
+/// The [FileInfo] of the single saved file, or null when the session
+/// saved zero or multiple files. Companion to [singleSavedFileFor] for
+/// callers that need metadata (type, name), not just the path.
+FileInfo? singleSavedFileInfoFor(TransferSession session) {
+  FileInfo? only;
+  for (final f in session.files.values) {
+    final path = f.savedPath;
+    if (path == null || path.isEmpty) continue;
+    if (only != null) return null;
+    only = f.file;
+  }
+  return only;
+}
+
 /// Lightweight "Where is it?" affordance: a dialog with the actual save
 /// location and a copy button. On Android it also notes the Downloads
 /// publish, since file paths there are not user-navigable.
@@ -39,6 +55,9 @@ Future<void> showSavedLocationDialog(
     BuildContext context, TransferSession session) {
   final folder = savedFolderFor(session);
   final singleFile = singleSavedFileFor(session);
+  final singleInfo = singleSavedFileInfoFor(session);
+  final isMessage =
+      singleFile != null && singleInfo != null && isMessageSnippet(singleInfo);
   return showDialog<void>(
     context: context,
     builder: (ctx) => AlertDialog(
@@ -47,6 +66,24 @@ Future<void> showSavedLocationDialog(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (isMessage) ...[
+            FutureBuilder<String>(
+              future: File(singleFile).readAsString(),
+              builder: (ctx, snap) => Container(
+                width: double.maxFinite,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Theme.of(ctx).colorScheme.surfaceContainerLow,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: SelectableText(
+                  snap.data ?? '…',
+                  maxLines: 8,
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
           if (folder != null)
             SelectableText(folder)
           else
@@ -62,6 +99,16 @@ Future<void> showSavedLocationDialog(
         ],
       ),
       actions: [
+        if (isMessage)
+          FilledButton.tonalIcon(
+            icon: const Icon(Icons.copy_all, size: 18),
+            label: const Text('Copy message'),
+            onPressed: () async {
+              final text = await File(singleFile).readAsString();
+              await Clipboard.setData(ClipboardData(text: text));
+              if (ctx.mounted) Navigator.of(ctx).pop();
+            },
+          ),
         if (folder != null)
           TextButton.icon(
             icon: const Icon(Icons.copy, size: 18),

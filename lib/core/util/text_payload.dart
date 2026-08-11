@@ -29,3 +29,12 @@ Future<FileInfo> stageTextSnippet(String text, Directory tempDir) async {
     localPath: file.path,
   );
 }
+
+/// Whether a received file looks like a LanLink text-message snippet:
+/// small `.txt` named `Message …` with fileType `text`. Drives the
+/// receiver-side "Copy message" affordance.
+bool isMessageSnippet(FileInfo file) =>
+    file.fileType == 'text' &&
+    file.fileName.startsWith('Message ') &&
+    file.fileName.endsWith('.txt') &&
+    file.size <= 64 * 1024;
