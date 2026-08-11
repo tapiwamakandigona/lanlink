@@ -165,15 +165,19 @@ class VisibilityStatusLine extends StatelessWidget {
       ],
     );
     if (!retryable) return line;
-    return InkWell(
-      onTap: onRetry,
-      borderRadius: BorderRadius.circular(VRadius.md),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(
-          horizontal: VSpace.x2,
-          vertical: VSpace.x1,
+    return Semantics(
+      button: true,
+      label: "You're hidden right now. Retry becoming visible",
+      child: InkWell(
+        onTap: onRetry,
+        borderRadius: BorderRadius.circular(VRadius.md),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: VSpace.x2,
+            vertical: VSpace.x1,
+          ),
+          child: line,
         ),
-        child: line,
       ),
     );
   }
@@ -201,44 +205,49 @@ class _VerbCard extends StatelessWidget {
     final fg = primary ? scheme.onPrimary : scheme.onSurface;
     final sub =
         primary ? scheme.onPrimary.withOpacity(0.78) : scheme.onSurfaceVariant;
-    return Material(
-      color: bg,
-      clipBehavior: Clip.antiAlias,
-      shape: RoundedRectangleBorder(
-        borderRadius: VRadius.lgAll,
-        side: primary
-            ? BorderSide.none
-            : BorderSide(color: scheme.outlineVariant),
-      ),
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(VSpace.x5),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: primary
-                      ? scheme.onPrimary.withOpacity(0.16)
-                      : scheme.primaryContainer,
-                  shape: BoxShape.circle,
+    return Semantics(
+      button: true,
+      label: '$label. $caption',
+      child: Material(
+        color: bg,
+        clipBehavior: Clip.antiAlias,
+        shape: RoundedRectangleBorder(
+          borderRadius: VRadius.lgAll,
+          side: primary
+              ? BorderSide.none
+              : BorderSide(color: scheme.outlineVariant),
+        ),
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(VSpace.x5),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: primary
+                        ? scheme.onPrimary.withOpacity(0.16)
+                        : scheme.primaryContainer,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(icon,
+                      size: 22,
+                      color: primary ? fg : scheme.onPrimaryContainer),
                 ),
-                child: Icon(icon,
-                    size: 22, color: primary ? fg : scheme.onPrimaryContainer),
-              ),
-              const Spacer(),
-              Text(label, style: VType.heading.copyWith(color: fg)),
-              const SizedBox(height: VSpace.x1),
-              Text(
-                caption,
-                style: VType.caption.copyWith(color: sub),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ],
+                const Spacer(),
+                Text(label, style: VType.heading.copyWith(color: fg)),
+                const SizedBox(height: VSpace.x1),
+                Text(
+                  caption,
+                  style: VType.caption.copyWith(color: sub),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
           ),
         ),
       ),

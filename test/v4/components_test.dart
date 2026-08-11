@@ -145,6 +145,31 @@ void main() {
       );
     });
 
+    testWidgets('verb cards and retry line expose button semantics',
+        (tester) async {
+      final handle = tester.ensureSemantics();
+      await tester.pumpWidget(_host(TwoVerbHome(
+        deviceName: 'Marmalade-Fox',
+        visible: false,
+        onRetryVisibility: () {},
+        onSend: () {},
+        onReceive: () {},
+      )));
+      expect(
+        find.bySemanticsLabel(RegExp('Send. Pick files')),
+        findsOneWidget,
+      );
+      expect(
+        find.bySemanticsLabel(RegExp('Receive. Show a code')),
+        findsOneWidget,
+      );
+      expect(
+        find.bySemanticsLabel(RegExp('Retry becoming visible')),
+        findsOneWidget,
+      );
+      handle.dispose();
+    });
+
     testWidgets('renders the inline session strip slot', (tester) async {
       const marker = Key('strip');
       await tester.pumpWidget(_host(TwoVerbHome(
