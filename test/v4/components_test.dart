@@ -105,6 +105,46 @@ void main() {
       );
     });
 
+    testWidgets(
+        'hidden + onRetryVisibility: shows "tap to retry" and fires the '
+        'callback on tap', (tester) async {
+      var retried = 0;
+      await tester.pumpWidget(_host(TwoVerbHome(
+        deviceName: 'Marmalade-Fox',
+        visible: false,
+        onRetryVisibility: () => retried++,
+        onSend: () {},
+        onReceive: () {},
+      )));
+      expect(
+        find.textContaining('tap to retry', findRichText: true),
+        findsOneWidget,
+      );
+      await tester.tap(find.byType(VisibilityStatusLine));
+      expect(retried, 1);
+    });
+
+    testWidgets('hidden without retry callback stays non-interactive',
+        (tester) async {
+      await tester.pumpWidget(_host(TwoVerbHome(
+        deviceName: 'Marmalade-Fox',
+        visible: false,
+        onSend: () {},
+        onReceive: () {},
+      )));
+      expect(
+        find.textContaining('tap to retry', findRichText: true),
+        findsNothing,
+      );
+      expect(
+        find.descendant(
+          of: find.byType(VisibilityStatusLine),
+          matching: find.byType(InkWell),
+        ),
+        findsNothing,
+      );
+    });
+
     testWidgets('renders the inline session strip slot', (tester) async {
       const marker = Key('strip');
       await tester.pumpWidget(_host(TwoVerbHome(

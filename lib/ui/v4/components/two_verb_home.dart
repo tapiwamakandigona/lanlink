@@ -14,6 +14,7 @@ class TwoVerbHome extends StatelessWidget {
     required this.onSend,
     required this.onReceive,
     this.visible = true,
+    this.onRetryVisibility,
     this.sessionStrip,
   });
 
@@ -28,6 +29,9 @@ class TwoVerbHome extends StatelessWidget {
 
   /// Whether this device is currently discoverable on the network.
   final bool visible;
+
+  /// Forwarded to [VisibilityStatusLine.onRetry] when [visible] is false.
+  final VoidCallback? onRetryVisibility;
 
   /// Optional inline session strip (e.g. a compact [SessionCard]) shown
   /// under the verbs while a transfer is running.
@@ -77,7 +81,11 @@ class TwoVerbHome extends StatelessWidget {
                 ),
               ),
             const SizedBox(height: VSpace.x4),
-            VisibilityStatusLine(deviceName: deviceName, visible: visible),
+            VisibilityStatusLine(
+              deviceName: deviceName,
+              visible: visible,
+              onRetry: onRetryVisibility,
+            ),
             if (sessionStrip != null) ...[
               const SizedBox(height: VSpace.x4),
               sessionStrip!,
@@ -95,6 +103,7 @@ class VisibilityStatusLine extends StatelessWidget {
     super.key,
     required this.deviceName,
     this.visible = true,
+    this.onRetry,
   });
 
   /// This device's friendly name, e.g. "Purple-Otter".
@@ -103,11 +112,18 @@ class VisibilityStatusLine extends StatelessWidget {
   /// When false the line says the device is hidden.
   final bool visible;
 
+  /// When the device is hidden and this is non-null, the line becomes
+  /// tappable and reads "tap to retry" — hidden almost always means the
+  /// receiver failed to bind a port, which a retry often fixes (network
+  /// stack was still coming up, the conflicting app has since quit).
+  final VoidCallback? onRetry;
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final dotColor = visible ? scheme.primary : scheme.outline;
-    return Row(
+    final retryable = !visible && onRetry != null;
+    final line = Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
         Container(
@@ -131,12 +147,34 @@ class VisibilityStatusLine extends StatelessWidget {
                         ),
                       ),
                     ]
-                  : [const TextSpan(text: "You're hidden right now")],
+                  : [
+                      const TextSpan(text: "You're hidden right now"),
+                      if (retryable)
+                        TextSpan(
+                          text: ' — tap to retry',
+                          style: VType.bodyStrong.copyWith(
+                            fontSize: 15,
+                            color: scheme.primary,
+                          ),
+                        ),
+                    ],
             ),
             overflow: TextOverflow.ellipsis,
           ),
         ),
       ],
+    );
+    if (!retryable) return line;
+    return InkWell(
+      onTap: onRetry,
+      borderRadius: BorderRadius.circular(VRadius.md),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: VSpace.x2,
+          vertical: VSpace.x1,
+        ),
+        child: line,
+      ),
     );
   }
 }

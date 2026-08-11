@@ -327,6 +327,32 @@ class AppState extends ChangeNotifier {
   /// Local listening port (may differ from settings if it was in use).
   int? get port => _receiver?.port;
 
+  /// Retries starting the receiver after a failed boot (e.g. every candidate
+  /// port was taken, or the OS refused the bind while the network stack was
+  /// still coming up). No-op when the receiver is already listening.
+  /// Returns true when the device is discoverable afterwards.
+  Future<bool> retryReceiver() async {
+    if (_networkSilent) return false;
+    final receiver = _receiver;
+    if (receiver == null) return false;
+    if (receiver.port != null) return true;
+    try {
+      await receiver.start();
+      EventLog.instance.add(
+        'Receiver recovered: listening on '
+        '${_localIps.join(", ")}:${receiver.port}',
+      );
+      // Fresh announcement so peers learn the newly bound port immediately.
+      _discovery?.poke();
+      notifyListeners();
+      return true;
+    } catch (e) {
+      EventLog.instance.add('Receiver retry failed: $e');
+      notifyListeners();
+      return false;
+    }
+  }
+
   /// IPv4 addresses we're listening on (for the Settings screen).
   List<String> get localIps => List.unmodifiable(_localIps);
 

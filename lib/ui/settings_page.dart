@@ -160,8 +160,11 @@ class _SettingsPageState extends State<SettingsPage> {
           _kv(
               context,
               'Listening on',
-              '${state.localIps.isEmpty ? "no LAN interface" : state.localIps.join(", ")}'
-                  ' : ${state.port ?? "?"}'),
+              state.localIps.isEmpty
+                  ? 'no LAN interface'
+                  : state.port == null
+                      ? '${state.localIps.join(", ")} — not receiving'
+                      : '${state.localIps.join(", ")}:${state.port}'),
           Row(
             children: [
               Expanded(

@@ -101,6 +101,7 @@ class _HomePageState extends State<HomePage> {
                   TwoVerbHome(
                     deviceName: state.displayAlias,
                     visible: state.port != null,
+                    onRetryVisibility: () => state.retryReceiver(),
                     onSend: () => Navigator.of(context).pushNamed('/send'),
                     onReceive: () =>
                         Navigator.of(context).pushNamed('/receive'),
