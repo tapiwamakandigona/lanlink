@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models.dart';
 import '../theme/tokens.dart';
 import 'device_radar.dart';
+import 'file_glyph.dart';
 import 'verified_badge.dart';
 
 /// The receive prompt: "`<Name>` wants to send you N files (total size)".
@@ -120,7 +121,7 @@ class _ConsentSheetState extends State<ConsentSheet> {
                       padding: const EdgeInsets.symmetric(vertical: VSpace.x1),
                       child: Row(
                         children: [
-                          Icon(Icons.insert_drive_file_outlined,
+                          Icon(fileGlyphFor(name),
                               size: 16, color: scheme.onSurfaceVariant),
                           const SizedBox(width: VSpace.x2),
                           Expanded(

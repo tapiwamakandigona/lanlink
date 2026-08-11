@@ -11,6 +11,7 @@ import '../../core/platform/media_library.dart';
 import '../../core/platform/media_permissions.dart';
 import '../../core/util/format.dart';
 import '../../core/util/picker_filter.dart';
+import '../v4/components/file_glyph.dart';
 import '../v4/theme/tokens.dart';
 
 const _uuid = Uuid();
@@ -665,7 +666,7 @@ class _SharePickerPageState extends State<SharePickerPage>
                     _selectedFiles.remove(key);
                   }
                 }),
-                secondary: const Icon(Icons.insert_drive_file_outlined),
+                secondary: Icon(fileGlyphFor(file.fileName)),
                 title: Text(file.fileName, overflow: TextOverflow.ellipsis),
                 subtitle: Text(formatBytes(file.size)),
               );
