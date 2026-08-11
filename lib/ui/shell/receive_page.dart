@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/discovery/connect_payload.dart';
@@ -291,15 +292,33 @@ class _ReceivePageState extends State<ReceivePage> with WidgetsBindingObserver {
         ),
         const SizedBox(height: VSpace.x6),
         Text(
-          'No camera on the other device?',
+          'No camera on the other device? Use Direct Link with this '
+          'address:',
           style: VType.label.copyWith(color: scheme.onSurfaceVariant),
           textAlign: TextAlign.center,
         ),
-        const SizedBox(height: VSpace.x1),
-        Text(
-          'Use Direct Link and type ${payload.hostPort}',
-          style: VType.bodyStrong.copyWith(color: scheme.onSurface),
-          textAlign: TextAlign.center,
+        const SizedBox(height: VSpace.x2),
+        // Tap-to-copy: reading an IP:port off one screen and typing it
+        // on another is exactly the sort of friction a copy chip removes
+        // (desktop peers can paste into Direct Link).
+        Center(
+          child: ActionChip(
+            avatar: Icon(Icons.copy, size: 16, color: scheme.onSurface),
+            label: Text(
+              payload.hostPort,
+              style: VType.bodyStrong.copyWith(color: scheme.onSurface),
+            ),
+            onPressed: () async {
+              final messenger = ScaffoldMessenger.of(context);
+              await Clipboard.setData(ClipboardData(text: payload.hostPort));
+              messenger
+                ..hideCurrentSnackBar()
+                ..showSnackBar(const SnackBar(
+                  content: Text('Address copied'),
+                  duration: Duration(seconds: 2),
+                ));
+            },
+          ),
         ),
       ],
     ];
