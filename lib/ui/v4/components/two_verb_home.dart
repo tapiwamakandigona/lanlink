@@ -14,6 +14,7 @@ class TwoVerbHome extends StatelessWidget {
     required this.onSend,
     required this.onReceive,
     this.visible = true,
+    this.compact = false,
     this.onRetryVisibility,
     this.sessionStrip,
   });
@@ -30,6 +31,11 @@ class TwoVerbHome extends StatelessWidget {
   /// Whether this device is currently discoverable on the network.
   final bool visible;
 
+  /// Compact mode: the verbs shrink to a slim side-by-side row so live
+  /// transfer cards fit above the fold. Home turns this on whenever the
+  /// Transfers section is showing.
+  final bool compact;
+
   /// Forwarded to [VisibilityStatusLine.onRetry] when [visible] is false.
   final VoidCallback? onRetryVisibility;
 
@@ -42,6 +48,55 @@ class TwoVerbHome extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final wide = constraints.maxWidth >= 560;
+        if (compact) {
+          final heightScale = MediaQuery.textScalerOf(context)
+              .clamp(maxScaleFactor: 2.0)
+              .scale(1.0);
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                height: 72 * heightScale,
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: _VerbCard(
+                        icon: Icons.north_east,
+                        label: 'Send',
+                        caption: 'Pick files, choose a device',
+                        primary: true,
+                        dense: true,
+                        onTap: onSend,
+                      ),
+                    ),
+                    const SizedBox(width: VSpace.x4),
+                    Expanded(
+                      child: _VerbCard(
+                        icon: Icons.south_west,
+                        label: 'Receive',
+                        caption: 'Show a code, get files',
+                        primary: false,
+                        dense: true,
+                        onTap: onReceive,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: VSpace.x3),
+              VisibilityStatusLine(
+                deviceName: deviceName,
+                visible: visible,
+                onRetry: onRetryVisibility,
+              ),
+              if (sessionStrip != null) ...[
+                const SizedBox(height: VSpace.x4),
+                sessionStrip!,
+              ],
+            ],
+          );
+        }
         final verbs = [
           Expanded(
             child: _VerbCard(
@@ -197,6 +252,7 @@ class _VerbCard extends StatelessWidget {
     required this.caption,
     required this.primary,
     required this.onTap,
+    this.dense = false,
   });
 
   final IconData icon;
@@ -204,6 +260,9 @@ class _VerbCard extends StatelessWidget {
   final String caption;
   final bool primary;
   final VoidCallback onTap;
+
+  /// Slim horizontal variant used by [TwoVerbHome.compact].
+  final bool dense;
 
   @override
   Widget build(BuildContext context) {
@@ -227,36 +286,67 @@ class _VerbCard extends StatelessWidget {
         ),
         child: InkWell(
           onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.all(VSpace.x5),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: primary
-                        ? scheme.onPrimary.withValues(alpha: 0.16)
-                        : scheme.primaryContainer,
-                    shape: BoxShape.circle,
+          child: dense
+              ? Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: VSpace.x4),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 32,
+                        height: 32,
+                        decoration: BoxDecoration(
+                          color: primary
+                              ? scheme.onPrimary.withValues(alpha: 0.16)
+                              : scheme.primaryContainer,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(icon,
+                            size: 18,
+                            color: primary ? fg : scheme.onPrimaryContainer),
+                      ),
+                      const SizedBox(width: VSpace.x3),
+                      Flexible(
+                        child: Text(
+                          label,
+                          style: VType.bodyStrong
+                              .copyWith(fontSize: 17, color: fg),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
                   ),
-                  child: Icon(icon,
-                      size: 22,
-                      color: primary ? fg : scheme.onPrimaryContainer),
+                )
+              : Padding(
+                  padding: const EdgeInsets.all(VSpace.x5),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: primary
+                              ? scheme.onPrimary.withValues(alpha: 0.16)
+                              : scheme.primaryContainer,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(icon,
+                            size: 22,
+                            color: primary ? fg : scheme.onPrimaryContainer),
+                      ),
+                      const Spacer(),
+                      Text(label, style: VType.heading.copyWith(color: fg)),
+                      const SizedBox(height: VSpace.x1),
+                      Text(
+                        caption,
+                        style: VType.caption.copyWith(color: sub),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
                 ),
-                const Spacer(),
-                Text(label, style: VType.heading.copyWith(color: fg)),
-                const SizedBox(height: VSpace.x1),
-                Text(
-                  caption,
-                  style: VType.caption.copyWith(color: sub),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ),
-          ),
         ),
       ),
     );

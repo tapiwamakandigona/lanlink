@@ -103,6 +103,9 @@ class _HomePageState extends State<HomePage> {
                     ),
                   TwoVerbHome(
                     deviceName: state.displayAlias,
+                    // Slim verbs while transfer cards are on screen, so a
+                    // live transfer sits above the fold instead of at it.
+                    compact: clusters.isNotEmpty,
                     visible: state.port != null,
                     onRetryVisibility: () => state.retryReceiver(),
                     onSend: () => Navigator.of(context).pushNamed('/send'),
