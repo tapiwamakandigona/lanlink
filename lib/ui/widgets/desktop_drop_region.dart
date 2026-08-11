@@ -68,7 +68,7 @@ class _DesktopDropRegionState extends State<DesktopDropRegion> {
             Positioned.fill(
               child: IgnorePointer(
                 child: Container(
-                  color: scheme.surface.withOpacity(0.85),
+                  color: scheme.surface.withValues(alpha: 0.85),
                   alignment: Alignment.center,
                   child: Container(
                     padding: const EdgeInsets.symmetric(

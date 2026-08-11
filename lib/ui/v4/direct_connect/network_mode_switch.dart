@@ -92,7 +92,7 @@ class _Segment extends StatelessWidget {
               boxShadow: selected
                   ? [
                       BoxShadow(
-                        color: scheme.shadow.withOpacity(0.10),
+                        color: scheme.shadow.withValues(alpha: 0.10),
                         blurRadius: 4,
                         offset: const Offset(0, 1),
                       ),
@@ -107,7 +107,8 @@ class _Segment extends StatelessWidget {
               style: VType.label.copyWith(
                 color: selected
                     ? scheme.onSurface
-                    : scheme.onSurfaceVariant.withOpacity(enabled ? 1.0 : 0.5),
+                    : scheme.onSurfaceVariant
+                        .withValues(alpha: enabled ? 1.0 : 0.5),
               ),
             ),
           ),

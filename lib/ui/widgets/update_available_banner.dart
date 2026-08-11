@@ -60,7 +60,7 @@ class UpdateAvailableBanner extends StatelessWidget {
                         'Tap to see what\'s new. Updates are optional.',
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: theme.colorScheme.onPrimaryContainer
-                              .withOpacity(0.85),
+                              .withValues(alpha: 0.85),
                         ),
                       ),
                     ],
