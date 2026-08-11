@@ -41,6 +41,7 @@ dependencies:
 
   # Unlock 90/120 Hz on Android OEMs that cap Flutter at 60 Hz.
   flutter_displaymode: ^0.7.0
+  window_manager: ^0.5.2
 
 dev_dependencies:
   flutter_test:
