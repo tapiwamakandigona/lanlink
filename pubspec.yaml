@@ -10,7 +10,6 @@ dependencies:
   flutter:
     sdk: flutter
 
-  cupertino_icons: ^1.0.8
 
   # HTTP server: every peer hosts its own server so transfers are symmetric.
   shelf: ^1.4.1
@@ -18,9 +17,6 @@ dependencies:
 
   # HTTP client with streaming + multipart support, used by the sender.
   dio: ^5.7.0
-
-  # LAN networking helpers.
-  network_info_plus: ^6.1.1
 
   # Storage + filesystem.
   path_provider: ^2.1.5
@@ -37,7 +33,6 @@ dependencies:
 
   # Misc.
   uuid: ^4.5.1
-  crypto: ^3.0.6
   provider: ^6.1.2
   pub_semver: ^2.1.4
 
@@ -50,6 +45,7 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  crypto: ^3.0.6
   flutter_lints: ^5.0.0
   flutter_launcher_icons: ^0.14.1
 
