@@ -85,7 +85,11 @@ class _Segment extends StatelessWidget {
               horizontal: VSpace.x2,
             ),
             decoration: BoxDecoration(
-              color: selected ? scheme.surface : Colors.transparent,
+              // Primary fill on the active segment: the old white-pill
+              // treatment left the *unselected* halves looking darker
+              // (filled), so the affordance read inverted on the warm
+              // Ember palette.
+              color: selected ? scheme.primary : Colors.transparent,
               borderRadius: const BorderRadius.all(
                 Radius.circular(VRadius.sm - 2),
               ),
@@ -106,7 +110,7 @@ class _Segment extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: VType.label.copyWith(
                 color: selected
-                    ? scheme.onSurface
+                    ? scheme.onPrimary
                     : scheme.onSurfaceVariant
                         .withValues(alpha: enabled ? 1.0 : 0.5),
               ),
