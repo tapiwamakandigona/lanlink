@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -5,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 
 import '../../core/models/session.dart';
+import '../../core/platform/reveal_folder.dart';
 
 /// The folder a completed receive [session] landed in, derived from the
 /// first saved file's path. Null when no file recorded a saved path.
@@ -52,6 +54,18 @@ Future<void> showSavedLocationDialog(
             onPressed: () async {
               await Clipboard.setData(ClipboardData(text: folder));
               if (ctx.mounted) Navigator.of(ctx).pop();
+            },
+          ),
+        // Desktop gets a real "Open folder" — competing tools jump
+        // straight to the received files, a copyable path is the fallback.
+        if (folder != null &&
+            (Platform.isWindows || Platform.isMacOS || Platform.isLinux))
+          FilledButton.tonalIcon(
+            icon: const Icon(Icons.folder_open_outlined, size: 18),
+            label: const Text('Open folder'),
+            onPressed: () {
+              unawaited(revealFolder(folder));
+              Navigator.of(ctx).pop();
             },
           ),
         FilledButton(
