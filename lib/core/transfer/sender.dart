@@ -19,7 +19,15 @@ class Sender {
   Sender({
     required this.localDeviceProvider,
     Dio? dio,
+    this.maxParallelUploads = 3,
   }) : _dio = dio ?? _defaultDio();
+
+  /// Upper bound on simultaneous per-file uploads within one session.
+  /// Per-file HTTP round-trips dominate the wall clock for photo-roll style
+  /// batches on real Wi-Fi (each file costs at least one RTT); pipelining a
+  /// few uploads hides that latency without fragmenting a single big file's
+  /// bandwidth. 1 restores strictly sequential v4.1.0 behavior.
+  final int maxParallelUploads;
 
   /// Returns the current local-device info to embed in `prepare-upload`.
   final Device Function() localDeviceProvider;
@@ -203,88 +211,125 @@ class Sender {
       }
     }
 
-    // 2. upload each accepted file in turn
+    // 2. upload the accepted files.
+    //
+    // Files are uploaded with bounded concurrency (up to [maxParallelUploads]
+    // at once). For many small files the per-file HTTP round-trip dominates
+    // the wall clock; pipelining hides that latency. Tokens are per-file in
+    // the LocalSend v2 protocol, so concurrent uploads to distinct files are
+    // legal against LanLink and LocalSend receivers alike. A single file (or
+    // a resumed file) behaves exactly as before.
     final byId = {for (final f in files) f.id: f};
-    for (final entry in tokens.entries) {
-      final fileId = entry.key;
-      final token = entry.value;
-      final info = byId[fileId];
-      if (info == null) {
+    for (final fileId in tokens.keys) {
+      if (byId[fileId] == null) {
         // The receiver invented a fileId we never offered — a hostile or
         // broken peer. Fail cleanly instead of throwing (C2).
         _failAll(session, files,
             'Malformed prepare-upload response (unknown file id).');
         return;
       }
-      final file = File(info.localPath!);
-      if (!await file.exists()) {
-        session.markFile(fileId, TransferStatus.failed,
-            error: 'Source file missing: ${info.localPath}');
-        session.markStatus(TransferStatus.failed);
-        return;
-      }
-      final uri = peer.baseUri.replace(
-        path: LanLinkProtocol.routeUpload,
-        queryParameters: {
-          'sessionId': sessionId,
-          'fileId': fileId,
-          'token': token,
-        },
-      );
-      try {
-        final length = await file.length();
-        var startAt = resume[fileId] ?? 0;
-        if (startAt < 0 || startAt >= length) startAt = 0;
+    }
 
-        // First attempt resumes at the receiver's offset; if the receiver
-        // disagrees (409 — its part changed under us) retry once from zero.
-        for (var attempt = 0;; attempt++) {
-          try {
-            await _uploadFrom(
-              session: session,
-              fileId: fileId,
-              file: file,
-              length: length,
-              startAt: startAt,
-              uri: uri,
-              cancelToken: cancelToken,
-            );
-            break;
-          } on DioException catch (e) {
-            final conflict = e.response?.statusCode == 409;
-            if (attempt == 0 && startAt > 0 && conflict) {
-              startAt = 0;
-              continue;
-            }
-            rethrow;
-          }
-        }
-        // Make sure the per-file byte counter is exactly the file size so
-        // fraction == 1.0 cleanly (in case the source stream reported a
-        // shorter count for any reason).
-        session.updateBytes(fileId, length);
-        session.markFile(fileId, TransferStatus.completed);
-      } catch (e) {
-        if (kDebugMode) debugPrint('[sender] upload of $fileId failed: $e');
-        // Local user hit cancel, or the receiver stopped the session
-        // (its upload handler answers 403 once the session is cancelled):
-        // that's a cancellation, not a failure.
-        final rejectedByReceiver =
-            e is DioException && e.response?.statusCode == 403;
-        if (_wasCancelled(session, e) || rejectedByReceiver) {
-          session.markFile(fileId, TransferStatus.cancelled);
-          _markPendingFiles(session, files, TransferStatus.cancelled);
-          session.markStatus(TransferStatus.cancelled);
+    final queue = tokens.entries.toList();
+    var next = 0;
+    var stopped = false;
+
+    Future<void> worker() async {
+      while (!stopped) {
+        if (next >= queue.length) return;
+        final entry = queue[next++];
+        final fileId = entry.key;
+        final token = entry.value;
+        final info = byId[fileId]!;
+        final file = File(info.localPath!);
+        if (!await file.exists()) {
+          stopped = true;
+          session.markFile(fileId, TransferStatus.failed,
+              error: 'Source file missing: ${info.localPath}');
+          session.markStatus(TransferStatus.failed);
           return;
         }
-        session.markFile(fileId, TransferStatus.failed,
-            error: friendlyTransferError(e, peerName: peer.alias));
-        session.markStatus(TransferStatus.failed);
-        return;
+        final uri = peer.baseUri.replace(
+          path: LanLinkProtocol.routeUpload,
+          queryParameters: {
+            'sessionId': sessionId,
+            'fileId': fileId,
+            'token': token,
+          },
+        );
+        try {
+          final length = await file.length();
+          var startAt = resume[fileId] ?? 0;
+          if (startAt < 0 || startAt >= length) startAt = 0;
+
+          // First attempt resumes at the receiver's offset; if the receiver
+          // disagrees (409 — its part changed under us) retry once from zero.
+          for (var attempt = 0;; attempt++) {
+            try {
+              await _uploadFrom(
+                session: session,
+                fileId: fileId,
+                file: file,
+                length: length,
+                startAt: startAt,
+                uri: uri,
+                cancelToken: cancelToken,
+              );
+              break;
+            } on DioException catch (e) {
+              final conflict = e.response?.statusCode == 409;
+              if (attempt == 0 && startAt > 0 && conflict) {
+                startAt = 0;
+                continue;
+              }
+              rethrow;
+            }
+          }
+          // Make sure the per-file byte counter is exactly the file size so
+          // fraction == 1.0 cleanly (in case the source stream reported a
+          // shorter count for any reason).
+          session.updateBytes(fileId, length);
+          session.markFile(fileId, TransferStatus.completed);
+        } catch (e) {
+          if (stopped) {
+            // A sibling upload already decided the session's fate; this
+            // failure is fallout from the shared cancel token firing.
+            return;
+          }
+          stopped = true;
+          if (kDebugMode) debugPrint('[sender] upload of $fileId failed: $e');
+          // Local user hit cancel, or the receiver stopped the session
+          // (its upload handler answers 403 once the session is cancelled):
+          // that's a cancellation, not a failure.
+          final rejectedByReceiver =
+              e is DioException && e.response?.statusCode == 403;
+          if (_wasCancelled(session, e) || rejectedByReceiver) {
+            session.markFile(fileId, TransferStatus.cancelled);
+            _markPendingFiles(session, files, TransferStatus.cancelled);
+            session.markStatus(TransferStatus.cancelled);
+          } else {
+            session.markFile(fileId, TransferStatus.failed,
+                error: friendlyTransferError(e, peerName: peer.alias));
+            session.markStatus(TransferStatus.failed);
+          }
+          // Abort the sibling uploads still in flight.
+          if (!cancelToken.isCancelled) {
+            cancelToken.cancel('sibling upload ended the session');
+          }
+          return;
+        }
       }
     }
 
-    session.markStatus(TransferStatus.completed);
+    final workers = <Future<void>>[
+      for (var i = 0; i < maxParallelUploads && i < queue.length; i++)
+        worker(),
+    ];
+    await Future.wait(workers);
+
+    if (session.status == TransferStatus.transferring) {
+      session.markStatus(TransferStatus.completed);
+    }
   }
 
   /// Cancels an in-flight send driven by [send]: aborts the HTTP transfer
@@ -385,6 +430,11 @@ class Sender {
     CancelToken? cancelToken,
   }) async {
     session.updateBytes(fileId, startAt);
+    // NOTE(perf, 2026-08-11): keep `openRead` here. A custom
+    // RandomAccessFile reader with bigger blocks was benchmarked at no real
+    // throughput gain on loopback and it broke stream backpressure — peak
+    // RSS growth on a 150MB send jumped from ~17MB to ~130MB (see
+    // test/e2e_sim/large_file_e2e_test.dart's streaming guard).
     final stream = file.openRead(startAt);
     int sent = startAt;
     await _dio.postUri<dynamic>(
