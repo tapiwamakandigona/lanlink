@@ -77,7 +77,7 @@ void main() {
       onPeer: (peer) {
         seen ??= peer;
       },
-      port: fake.port,
+      ports: [fake.port],
       perHostTimeout: const Duration(seconds: 2),
       parallelProbes: 8,
     );
@@ -104,4 +104,50 @@ void main() {
           '172.20.10', // iOS Personal Hotspot
         }));
   });
+  test(
+      'SubnetScanner finds a peer on a receiver fallback port '
+      '(default+1) without being told', () async {
+    // Reserve the "default" port with a dumb socket that never answers
+    // /info, and park the fake peer on the next port up — the situation
+    // after Receiver._bindWithFallback loses the default port to another
+    // instance.
+    final blocker = await ServerSocket.bind('127.0.0.1', 0);
+    addTearDown(blocker.close);
+    final fake = await _spinUpFakePeer(
+      alias: 'fallback-peer',
+      fingerprint: 'fp-fallback',
+    );
+    addTearDown(() => fake.close(force: true));
+
+    final sender = Sender(
+      localDeviceProvider: () => Device(
+        alias: 'me',
+        version: LanLinkProtocol.protocolVersion,
+        deviceModel: 'me',
+        deviceType: LanLinkProtocol.deviceTypeHeadless,
+        fingerprint: 'me',
+        port: fake.port,
+        protocol: 'http',
+        ip: '127.0.0.1',
+      ),
+    );
+
+    Device? seen;
+    final scanner = SubnetScanner(
+      sender: sender,
+      onPeer: (peer) => seen ??= peer,
+      // Simulate: default port answers nothing, peer sits on "default+1".
+      ports: [blocker.port, fake.port],
+      perHostTimeout: const Duration(seconds: 2),
+      parallelProbes: 8,
+    );
+
+    await scanner.scan(localIps: ['127.0.0.1'], force: true);
+
+    expect(seen, isNotNull,
+        reason: 'peer on the fallback port must be discovered');
+    expect(seen!.alias, 'fallback-peer');
+    expect(seen!.port, fake.port);
+  });
+
 }
