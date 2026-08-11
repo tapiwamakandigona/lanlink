@@ -760,6 +760,31 @@ void main() {
       expect(state.isConnectTokenValid(tokenA), isFalse);
     });
   });
+
+  testWidgets('staged banner Clear unstages without leaving the page',
+      (tester) async {
+    final state = await _makeState(tester);
+
+    await tester.pumpWidget(_wrap(
+      state,
+      SendPage(
+        scannerBuilder: (_, __) => const SizedBox(),
+        prestagedFiles: [_file('photo.jpg')],
+      ),
+    ));
+    await tester.pump();
+
+    expect(find.text('Ready to send photo.jpg'), findsOneWidget);
+
+    await tester.tap(find.text('Clear'));
+    await tester.pump();
+
+    expect(find.text('Ready to send photo.jpg'), findsNothing);
+    // Back to the unstaged affordances.
+    expect(find.text('Send a message instead'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+  });
 }
 
 class _TokenSender extends Sender {

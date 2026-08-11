@@ -396,7 +396,16 @@ class _SendPageState extends State<SendPage> {
                       style: VType.bodyStrong.copyWith(color: scheme.onSurface),
                       textAlign: TextAlign.center,
                     ),
-                    const SizedBox(height: VSpace.x4),
+                    // Escape hatch: staged-by-mistake (drag-drop, share
+                    // sheet, message) must be clearable without leaving
+                    // the page.
+                    TextButton(
+                      onPressed: _busy
+                          ? null
+                          : () => setState(() => _staged = const []),
+                      child: const Text('Clear'),
+                    ),
+                    const SizedBox(height: VSpace.x2),
                   ],
                   Text('Nearby devices',
                       style: VType.heading.copyWith(color: scheme.onSurface)),
