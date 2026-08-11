@@ -29,6 +29,33 @@ void main() {
       expect(
           splitSafeRelativePath('we?ird/na:me*.txt'), ['we_ird', 'na_me_.txt']);
     });
+
+    test('strips control characters', () {
+      expect(splitSafeRelativePath('bad\x00name\x1f.txt'), ['badname.txt']);
+    });
+
+    test('neutralizes Windows reserved device names', () {
+      // A Windows receiver cannot create these — with or without extension,
+      // any case. They must arrive renamed, not fail the whole transfer.
+      expect(splitSafeRelativePath('CON'), ['_CON']);
+      expect(splitSafeRelativePath('con.txt'), ['_con.txt']);
+      expect(splitSafeRelativePath('Aux.log'), ['_Aux.log']);
+      expect(splitSafeRelativePath('COM1.dump/readme.md'),
+          ['_COM1.dump', 'readme.md']);
+      expect(splitSafeRelativePath('nul'), ['_nul']);
+      // Not reserved: COM10, CONS, console.txt.
+      expect(splitSafeRelativePath('COM10.txt'), ['COM10.txt']);
+      expect(splitSafeRelativePath('console.txt'), ['console.txt']);
+    });
+
+    test('strips trailing dots and spaces (invalid on Windows)', () {
+      expect(splitSafeRelativePath('report.'), ['report']);
+      expect(splitSafeRelativePath('notes... '), ['notes']);
+      expect(splitSafeRelativePath('dir./file.txt'), ['dir', 'file.txt']);
+      // Replacement of an illegal char can leave a non-dot tail; only
+      // genuine trailing dots/spaces are stripped.
+      expect(splitSafeRelativePath('evil.<'), ['evil._']);
+    });
   });
 
   group('fileInfosForFolder', () {
