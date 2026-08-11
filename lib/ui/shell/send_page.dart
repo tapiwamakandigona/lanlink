@@ -665,8 +665,26 @@ class _SendPageState extends State<SendPage> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final state = context.watch<AppState>();
+    // Recents first (the device you always send to should be first —
+    // ShareIt/Quick Share convention), then alphabetical for the rest.
+    final lastUsed = <String, DateTime>{};
+    for (final s in state.sessions) {
+      final t = s.finishedAt ?? s.startedAt;
+      final prev = lastUsed[s.peer.fingerprint];
+      if (prev == null || t.isAfter(prev)) lastUsed[s.peer.fingerprint] = t;
+    }
     final peers = state.peers.values.toList()
-      ..sort((a, b) => a.alias.toLowerCase().compareTo(b.alias.toLowerCase()));
+      ..sort((a, b) {
+        final ta = lastUsed[a.fingerprint];
+        final tb = lastUsed[b.fingerprint];
+        if (ta != null && tb == null) return -1;
+        if (ta == null && tb != null) return 1;
+        if (ta != null && tb != null) {
+          final c = tb.compareTo(ta);
+          if (c != 0) return c;
+        }
+        return a.alias.toLowerCase().compareTo(b.alias.toLowerCase());
+      });
     final hasScanner =
         widget.scannerBuilder != null || SendPage.cameraSupported;
 
@@ -711,19 +729,6 @@ class _SendPageState extends State<SendPage> with WidgetsBindingObserver {
                     style:
                         VType.caption.copyWith(color: scheme.onSurfaceVariant),
                   ),
-                  if (_staged.isEmpty)
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: TextButton.icon(
-                        onPressed: _busy ? null : () => _composeMessage(),
-                        icon: const Icon(Icons.chat_bubble_outline, size: 18),
-                        label: const Text('Send a message instead'),
-                        style: TextButton.styleFrom(
-                          padding: EdgeInsets.zero,
-                          visualDensity: VisualDensity.compact,
-                        ),
-                      ),
-                    ),
                   const SizedBox(height: VSpace.x4),
                   DeviceRadar(
                     peers: [
@@ -733,6 +738,9 @@ class _SendPageState extends State<SendPage> with WidgetsBindingObserver {
                     // only animates while a sweep is actually in flight, so
                     // an idle screen stops repainting every frame.
                     searching: state.isScanning,
+                    // Don't promise a scanner on hosts without one.
+                    scanHintVisible: hasScanner,
+                    onHelp: () => Navigator.of(context).pushNamed('/help'),
                     onPeerTap: (tapped) {
                       if (_busy) return;
                       // Resolve by fingerprint, never by display name:
@@ -749,6 +757,23 @@ class _SendPageState extends State<SendPage> with WidgetsBindingObserver {
                       unawaited(_sendTo(peer));
                     },
                   ),
+                  // Secondary action below the device list, not above it:
+                  // the list is what people came for.
+                  if (_staged.isEmpty) ...[
+                    const SizedBox(height: VSpace.x2),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        onPressed: _busy ? null : () => _composeMessage(),
+                        icon: const Icon(Icons.chat_bubble_outline, size: 18),
+                        label: const Text('Send a message instead'),
+                        style: TextButton.styleFrom(
+                          padding: EdgeInsets.zero,
+                          visualDensity: VisualDensity.compact,
+                        ),
+                      ),
+                    ),
+                  ],
                   if (_connecting) ...[
                     const SizedBox(height: VSpace.x4),
                     Row(
