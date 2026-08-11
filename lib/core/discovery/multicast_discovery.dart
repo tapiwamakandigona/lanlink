@@ -45,13 +45,6 @@ class MulticastDiscovery {
     if (_running) return;
     _running = true;
 
-    final group = InternetAddress(LanLinkProtocol.multicastGroup);
-    final interfaces = await NetworkInterface.list(
-      type: InternetAddressType.IPv4,
-      includeLoopback: false,
-      includeLinkLocal: false,
-    );
-
     // Bind one socket to ANY and join the multicast group on each iface.
     try {
       final socket = await RawDatagramSocket.bind(
@@ -62,30 +55,68 @@ class MulticastDiscovery {
       );
       socket.broadcastEnabled = true;
       socket.multicastLoopback = false;
+      _sockets.add(socket);
+      _bindSocketHandlers(socket);
+      await _refreshMulticastJoins();
+    } catch (e) {
+      if (kDebugMode) debugPrint('[discovery] failed to bind socket: $e');
+    }
+
+    // Send the first announce immediately, then on a timer. Every few
+    // ticks, re-join the multicast group on any newly appeared interface
+    // (hotspot toggled on, Wi-Fi reconnected, VPN dropped) — a socket only
+    // receives group traffic on interfaces it joined, and the set at bind
+    // time goes stale on mobile.
+    _announce();
+    var tick = 0;
+    _announceTimer = Timer.periodic(
+      LanLinkProtocol.announceInterval,
+      (_) {
+        tick += 1;
+        if (tick % _rejoinEveryTicks == 0) {
+          unawaited(_refreshMulticastJoins());
+        }
+        _announce();
+      },
+    );
+  }
+
+  /// Re-joins the multicast group on every interface not yet joined.
+  /// Cheap (one interface listing); called at start and periodically so
+  /// interfaces that appear after startup still receive group traffic.
+  static const _rejoinEveryTicks = 6; // every ~30s with a 5s interval
+  final Set<String> _joinedInterfaces = {};
+
+  Future<void> _refreshMulticastJoins() async {
+    if (!_running || _sockets.isEmpty) return;
+    final group = InternetAddress(LanLinkProtocol.multicastGroup);
+    List<NetworkInterface> interfaces;
+    try {
+      interfaces = await NetworkInterface.list(
+        type: InternetAddressType.IPv4,
+        includeLoopback: false,
+        includeLinkLocal: false,
+      );
+    } catch (_) {
+      return;
+    }
+    if (!_running) return;
+    for (final socket in _sockets) {
       for (final iface in interfaces) {
+        if (_joinedInterfaces.contains(iface.name)) continue;
         try {
           socket.joinMulticast(group, iface);
+          _joinedInterfaces.add(iface.name);
         } catch (e) {
           // Some interfaces (e.g. VPN tunnels) refuse to join multicast.
-          // Swallow and continue with the rest.
+          // Swallow and continue with the rest; retry next refresh.
           if (kDebugMode) {
             debugPrint(
                 '[discovery] joinMulticast skipped on ${iface.name}: $e');
           }
         }
       }
-      _sockets.add(socket);
-      _bindSocketHandlers(socket);
-    } catch (e) {
-      if (kDebugMode) debugPrint('[discovery] failed to bind socket: $e');
     }
-
-    // Send the first announce immediately, then on a timer.
-    _announce();
-    _announceTimer = Timer.periodic(
-      LanLinkProtocol.announceInterval,
-      (_) => _announce(),
-    );
   }
 
   Future<void> stop() async {
@@ -99,6 +130,7 @@ class MulticastDiscovery {
       } catch (_) {}
     }
     _sockets.clear();
+    _joinedInterfaces.clear();
   }
 
   /// Triggers an immediate announce. Useful after settings change.
@@ -178,15 +210,26 @@ class MulticastDiscovery {
   void _announce() {
     final payload = utf8.encode(json.encode(announcementJson()));
     for (final s in _sockets) {
-      try {
-        s.send(
-          payload,
-          InternetAddress(LanLinkProtocol.multicastGroup),
-          LanLinkProtocol.discoveryPort,
-        );
-      } catch (_) {}
+      for (final target in announceTargets()) {
+        try {
+          s.send(payload, target, LanLinkProtocol.discoveryPort);
+        } catch (_) {}
+      }
     }
   }
+
+  /// Destinations every announce is sent to. Multicast is the primary,
+  /// spec-compliant path, but many phone hotspots and consumer APs filter
+  /// multicast (IGMP snooping without a querier) while still forwarding the
+  /// limited broadcast address. Announcing to both costs one extra small
+  /// datagram per interval and makes discovery work on those networks
+  /// without waiting for the (slower, 20s-throttled) subnet sweep.
+  /// Receivers dedupe naturally: same fingerprint, same [onPeer] refresh.
+  @visibleForTesting
+  List<InternetAddress> announceTargets() => [
+        InternetAddress(LanLinkProtocol.multicastGroup),
+        InternetAddress('255.255.255.255'),
+      ];
 
   /// The unicast reply to a fresh announcement: same device payload but
   /// with `announce` unset (false), marking it a response per the LocalSend

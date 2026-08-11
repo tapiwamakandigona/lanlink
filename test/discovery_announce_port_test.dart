@@ -78,4 +78,33 @@ void main() {
     expect(discovery.responseJson()['announce'], isNot(true));
     expect(discovery.announcementJson()['announce'], isTrue);
   });
+
+  test(
+      'announces go to multicast AND limited broadcast (hotspots/APs that '
+      'filter multicast still see us without waiting for the subnet sweep)',
+      () {
+    final discovery = MulticastDiscovery(
+      selfDeviceProvider: () => Device(
+        alias: 'me',
+        version: LanLinkProtocol.protocolVersion,
+        deviceModel: 'unit',
+        deviceType: LanLinkProtocol.deviceTypeHeadless,
+        fingerprint: 'fp-self',
+        port: 53317,
+        protocol: 'http',
+        ip: '',
+      ),
+      onPeer: (_) {},
+    );
+
+    final targets = discovery.announceTargets().map((a) => a.address).toList();
+    expect(targets, contains(LanLinkProtocol.multicastGroup),
+        reason: 'multicast group is the primary, spec-compliant path');
+    expect(targets, contains('255.255.255.255'),
+        reason: 'limited broadcast is the fallback for multicast-filtering '
+            'networks');
+    expect(targets.first, LanLinkProtocol.multicastGroup,
+        reason: 'multicast stays first so spec-compliant peers see the '
+            'canonical packet first');
+  });
 }
