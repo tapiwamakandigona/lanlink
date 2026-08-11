@@ -163,23 +163,39 @@ class _SettingsPageState extends State<SettingsPage> {
               state.localIps.isEmpty
                   ? 'no LAN interface'
                   : state.port == null
-                      ? '${state.localIps.join(", ")} — not receiving'
+                      ? // "hidden" matches the home line ("You're hidden right
+                      // now") — one word for one state everywhere.
+                      '${state.localIps.join(", ")} — hidden'
                       : '${state.localIps.join(", ")}:${state.port}'),
+          // Show a short prefix of the fingerprint instead of the raw
+          // 64-char SHA-256, which wrapped to ~5 lines of hex on phones.
+          // Copy puts the full value on the clipboard for support cases.
           Row(
             children: [
               Expanded(
-                child: _kv(
-                    context,
-                    'Device code',
-                    state.fingerprint.isEmpty
-                        ? '(generating…)'
-                        : state.fingerprint),
+                child: _kv(context, 'Device code',
+                    _shortDeviceCode(state.fingerprint)),
               ),
+              if (state.fingerprint.isNotEmpty)
+                IconButton(
+                  tooltip: 'Copy full device code',
+                  icon: const Icon(Icons.copy, size: 18),
+                  visualDensity: VisualDensity.compact,
+                  onPressed: () async {
+                    final messenger = ScaffoldMessenger.of(context);
+                    await Clipboard.setData(
+                        ClipboardData(text: state.fingerprint));
+                    messenger.showSnackBar(
+                      const SnackBar(content: Text('Device code copied')),
+                    );
+                  },
+                ),
               const SizedBox(width: 6),
               const GlossaryTooltip(
-                message: 'A short random ID used to recognise this device on '
-                    'the local network. Other devices remember it so you can '
-                    'mark them as trusted. Safe to share.',
+                message: 'The unique ID other devices use to recognise this '
+                    'one on the local network, shown shortened here. Other '
+                    'devices remember it so you can mark them as trusted. '
+                    'Safe to share.',
               ),
             ],
           ),
@@ -275,6 +291,15 @@ class _SettingsPageState extends State<SettingsPage> {
         ],
       ),
     );
+  }
+
+  /// `9F2C 1E77` style prefix of the 64-char fingerprint — enough to
+  /// visually match two devices without a wall of hex.
+  String _shortDeviceCode(String fingerprint) {
+    if (fingerprint.isEmpty) return '(generating…)';
+    if (fingerprint.length < 8) return fingerprint.toUpperCase();
+    final p = fingerprint.toUpperCase();
+    return '${p.substring(0, 4)} ${p.substring(4, 8)}';
   }
 
   Widget _kv(BuildContext context, String k, String v) {

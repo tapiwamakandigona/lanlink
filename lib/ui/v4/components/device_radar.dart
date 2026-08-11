@@ -15,6 +15,8 @@ class DeviceRadar extends StatelessWidget {
     required this.peers,
     required this.onPeerTap,
     this.searching = true,
+    this.scanHintVisible = true,
+    this.onHelp,
   });
 
   /// The nearby peers to render, in display order.
@@ -26,9 +28,22 @@ class DeviceRadar extends StatelessWidget {
   /// When true and [peers] is empty, shows the "Looking around…" state.
   final bool searching;
 
+  /// Whether the empty state may mention scanning the other device's
+  /// code — false on hosts without a camera/scanner.
+  final bool scanHintVisible;
+
+  /// Optional "Can't see it? Get help" action on the empty state.
+  final VoidCallback? onHelp;
+
   @override
   Widget build(BuildContext context) {
-    if (peers.isEmpty) return _EmptyRadar(searching: searching);
+    if (peers.isEmpty) {
+      return _EmptyRadar(
+        searching: searching,
+        scanHintVisible: scanHintVisible,
+        onHelp: onHelp,
+      );
+    }
     return Wrap(
       spacing: VSpace.x4,
       runSpacing: VSpace.x5,
@@ -151,7 +166,14 @@ class DeviceBubble extends StatelessWidget {
 }
 
 class _EmptyRadar extends StatelessWidget {
-  const _EmptyRadar({required this.searching});
+  const _EmptyRadar({
+    required this.searching,
+    this.scanHintVisible = true,
+    this.onHelp,
+  });
+
+  final bool scanHintVisible;
+  final VoidCallback? onHelp;
 
   final bool searching;
 
@@ -196,12 +218,27 @@ class _EmptyRadar extends StatelessWidget {
                 // Passive discovery keeps listening even when no sweep is
                 // in flight — this state is "not found yet", not "gave
                 // up". Say what actually unblocks people.
-                : 'Make sure both devices are on the same Wi-Fi and the '
-                    'other device has LanLink open — or scan their code '
-                    'below.',
+                // Only promise a scanner where one exists (desktop
+                // builds have no camera flow).
+                : scanHintVisible
+                    ? 'Make sure both devices are on the same Wi-Fi and the '
+                        'other device has LanLink open — or scan their code '
+                        'below.'
+                    : 'Make sure both devices are on the same Wi-Fi and the '
+                        'other device has LanLink open.',
             style: VType.caption.copyWith(color: scheme.onSurfaceVariant),
             textAlign: TextAlign.center,
           ),
+          if (!searching && onHelp != null) ...[
+            const SizedBox(height: VSpace.x2),
+            TextButton(
+              onPressed: onHelp,
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+              ),
+              child: const Text("Can't see it? Get help"),
+            ),
+          ],
         ],
       ),
     );

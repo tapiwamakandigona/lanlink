@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 
 import '../../core/models/session.dart';
+import '../../core/platform/reveal_folder.dart';
 import '../../state/app_state.dart';
 import '../shell/saved_location.dart';
 import '../shell/session_display.dart';
@@ -49,6 +51,7 @@ class LiveSessionCard extends StatelessWidget {
                   session.status == TransferStatus.completed
               ? () => showSavedLocationDialog(context, session)
               : null,
+          onOpen: _openAction(session),
         );
         if (!session.isTerminal) return card;
         // Terminal cards can also be swiped away.
@@ -60,4 +63,20 @@ class LiveSessionCard extends StatelessWidget {
       },
     );
   }
+}
+
+/// One-tap "Open" for a completed single-file receive, desktop only —
+/// that's where the platform can open a file directly. Android keeps the
+/// "Where is it?" dialog (files also land in Downloads there).
+VoidCallback? _openAction(TransferSession session) {
+  if (session.direction != TransferDirection.receive ||
+      session.status != TransferStatus.completed) {
+    return null;
+  }
+  if (!(Platform.isWindows || Platform.isMacOS || Platform.isLinux)) {
+    return null;
+  }
+  final single = singleSavedFileFor(session);
+  if (single == null) return null;
+  return () => unawaited(openFile(single));
 }

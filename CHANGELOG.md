@@ -1,5 +1,41 @@
 # Changelog
 
+## 4.3.1 (+18) — UI flow polish
+
+A pixels-first review pass over the core journeys (home -> send ->
+receive -> history), fixing what a fresh pair of eyes catches.
+
+### Fixed
+- **History rows no longer lose their metadata.** The trailing action
+  ("Send again" / "Retry" / "Where is it?") used to ellipsize both text
+  lines; rows now use the standard card layout with the action below, and
+  the size + time can never truncate.
+- **Share picker:** the "Photos & videos" tab no longer clips mid-word on
+  phones, and unselected media tiles drop the heavy dark chip that read as
+  already-selected.
+- **Settings:** the device code shows a short grouped prefix (like
+  `9F2C 1E77`) with a copy button for the full value, instead of five
+  wrapped lines of raw SHA-256 — and its tooltip is no longer wrong.
+- **Receive:** the Same Wi-Fi / No shared Wi-Fi switch highlights the
+  *selected* side with a solid accent fill; the old treatment read
+  inverted.
+- One word for one state: Settings now says "hidden" exactly like home,
+  instead of "not receiving".
+- The send screen's empty state only suggests scanning a code on devices
+  that actually have a scanner.
+
+### Improved
+- **Live transfers sit above the fold.** While transfer cards are on
+  screen, the big Send/Receive cards collapse to a slim row, so progress —
+  including a second transfer — is visible without scrolling.
+- **Recents first.** Nearby devices sort by most recent transfer, so the
+  device you always send to appears first (alphabetical for new ones).
+- **One-tap Open.** After a single-file receive on desktop, the card
+  offers Open directly — no more dialog detour.
+- "Can't see it? Get help" on the empty device list links straight to the
+  connection wizard (previously buried in the overflow menu).
+- "Send a message instead" moved below the device list.
+
 ## 4.3.0 (+17) — "Gauntlet"
 
 This release folds together two lines of work: the security + hotspot

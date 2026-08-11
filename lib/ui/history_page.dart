@@ -119,48 +119,92 @@ class HistoryPage extends StatelessWidget {
         single != null ? single.fileName : '${s.files.length} files';
     final peerLabel = settings.nicknameFor(s.peer.fingerprint) ??
         (s.peer.alias.isEmpty ? 'Unknown device' : s.peer.alias);
-    return Card(
-      child: ListTile(
-        leading: Icon(icon, color: color),
-        title: Text('$status • $peerLabel', overflow: TextOverflow.ellipsis),
-        subtitle: Row(
-          children: [
-            if (single != null) ...[
-              Icon(fileGlyphFor(single.fileName),
-                  size: 14, color: theme.colorScheme.onSurfaceVariant),
-              const SizedBox(width: 4),
-            ],
-            Expanded(
-              child: Text(
-                '$whatLabel • ${formatBytes(total)} • '
-                '${_timeAgo(s.finishedAt ?? s.startedAt)}',
-                style: theme.textTheme.bodySmall,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
-        ),
-        trailing: AppState.canRetry(s)
+    final scheme = theme.colorScheme;
+    // The action lives on its own bottom-right row (same language as
+    // SessionCard) instead of a ListTile `trailing`, which reserved its
+    // width for the full tile height and ellipsized both text lines.
+    final Widget? action = AppState.canRetry(s)
+        ? TextButton.icon(
+            icon: const Icon(Icons.refresh, size: 18),
+            label: const Text('Retry'),
+            onPressed: () => _retry(context, s),
+          )
+        : s.direction == TransferDirection.receive &&
+                s.status == TransferStatus.completed
             ? TextButton.icon(
-                icon: const Icon(Icons.refresh, size: 18),
-                label: const Text('Retry'),
-                onPressed: () => _retry(context, s),
+                icon: const Icon(Icons.folder_open_outlined, size: 18),
+                label: const Text('Where is it?'),
+                onPressed: () => showSavedLocationDialog(context, s),
               )
-            : s.direction == TransferDirection.receive &&
-                    s.status == TransferStatus.completed
+            : _canSendAgain(s)
                 ? TextButton.icon(
-                    icon: const Icon(Icons.folder_open_outlined, size: 18),
-                    label: const Text('Where is it?'),
-                    onPressed: () => showSavedLocationDialog(context, s),
+                    icon: const Icon(Icons.send_outlined, size: 18),
+                    label: const Text('Send again'),
+                    onPressed: () => _retry(context, s),
                   )
-                : _canSendAgain(s)
-                    ? TextButton.icon(
-                        icon: const Icon(Icons.send_outlined, size: 18),
-                        label: const Text('Send again'),
-                        onPressed: () => _retry(context, s),
-                      )
-                    : null,
-        isThreeLine: false,
+                : null;
+    // Size and time never truncate: the (possibly very long) file name is
+    // the only flexible segment on the metadata line.
+    final metaTail =
+        ' • ${formatBytes(total)} • ${_timeAgo(s.finishedAt ?? s.startedAt)}';
+    return Container(
+      margin: const EdgeInsets.only(bottom: VSpace.x3),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerLowest,
+        borderRadius: VRadius.mdAll,
+        border: Border.all(color: scheme.outlineVariant),
+      ),
+      padding: const EdgeInsets.all(VSpace.x4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(icon, color: color),
+              const SizedBox(width: VSpace.x3),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '$status • $peerLabel',
+                      style: VType.bodyStrong.copyWith(color: scheme.onSurface),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    Row(
+                      children: [
+                        if (single != null) ...[
+                          Icon(fileGlyphFor(single.fileName),
+                              size: 14, color: scheme.onSurfaceVariant),
+                          const SizedBox(width: 4),
+                        ],
+                        Flexible(
+                          child: Text(
+                            whatLabel,
+                            style: VType.caption
+                                .copyWith(color: scheme.onSurfaceVariant),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        Text(
+                          metaTail,
+                          style: VType.caption
+                              .copyWith(color: scheme.onSurfaceVariant),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          if (action != null)
+            Align(alignment: Alignment.centerRight, child: action),
+        ],
       ),
     );
   }
