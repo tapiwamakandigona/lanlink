@@ -300,13 +300,14 @@ class _SharePickerPageState extends State<SharePickerPage>
         title: const Text('Pick what to send'),
         bottom: TabBar(
           controller: _tabs,
+          // Text-only tabs with tight label padding: icon-over-text at
+          // three-up on a 360–390dp phone clipped "Photos & videos"
+          // mid-word (default 16dp-per-side padding still did at 390dp).
+          labelPadding: const EdgeInsets.symmetric(horizontal: 4),
           tabs: const [
-            Tab(
-              icon: Icon(Icons.photo_library_outlined),
-              text: 'Photos & videos',
-            ),
-            Tab(icon: Icon(Icons.apps), text: 'Apps'),
-            Tab(icon: Icon(Icons.folder_outlined), text: 'All files'),
+            Tab(text: 'Photos & videos'),
+            Tab(text: 'Apps'),
+            Tab(text: 'All files'),
           ],
         ),
       ),
@@ -529,7 +530,9 @@ class _SharePickerPageState extends State<SharePickerPage>
               duration: const Duration(milliseconds: 120),
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: selected ? theme.colorScheme.primary : Colors.black54,
+                // Unselected is a light scrim ring (gallery convention);
+                // the old solid Colors.black54 chip read as "selected".
+                color: selected ? theme.colorScheme.primary : Colors.black26,
               ),
               padding: const EdgeInsets.all(2),
               child: Icon(
