@@ -40,7 +40,7 @@ dependencies:
   desktop_drop: ^0.7.1
 
   # Unlock 90/120 Hz on Android OEMs that cap Flutter at 60 Hz.
-  flutter_displaymode: ^0.7.0
+  flutter_displaymode: ^0.6.0
 
 dev_dependencies:
   flutter_test:
