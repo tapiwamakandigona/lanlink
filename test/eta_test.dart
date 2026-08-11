@@ -1,4 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:lanlink/core/models/device.dart';
+import 'package:lanlink/core/models/file_info.dart';
+import 'package:lanlink/core/models/session.dart';
 import 'package:lanlink/core/util/eta.dart';
 
 void main() {
@@ -74,6 +77,62 @@ void main() {
     });
     test('does not flag zero', () {
       expect(isSlowSpeed(0), isFalse);
+    });
+  });
+
+  group('TransferSession rolling speed', () {
+    TransferSession session(int totalBytes) => TransferSession(
+          sessionId: 's',
+          direction: TransferDirection.send,
+          peer: Device(
+            alias: 'peer',
+            version: '2.1',
+            deviceModel: 'test',
+            deviceType: 'headless',
+            fingerprint: 'fp',
+            port: 53317,
+            protocol: 'http',
+            ip: '127.0.0.1',
+          ),
+          files: {
+            'f': FileProgress(
+              file: FileInfo(
+                id: 'f',
+                fileName: 'big.bin',
+                size: totalBytes,
+                fileType: 'other',
+              ),
+              status: TransferStatus.transferring,
+            ),
+          },
+          status: TransferStatus.transferring,
+        );
+
+    test('tracks the trailing window, not the lifetime average', () {
+      final s = session(1000 * 1000 * 1000);
+      final t0 = s.startedAt;
+      // 10 seconds at 10 MB/s...
+      for (var i = 1; i <= 10; i++) {
+        s.files['f']!.bytes = 10 * 1000 * 1000 * i;
+        s.recomputeSpeedAt(t0.add(Duration(seconds: i)));
+      }
+      expect(s.speedBytesPerSec, closeTo(10 * 1000 * 1000, 2 * 1000 * 1000));
+      // ...then the link collapses to 1 MB/s for 10 more seconds.
+      for (var i = 1; i <= 10; i++) {
+        s.files['f']!.bytes = 100 * 1000 * 1000 + 1000 * 1000 * i;
+        s.recomputeSpeedAt(t0.add(Duration(seconds: 10 + i)));
+      }
+      // Lifetime average would report ~5.5 MB/s; the window must be ~1 MB/s.
+      expect(s.speedBytesPerSec, closeTo(1000 * 1000, 300 * 1000),
+          reason: 'speed (and the ETA derived from it) must reflect the '
+              'current link, not history');
+    });
+
+    test('falls back to lifetime average right at the start', () {
+      final s = session(1000 * 1000);
+      s.files['f']!.bytes = 500 * 1000;
+      s.recomputeSpeedAt(s.startedAt.add(const Duration(milliseconds: 100)));
+      expect(s.speedBytesPerSec, greaterThan(0));
     });
   });
 }
