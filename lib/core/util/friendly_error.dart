@@ -20,6 +20,9 @@ String friendlyTransferError(Object error, {String? peerName}) {
       case DioExceptionType.connectionTimeout:
       case DioExceptionType.sendTimeout:
       case DioExceptionType.receiveTimeout:
+      // transformTimeout (dio >= 5.10) fires when decoding a response body
+      // exceeds its budget — to the user that is the same "it timed out".
+      case DioExceptionType.transformTimeout:
         return 'Timed out reaching $who. Make sure both devices are on '
             'the same Wi-Fi or hotspot and try again.';
       case DioExceptionType.connectionError:
