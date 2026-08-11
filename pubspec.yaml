@@ -25,7 +25,7 @@ dependencies:
   permission_handler: ^13.0.1
   shared_preferences: ^2.3.3
   url_launcher: ^6.3.1
-  package_info_plus: ^8.3.1
+  package_info_plus: ^9.0.1
 
   # QR code rendering + scanning for instant peer pairing.
   qr_flutter: ^4.1.0
