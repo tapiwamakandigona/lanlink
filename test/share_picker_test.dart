@@ -60,6 +60,9 @@ Future<_Result> _pump(
                         requestMediaAccess ?? (() async => MediaAccess.granted),
                     openSettings: openSettings ?? (() async => true),
                     pickAnyFiles: pickAnyFiles ?? (() async => const []),
+                    // Test media use fake paths; the real check would drop
+                    // them all at staging time.
+                    mediaPathExists: (_) => true,
                   ),
                 ),
               );

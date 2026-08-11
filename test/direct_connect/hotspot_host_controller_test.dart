@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lanlink/core/platform/local_hotspot.dart';
 import 'package:lanlink/ui/v4/direct_connect/hotspot_host_controller.dart';
@@ -117,6 +118,43 @@ void main() {
       await c.enable();
       c.dispose();
       expect(log.last, 'stop');
+    });
+
+    group('on Windows', () {
+      setUp(() {
+        debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      });
+      tearDown(() {
+        debugDefaultTargetPlatformOverride = null;
+      });
+
+      test('enable skips the permission check entirely', () async {
+        // Even a hasPermission fake that would say "no" must never be
+        // consulted: Windows has no runtime permission to grant.
+        final log = <String>[];
+        final c = _controller(log: log, permitted: false);
+        await c.enable();
+        expect(c.phase, HotspotHostPhase.running);
+        expect(log, ['isSupported', 'start']);
+      });
+
+      test('unsupported message talks about the PC, not Android', () async {
+        final log = <String>[];
+        final c = _controller(log: log, supported: false);
+        await c.enable();
+        expect(c.phase, HotspotHostPhase.failed);
+        expect(c.error, contains('Wi-Fi adapter'));
+        expect(c.error, isNot(contains('Android')));
+      });
+
+      test('start refusal message is Windows-flavoured', () async {
+        final log = <String>[];
+        final c = _controller(log: log, startResult: null);
+        await c.enable();
+        expect(c.phase, HotspotHostPhase.failed);
+        expect(c.error, contains('Wi-Fi'));
+        expect(c.error, isNot(contains('Location')));
+      });
     });
 
     test('notifies listeners on every phase change', () async {

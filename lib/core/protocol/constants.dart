@@ -6,11 +6,16 @@ class LanLinkProtocol {
   LanLinkProtocol._();
 
   /// Wire protocol version we implement.
-  static const protocolVersion = '2.0';
+  ///
+  /// 2.1: transport is HTTPS with self-signed certificates; the device
+  /// fingerprint is the SHA-256 hash of the certificate DER and is verified
+  /// during the TLS handshake (certificate pinning + trust-on-first-use).
+  /// This intentionally breaks wire-compat with older plaintext-HTTP builds.
+  static const protocolVersion = '2.1';
 
-  // NOTE: The hard-coded appVersion constant was removed because it was stale
-  // (2.0.0 vs pubspec 3.5.0+13) and unused. The canonical version lives in
-  // pubspec.yaml and can be read at runtime via package_info_plus.
+  // NOTE: The hard-coded appVersion constant was removed because it was
+  // stale and unused. The canonical version lives in pubspec.yaml and is
+  // read at runtime via package_info_plus.
 
   /// Default TCP port for the HTTP server. Matches LocalSend's default.
   static const defaultPort = 53317;

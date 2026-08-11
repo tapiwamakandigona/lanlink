@@ -9,6 +9,7 @@
 // - N2: the share-picker search filter is debounced (covered in
 //   share_picker_test.dart; the timer plumbing is exercised there).
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lanlink/app.dart';
@@ -32,7 +33,7 @@ class _CountingSender extends Sender {
             deviceType: LanLinkProtocol.deviceTypeHeadless,
             fingerprint: 'me',
             port: LanLinkProtocol.defaultPort,
-            protocol: 'http',
+            protocol: 'https',
             ip: '127.0.0.1',
           ),
         );
@@ -40,7 +41,11 @@ class _CountingSender extends Sender {
   int probes = 0;
 
   @override
-  Future<Device?> probe(Device peer) async {
+  Future<Device?> probe(
+    Device peer, {
+    CancelToken? cancelToken,
+    Duration? timeout,
+  }) async {
     probes += 1;
     return null;
   }

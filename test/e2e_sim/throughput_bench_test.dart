@@ -18,13 +18,14 @@ import 'package:lanlink/core/transfer/receiver.dart';
 import 'package:dio/dio.dart';
 import 'package:lanlink/core/transfer/sender.dart';
 
+import '../tls_test_helpers.dart';
 import 'e2e_helpers.dart';
 
 /// Dio with [rtt] of artificial latency before every request — loopback has
 /// ~0 RTT, so this is what makes the per-file round-trip cost (the thing
 /// upload pipelining hides on real Wi-Fi) visible in a benchmark.
 Dio delayedDio(Duration rtt) {
-  final d = Dio(BaseOptions(
+  final d = trustAllDio(BaseOptions(
     connectTimeout: const Duration(seconds: 10),
     receiveTimeout: const Duration(minutes: 30),
     sendTimeout: const Duration(minutes: 30),
@@ -50,6 +51,7 @@ Future<void> main() async {
     tmp = await Directory.systemTemp.createTemp('lanlink_bench_');
     saveDir = await Directory('${tmp.path}/inbox').create();
     receiver = Receiver(
+      certificateProvider: testCertificateProvider,
       localDeviceProvider: () => device('bench-rx', 'fp-rx', 53420),
       saveDirProvider: () async => saveDir,
       onAccept: (peer, files) async =>
@@ -58,7 +60,15 @@ Future<void> main() async {
     );
     await receiver.start();
     receiverDevice = device('bench-rx', 'fp-rx', receiver.port!);
-    sender = Sender(localDeviceProvider: () => device('bench-tx', 'fp-tx', 1));
+    sender = Sender(
+      localDeviceProvider: () => device('bench-tx', 'fp-tx', 1),
+      dio: trustAllDio(BaseOptions(
+        connectTimeout: const Duration(seconds: 10),
+        receiveTimeout: const Duration(minutes: 30),
+        sendTimeout: const Duration(minutes: 30),
+        responseType: ResponseType.json,
+      )),
+    );
   });
 
   tearDown(() async {

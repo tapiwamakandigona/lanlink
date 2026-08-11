@@ -22,7 +22,7 @@ void main() {
       deviceType: LanLinkProtocol.deviceTypeMobile,
       fingerprint: fingerprint,
       port: LanLinkProtocol.defaultPort,
-      protocol: 'http',
+      protocol: 'https',
       ip: '192.168.1.10',
     );
   }

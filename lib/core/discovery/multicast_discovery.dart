@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 
 import '../models/device.dart';
 import '../protocol/constants.dart';
@@ -57,10 +58,15 @@ class MulticastDiscovery {
       socket.multicastLoopback = false;
       _sockets.add(socket);
       _bindSocketHandlers(socket);
-      await _refreshMulticastJoins();
     } catch (e) {
       if (kDebugMode) debugPrint('[discovery] failed to bind socket: $e');
     }
+    // Android Wi-Fi drivers filter inbound multicast unless the app holds
+    // a MulticastLock (the manifest permission alone does nothing). Without
+    // it, peer announcements never arrive and discovery silently degrades
+    // to subnet scans only.
+    await _setMulticastLock(true);
+    await _refreshMulticastJoins();
 
     // Send the first announces as a short burst, then steady on a timer.
     // Every few ticks, re-join the multicast group on any newly appeared
@@ -82,8 +88,9 @@ class MulticastDiscovery {
   }
 
   /// Re-joins the multicast group on every interface not yet joined.
-  /// Cheap (one interface listing); called at start and periodically so
-  /// interfaces that appear after startup still receive group traffic.
+  /// Cheap (one interface listing); called at start, periodically, and on
+  /// [poke] so interfaces that appear after startup (the hotspot interface,
+  /// a reconnected Wi-Fi) still receive group traffic.
   static const _rejoinEveryTicks = 6; // every ~30s with a 5s interval
   final Set<String> _joinedInterfaces = {};
 
@@ -108,8 +115,9 @@ class MulticastDiscovery {
           socket.joinMulticast(group, iface);
           _joinedInterfaces.add(iface.name);
         } catch (e) {
-          // Some interfaces (e.g. VPN tunnels) refuse to join multicast.
-          // Swallow and continue with the rest; retry next refresh.
+          // Some interfaces (e.g. VPN tunnels) refuse to join multicast,
+          // and already-joined interfaces throw "address in use". Swallow
+          // and continue with the rest; retry next refresh.
           if (kDebugMode) {
             debugPrint(
                 '[discovery] joinMulticast skipped on ${iface.name}: $e');
@@ -135,10 +143,35 @@ class MulticastDiscovery {
     }
     _sockets.clear();
     _joinedInterfaces.clear();
+    await _setMulticastLock(false);
+  }
+
+  /// Acquires/releases the Android multicast lock via the `lanlink/wifi`
+  /// channel. A no-op everywhere else (and under `flutter test`, where the
+  /// channel is not wired).
+  static const _wifiChannel = MethodChannel('lanlink/wifi');
+
+  Future<void> _setMulticastLock(bool acquire) async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _wifiChannel.invokeMethod<bool>(
+        acquire ? 'acquireMulticastLock' : 'releaseMulticastLock',
+      );
+    } catch (_) {
+      // Best-effort: discovery still works via subnet scans without it.
+    }
   }
 
   /// Triggers an immediate announce burst. Useful after settings change.
-  void poke() => _announceBurst();
+  ///
+  /// Also re-joins the multicast group on the *current* interface set:
+  /// interfaces that appeared after [start] (e.g. the hotspot interface
+  /// once this phone joins the PC-hosted network) would otherwise never
+  /// receive group traffic.
+  void poke() {
+    unawaited(_refreshMulticastJoins());
+    _announceBurst();
+  }
 
   /// One announce now plus two quick follow-ups. A single UDP datagram is
   /// routinely lost right after a radio wakes from power-save (the classic

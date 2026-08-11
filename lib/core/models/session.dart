@@ -229,7 +229,7 @@ class TransferSession extends ChangeNotifier {
           LanLinkProtocol.deviceTypeHeadless,
       fingerprint: (peerJson['fingerprint'] as String?) ?? '',
       port: (peerJson['port'] as num?)?.toInt() ?? LanLinkProtocol.defaultPort,
-      protocol: (peerJson['protocol'] as String?) ?? 'http',
+      protocol: (peerJson['protocol'] as String?) ?? 'https',
       ip: (peerJson['ip'] as String?) ?? '0.0.0.0',
     );
     final filesJson = (json['files'] as List?) ?? const [];

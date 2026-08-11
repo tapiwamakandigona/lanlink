@@ -19,6 +19,8 @@
         android:name="android.permission.NEARBY_WIFI_DEVICES"
         android:usesPermissionFlags="neverForLocation" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <!-- WifiNetworkSpecifier joins (requestNetwork with a Wi-Fi specifier). -->
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
 
     <!-- Storage access. On Android 11+ we rely on the Storage Access Framework
          (no permission required for picked URIs); the WRITE_EXTERNAL_STORAGE

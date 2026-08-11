@@ -3,6 +3,7 @@
 // machine), the receiver must fall back to a nearby or ephemeral port
 // instead of throwing an unhandled SocketException that blanks the UI.
 
+import 'tls_test_helpers.dart';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -12,6 +13,7 @@ import 'package:lanlink/core/transfer/receiver.dart';
 
 Receiver _buildReceiver(int desiredPort) {
   return Receiver(
+    certificateProvider: testCertificateProvider,
     localDeviceProvider: () => Device(
       alias: 'fallback-test',
       version: LanLinkProtocol.protocolVersion,
@@ -19,7 +21,7 @@ Receiver _buildReceiver(int desiredPort) {
       deviceType: LanLinkProtocol.deviceTypeHeadless,
       fingerprint: 'fallback-fp',
       port: desiredPort,
-      protocol: 'http',
+      protocol: 'https',
       ip: '127.0.0.1',
     ),
     saveDirProvider: () async => Directory.systemTemp,

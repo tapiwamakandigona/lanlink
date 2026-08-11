@@ -91,9 +91,9 @@ class HistoryPage extends StatelessWidget {
         icon = isSend
             ? Icons.cloud_upload_outlined
             : Icons.cloud_download_outlined;
-        // Single-green rule: terminal success uses the semantic palette.
-        color = theme.extension<EmberSemantics>()?.success ??
-            theme.colorScheme.primary;
+        // The single semantic green lives in EmberSemantics; a literal
+        // Colors.green here would reintroduce the v3 competing-greens bug.
+        color = context.ember.success;
         status = isSend ? 'Sent' : 'Received';
         break;
       case TransferStatus.failed:

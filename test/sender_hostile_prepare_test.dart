@@ -14,6 +14,8 @@ import 'package:lanlink/core/transfer/sender.dart';
 import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
 
+import 'tls_test_helpers.dart';
+
 Device _device(String alias, String fp, int port) => Device(
       alias: alias,
       version: LanLinkProtocol.protocolVersion,
@@ -21,7 +23,7 @@ Device _device(String alias, String fp, int port) => Device(
       deviceType: LanLinkProtocol.deviceTypeHeadless,
       fingerprint: fp,
       port: port,
-      protocol: 'http',
+      protocol: 'https',
       ip: '127.0.0.1',
     );
 
@@ -40,7 +42,8 @@ void main() {
     sourceFile = File(p.join(tmpRoot.path, 'src.bin'));
     await sourceFile.writeAsBytes(List<int>.filled(1024, 7));
 
-    hostileServer = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    hostileServer = await HttpServer.bindSecure(
+        InternetAddress.loopbackIPv4, 0, testCertificate().securityContext());
     port = hostileServer.port;
     hostileServer.listen((req) async {
       final body = await utf8.decoder.bind(req).join();
@@ -63,7 +66,7 @@ void main() {
 
   Future<TransferSession> drive() async {
     final sender = Sender(localDeviceProvider: () => _device('me', 'me-fp', 1));
-    final peer = _device('hostile', 'hostile-fp', port);
+    final peer = _device('hostile', testCertificate().fingerprint, port);
     final info = FileInfo(
       id: const Uuid().v4(),
       fileName: 'src.bin',

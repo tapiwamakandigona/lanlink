@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
 import '../models/device.dart';
@@ -69,11 +70,20 @@ class SubnetScanner {
   /// transfer I/O and progress frames.
   set transfersActive(bool active) => _transfersActive = active;
 
+  /// Dio cancel tokens for probes currently in flight, so [cancel] can
+  /// abort their sockets instead of merely abandoning the futures.
+  final Set<CancelToken> _activeProbes = {};
+
   /// Synchronously bumps the generation so any in-flight scan stops as soon
-  /// as the next host slot picks it up.
+  /// as the next host slot picks it up, and aborts the probes already in
+  /// flight so their sockets close now rather than at the connect timeout.
   void cancel() {
     _generation += 1;
     _running = false;
+    for (final token in _activeProbes.toList()) {
+      token.cancel('scan cancelled');
+    }
+    _activeProbes.clear();
   }
 
   /// Scans every /24 derived from [localIps] plus the well-known Android
@@ -177,6 +187,9 @@ class SubnetScanner {
   }
 
   Future<void> _probe(String ip, int gen) async {
+    // Probe the default port plus the receiver's fallback ports: a peer
+    // whose 53317 was taken listens on +1/+2 (my earlier finding), and a
+    // host that answers on one port needs no further probing.
     for (final port in ports) {
       if (_generation != gen) return;
       final stub = Device(
@@ -186,11 +199,21 @@ class SubnetScanner {
         deviceType: LanLinkProtocol.deviceTypeHeadless,
         fingerprint: '',
         port: port,
-        protocol: 'http',
+        protocol: 'https',
         ip: ip,
       );
+      // A per-probe cancel token: `.timeout` alone abandons the future but
+      // the socket keeps dialing for the full dio connect timeout (10 s),
+      // piling up ~160 lingering sockets on a dead subnet. Cancelling the
+      // token on timeout (or an external [cancel]) closes the socket now.
+      // Passing [perHostTimeout] down also aligns the receive budget with
+      // this probe's deadline.
+      final cancelToken = CancelToken();
+      _activeProbes.add(cancelToken);
       try {
-        final probed = await sender.probe(stub).timeout(perHostTimeout);
+        final probed = await sender
+            .probe(stub, cancelToken: cancelToken, timeout: perHostTimeout)
+            .timeout(perHostTimeout);
         if (_generation != gen) return;
         if (probed != null) {
           onPeer(probed);
@@ -200,9 +223,14 @@ class SubnetScanner {
           return;
         }
       } catch (e) {
+        if (e is TimeoutException && !cancelToken.isCancelled) {
+          cancelToken.cancel('probe timeout');
+        }
         if (kDebugMode && e is! TimeoutException && e is! SocketException) {
           debugPrint('[scan] probe $ip:$port failed: $e');
         }
+      } finally {
+        _activeProbes.remove(cancelToken);
       }
     }
   }

@@ -1,3 +1,4 @@
+import 'tls_test_helpers.dart';
 import 'dart:convert';
 import 'dart:io';
 
@@ -91,6 +92,7 @@ void main() {
       tmp = await Directory.systemTemp.createTemp('lanlink_recv_folder_');
       saveDir = Directory('${tmp.path}/saved');
       receiver = Receiver(
+        certificateProvider: testCertificateProvider,
         localDeviceProvider: () => Device(
           alias: 'r',
           version: LanLinkProtocol.protocolVersion,
@@ -98,7 +100,7 @@ void main() {
           deviceType: LanLinkProtocol.deviceTypeHeadless,
           fingerprint: 'r-fp',
           port: 0,
-          protocol: 'http',
+          protocol: 'https',
           ip: '127.0.0.1',
         ),
         saveDirProvider: () async => saveDir,
@@ -108,7 +110,7 @@ void main() {
       );
       await receiver.start();
       port = receiver.port!;
-      client = HttpClient();
+      client = trustAllHttpClient();
     });
 
     tearDown(() async {
@@ -119,7 +121,7 @@ void main() {
 
     Future<void> sendFile(FileInfo file, List<int> bytes) async {
       final prepReq = await client.postUrl(Uri.parse(
-          'http://127.0.0.1:$port${LanLinkProtocol.routePrepareUpload}'));
+          'https://127.0.0.1:$port${LanLinkProtocol.routePrepareUpload}'));
       prepReq.headers.contentType = ContentType.json;
       prepReq.write(json.encode({
         'info': {
@@ -129,7 +131,7 @@ void main() {
           'deviceType': LanLinkProtocol.deviceTypeHeadless,
           'fingerprint': 's-fp',
           'port': 1,
-          'protocol': 'http',
+          'protocol': 'https',
         },
         'files': {
           file.id: {
@@ -146,7 +148,7 @@ void main() {
           as Map<String, dynamic>;
       final token = (prep['files'] as Map)[file.id] as String;
       final upReq = await client.postUrl(Uri.parse(
-          'http://127.0.0.1:$port${LanLinkProtocol.routeUpload}'
+          'https://127.0.0.1:$port${LanLinkProtocol.routeUpload}'
           '?sessionId=${prep['sessionId']}&fileId=${file.id}&token=$token'));
       upReq.headers.contentType = ContentType.binary;
       upReq.contentLength = bytes.length;

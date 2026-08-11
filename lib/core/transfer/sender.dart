@@ -2,12 +2,15 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
+import 'package:dio/io.dart';
 import 'package:flutter/foundation.dart';
 
 import '../models/device.dart';
 import '../models/file_info.dart';
+import '../platform/content_streams.dart';
 import '../models/session.dart';
 import '../protocol/constants.dart';
+import '../security/cert_pinning.dart';
 import '../util/friendly_error.dart';
 
 /// Drives outgoing transfers from this device to a [Device] peer.
@@ -19,8 +22,14 @@ class Sender {
   Sender({
     required this.localDeviceProvider,
     Dio? dio,
+    CertificatePinner? pinner,
+    Stream<List<int>> Function(String uri, int startAt)? contentOpener,
     this.maxParallelUploads = 3,
-  }) : _dio = dio ?? _defaultDio();
+  })  : pinner = pinner ?? CertificatePinner(),
+        _contentOpener = contentOpener ??
+            ((uri, startAt) => ContentStreams.openRead(uri, start: startAt)) {
+    _dio = dio ?? _defaultDio(this.pinner);
+  }
 
   /// Upper bound on simultaneous per-file uploads within one session.
   /// Per-file HTTP round-trips dominate the wall clock for photo-roll style
@@ -32,35 +41,85 @@ class Sender {
   /// Returns the current local-device info to embed in `prepare-upload`.
   final Device Function() localDeviceProvider;
 
-  final Dio _dio;
+  late final Dio _dio;
+
+  /// Opens a byte stream for a `content://` source ([FileInfo.contentUri]).
+  /// Defaults to the SAF platform channel; injectable so tests can feed
+  /// synthetic streams without a platform.
+  final Stream<List<int>> Function(String uri, int startAt) _contentOpener;
+
+  /// Verifies peer TLS certificates against pinned fingerprints (and records
+  /// cert hashes on first contact — TOFU). Shared with the default Dio's
+  /// HTTP client; injectable so tests can inspect/steer it.
+  final CertificatePinner pinner;
 
   /// Dio cancel tokens for in-flight sends, keyed by session identity so
   /// [cancelSend] can abort the HTTP work promptly.
   final Map<TransferSession, CancelToken> _inflight = {};
 
-  static Dio _defaultDio() {
+  static Dio _defaultDio(CertificatePinner pinner) {
     final d = Dio(BaseOptions(
       connectTimeout: const Duration(seconds: 10),
       receiveTimeout: const Duration(minutes: 30),
       sendTimeout: const Duration(minutes: 30),
       responseType: ResponseType.json,
     ));
+    d.httpClientAdapter = _pinnedAdapter(pinner);
     return d;
+  }
+
+  /// HTTPS adapter that trusts peers by certificate fingerprint, not by CA:
+  /// peers present self-signed certificates, so every connection lands in
+  /// `badCertificateCallback`, where [CertificatePinner.check] enforces the
+  /// pin (or records the hash on first contact).
+  static HttpClientAdapter _pinnedAdapter(CertificatePinner pinner) =>
+      IOHttpClientAdapter(
+        createHttpClient: () {
+          final client = HttpClient();
+          client.badCertificateCallback = pinner.check;
+          return client;
+        },
+      );
+
+  /// Declares the fingerprint we expect [peer] to present in the TLS
+  /// handshake. Call before any request to the peer.
+  void _pin(Device peer) => pinner.expect(peer.ip, peer.port, peer.fingerprint);
+
+  /// Overrides [d]'s self-reported fingerprint with the cert hash actually
+  /// verified (or recorded) during the TLS handshake, when available. The
+  /// wire JSON is peer-controlled; the handshake is not.
+  Device _withVerifiedFingerprint(Device d) {
+    final observed = pinner.observed(d.ip, d.port);
+    if (observed == null || observed.isEmpty) return d;
+    return d.copyWith(fingerprint: observed);
   }
 
   /// Try a quick `/info` round-trip to confirm the peer is reachable. Returns
   /// the up-to-date [Device] info if successful, or null on failure.
-  Future<Device?> probe(Device peer) async {
+  ///
+  /// [cancelToken] lets the caller genuinely abort the probe: a bare
+  /// `.timeout()` on the returned future only abandons it, leaving the
+  /// underlying socket alive for the full 10 s connect timeout — hundreds
+  /// of lingering sockets during a subnet sweep. [timeout] optionally
+  /// tightens the receive budget to match the caller's per-host deadline.
+  Future<Device?> probe(
+    Device peer, {
+    CancelToken? cancelToken,
+    Duration? timeout,
+  }) async {
+    _pin(peer);
     try {
       final resp = await _dio.getUri<Map<String, dynamic>>(
         peer.baseUri.replace(path: LanLinkProtocol.routeInfo),
+        cancelToken: cancelToken,
         options: Options(
           responseType: ResponseType.json,
-          receiveTimeout: const Duration(seconds: 4),
+          receiveTimeout: timeout ?? const Duration(seconds: 4),
         ),
       );
       if (resp.statusCode == 200 && resp.data != null) {
-        return Device.fromJson(resp.data!, ip: peer.ip);
+        return _withVerifiedFingerprint(
+            Device.fromJson(resp.data!, ip: peer.ip));
       }
     } catch (_) {}
     return null;
@@ -71,6 +130,7 @@ class Sender {
   /// success, or null when the token was rejected (consumed/unknown => 401)
   /// or the peer is unreachable.
   Future<Device?> connectWithToken(Device peer, String token) async {
+    _pin(peer);
     try {
       final resp = await _dio.postUri<Map<String, dynamic>>(
         peer.baseUri.replace(
@@ -84,7 +144,8 @@ class Sender {
         ),
       );
       if (resp.statusCode == 200 && resp.data != null) {
-        return Device.fromJson(resp.data!, ip: peer.ip);
+        return _withVerifiedFingerprint(
+            Device.fromJson(resp.data!, ip: peer.ip));
       }
     } catch (_) {}
     return null;
@@ -104,10 +165,11 @@ class Sender {
     required List<FileInfo> files,
   }) async {
     assert(
-      files.every((f) => f.localPath != null),
-      'Sender.send requires localPath on every file.',
+      files.every((f) => f.localPath != null || f.contentUri != null),
+      'Sender.send requires localPath or contentUri on every file.',
     );
 
+    _pin(peer);
     session.markStatus(TransferStatus.transferring);
     final cancelToken = CancelToken();
     _inflight[session] = cancelToken;
@@ -241,13 +303,29 @@ class Sender {
         final fileId = entry.key;
         final token = entry.value;
         final info = byId[fileId]!;
-        final file = File(info.localPath!);
-        if (!await file.exists()) {
-          stopped = true;
-          session.markFile(fileId, TransferStatus.failed,
-              error: 'Source file missing: ${info.localPath}');
-          session.markStatus(TransferStatus.failed);
-          return;
+        // Resolve the byte source: a filesystem path (desktop, media
+        // library) or an Android content URI (SAF pick — streamed, never
+        // copied).
+        final Stream<List<int>> Function(int startAt) openRead;
+        final int length;
+        final contentUri = info.contentUri;
+        if (contentUri != null) {
+          openRead = (startAt) => _contentOpener(contentUri, startAt);
+          // SAF reports the size at pick time; the provider owns the bytes,
+          // so there is no cheap existence probe — a vanished document fails
+          // the upload and lands in the normal per-file error path below.
+          length = info.size;
+        } else {
+          final file = File(info.localPath!);
+          if (!await file.exists()) {
+            stopped = true;
+            session.markFile(fileId, TransferStatus.failed,
+                error: 'Source file missing: ${info.localPath}');
+            session.markStatus(TransferStatus.failed);
+            return;
+          }
+          openRead = file.openRead;
+          length = await file.length();
         }
         final uri = peer.baseUri.replace(
           path: LanLinkProtocol.routeUpload,
@@ -258,7 +336,6 @@ class Sender {
           },
         );
         try {
-          final length = await file.length();
           var startAt = resume[fileId] ?? 0;
           if (startAt < 0 || startAt >= length) startAt = 0;
 
@@ -269,7 +346,7 @@ class Sender {
               await _uploadFrom(
                 session: session,
                 fileId: fileId,
-                file: file,
+                openRead: openRead,
                 length: length,
                 startAt: startAt,
                 uri: uri,
@@ -338,6 +415,7 @@ class Sender {
     required TransferSession session,
     required Device peer,
   }) async {
+    _pin(peer);
     _inflight[session]?.cancel('cancelled by user');
     _markPendingFiles(session, session.files.values.map((p) => p.file),
         TransferStatus.cancelled);
@@ -376,6 +454,7 @@ class Sender {
   /// the peer is still reachable. Returns true when the peer acknowledged
   /// (HTTP 200).
   Future<bool> notifyDisconnect(Device peer) async {
+    _pin(peer);
     try {
       final resp = await _dio.postUri<dynamic>(
         peer.baseUri.replace(path: LanLinkProtocol.routeDisconnect),
@@ -417,24 +496,24 @@ class Sender {
     }
   }
 
-  /// Streams [file] to [uri] starting at byte [startAt], updating the
-  /// session's live byte counter as chunks go out.
+  /// Streams the bytes from [openRead] to [uri] starting at byte [startAt],
+  /// updating the session's live byte counter as chunks go out.
   Future<void> _uploadFrom({
     required TransferSession session,
     required String fileId,
-    required File file,
+    required Stream<List<int>> Function(int startAt) openRead,
     required int length,
     required int startAt,
     required Uri uri,
     CancelToken? cancelToken,
   }) async {
     session.updateBytes(fileId, startAt);
-    // NOTE(perf, 2026-08-11): keep `openRead` here. A custom
+    // NOTE(perf, 2026-08-11): keep the injected `openRead` here. A custom
     // RandomAccessFile reader with bigger blocks was benchmarked at no real
     // throughput gain on loopback and it broke stream backpressure — peak
     // RSS growth on a 150MB send jumped from ~17MB to ~130MB (see
     // test/e2e_sim/large_file_e2e_test.dart's streaming guard).
-    final stream = file.openRead(startAt);
+    final stream = openRead(startAt);
     int sent = startAt;
     await _dio.postUri<dynamic>(
       startAt > 0
@@ -460,16 +539,23 @@ class Sender {
     );
   }
 
+  /// Fails every file that hasn't already completed. Completed is sticky:
+  /// a partial failure (e.g. file 3 of 3 errors out) must not rewrite the
+  /// history of files 1–2 that already landed on the receiver.
   void _failAll(TransferSession session, List<FileInfo> files, String message) {
     for (final f in files) {
+      if (session.files[f.id]?.status == TransferStatus.completed) continue;
       session.markFile(f.id, TransferStatus.failed, error: message);
     }
     session.markStatus(TransferStatus.failed);
   }
 
+  /// Applies [status] to every file that hasn't already completed
+  /// (completed is sticky — see [_failAll]).
   void _markAll(
       TransferSession session, List<FileInfo> files, TransferStatus status) {
     for (final f in files) {
+      if (session.files[f.id]?.status == TransferStatus.completed) continue;
       session.markFile(f.id, status);
     }
   }

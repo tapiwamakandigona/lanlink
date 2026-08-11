@@ -1,6 +1,6 @@
 import 'dart:async';
-import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -28,9 +28,19 @@ import '../v4/v4.dart';
 class ReceivePage extends StatefulWidget {
   const ReceivePage({
     super.key,
+    this.initialMode = NetworkMode.sameWifi,
     this.debugPayload,
     this.debugHotspotController,
   });
+
+  /// Route name shared by the named route and ad-hoc pushes so the
+  /// accept-flow can recognise (and pop) this page.
+  static const String routeName = '/receive';
+
+  /// Which network mode the page opens in. Passing
+  /// [NetworkMode.directLink] (the desktop "Connect to phone" entry
+  /// point) starts hosting immediately — no extra tap.
+  final NetworkMode initialMode;
 
   /// Test hook: skips live state and renders exactly this payload
   /// (plus hotspot credentials when Direct link mode is running).
@@ -54,32 +64,66 @@ class _ReceivePageState extends State<ReceivePage> with WidgetsBindingObserver {
   /// context after deactivation.
   AppState? _teardownRegistrar;
 
-  /// Only Android can host a LocalOnlyHotspot from inside an app.
+  /// Android (LocalOnlyHotspot) and Windows (Mobile Hotspot) can host a
+  /// direct link from inside the app; everything else gets the fallback
+  /// pane.
   bool get _canHostDirectLink =>
-      widget.debugHotspotController != null || Platform.isAndroid;
+      widget.debugHotspotController != null ||
+      defaultTargetPlatform == TargetPlatform.android ||
+      defaultTargetPlatform == TargetPlatform.windows;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    if (widget.initialMode == NetworkMode.directLink && _canHostDirectLink) {
+      _mode = NetworkMode.directLink;
+      // Hosting needs AppState (teardown hook), which is an inherited
+      // lookup — defer past the first frame.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || _mode != NetworkMode.directLink) return;
+        _startHosting();
+      });
+    } else {
+      _mode = widget.initialMode;
+    }
     _mintPayload();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _teardownRegistrar?.registerHotspotTeardown(null);
+    final registrar = _teardownRegistrar;
     _teardownRegistrar = null;
     final hotspot = _hotspot;
     if (hotspot != null) {
       hotspot.removeListener(_onHotspotChanged);
-      if (widget.debugHotspotController == null) {
-        // We own it: dispose stops any live reservation.
-        hotspot.dispose();
+      if (hotspot.isRunning &&
+          registrar != null &&
+          registrar.linkedPeers.isNotEmpty) {
+        // A linked peer is (or may be) mid-transfer over our hosted link —
+        // the accept flow pops this page to show progress on Home, and
+        // killing the hotspot here would sever the session. Hand ownership
+        // to AppState: Disconnect still stops it via the teardown hook.
+        registrar.adoptHotspot(
+          teardown: hotspot.disable,
+          dispose: widget.debugHotspotController == null
+              ? hotspot.dispose
+              // Injected by a test: never dispose an object the test owns.
+              : () {},
+        );
       } else {
-        // Injected by a test: tear down but let the test keep the object.
-        unawaited(hotspot.disable());
+        registrar?.registerHotspotTeardown(null);
+        if (widget.debugHotspotController == null) {
+          // We own it: dispose stops any live reservation.
+          hotspot.dispose();
+        } else {
+          // Injected by a test: tear down but let the test keep the object.
+          unawaited(hotspot.disable());
+        }
       }
+    } else {
+      registrar?.registerHotspotTeardown(null);
     }
     super.dispose();
   }
@@ -100,22 +144,27 @@ class _ReceivePageState extends State<ReceivePage> with WidgetsBindingObserver {
     setState(() => _mode = mode);
     if (mode == NetworkMode.directLink) {
       if (!_canHostDirectLink) return; // build shows the fallback pane
-      final hotspot = _hotspot ??= (widget.debugHotspotController ??
-          HotspotHostController())
-        ..addListener(_onHotspotChanged);
-      // F3 Disconnect teardown hook (F1 contract): while this device
-      // hosts, AppState holds the stop path so Disconnect can tear the
-      // hotspot down even though this page owns the controller.
-      final appState = context.read<AppState>();
-      appState.registerHotspotTeardown(hotspot.disable);
-      _teardownRegistrar = appState;
-      unawaited(hotspot.enable());
+      _startHosting();
     } else {
       _teardownRegistrar?.registerHotspotTeardown(null);
       _teardownRegistrar = null;
       unawaited(_hotspot?.disable());
       _mintPayload();
     }
+  }
+
+  /// Spins up (or reuses) the hotspot controller and starts hosting.
+  void _startHosting() {
+    final hotspot =
+        _hotspot ??= (widget.debugHotspotController ?? HotspotHostController())
+          ..addListener(_onHotspotChanged);
+    // F3 Disconnect teardown hook (F1 contract): while this device
+    // hosts, AppState holds the stop path so Disconnect can tear the
+    // hotspot down even though this page owns the controller.
+    final appState = context.read<AppState>();
+    appState.registerHotspotTeardown(hotspot.disable);
+    _teardownRegistrar = appState;
+    unawaited(hotspot.enable());
   }
 
   void _onHotspotChanged() {
@@ -401,7 +450,8 @@ class _MessagePane extends StatelessWidget {
 }
 
 /// Shown when the user flips to "No shared Wi-Fi" on a platform that
-/// can't host an in-app hotspot (everything except Android).
+/// can't host an in-app hotspot (everything except Android and
+/// Windows).
 class _DirectLinkUnsupported extends StatelessWidget {
   const _DirectLinkUnsupported({required this.scheme});
 
@@ -415,15 +465,15 @@ class _DirectLinkUnsupported extends StatelessWidget {
             size: 40, color: scheme.onSurfaceVariant),
         const SizedBox(height: VSpace.x4),
         Text(
-          'Direct link needs an Android host',
+          'Direct link needs an Android or Windows host',
           style: VType.heading.copyWith(color: scheme.onSurface),
           textAlign: TextAlign.center,
         ),
         const SizedBox(height: VSpace.x2),
         Text(
-          'Only Android can open a hotspot from inside an app. Start the '
-          'direct link on the Android device instead, or get both devices '
-          'onto the same Wi-Fi.',
+          'This device can\'t open a hotspot from inside the app. Start '
+          'the direct link on the Android phone or Windows PC instead, or '
+          'get both devices onto the same Wi-Fi.',
           style: VType.body.copyWith(color: scheme.onSurfaceVariant),
           textAlign: TextAlign.center,
         ),

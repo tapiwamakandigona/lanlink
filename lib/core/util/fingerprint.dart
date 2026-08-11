@@ -1,24 +1,11 @@
-import 'dart:convert';
-import 'dart:math';
+import '../security/device_certificate.dart';
 
-import 'package:shared_preferences/shared_preferences.dart';
-
-const _fingerprintKey = 'lanlink_fingerprint';
-
-/// Returns a stable, per-install device fingerprint.
+/// Returns the stable device fingerprint for this install.
 ///
-/// On first run we generate 16 random bytes and persist them in
-/// SharedPreferences. Subsequent calls return the same value. The
-/// fingerprint is used by peers to detect duplicate announcements when
-/// the same device is reachable on multiple IPs.
-Future<String> loadOrCreateFingerprint() async {
-  final prefs = await SharedPreferences.getInstance();
-  final existing = prefs.getString(_fingerprintKey);
-  if (existing != null && existing.isNotEmpty) return existing;
-
-  final rand = Random.secure();
-  final bytes = List<int>.generate(16, (_) => rand.nextInt(256));
-  final fp = base64Url.encode(bytes).replaceAll('=', '');
-  await prefs.setString(_fingerprintKey, fp);
-  return fp;
-}
+/// Since the HTTPS transport landed the fingerprint is no longer a random
+/// self-reported value: it is the SHA-256 hash of this device's TLS
+/// certificate DER (see [DeviceCertificate]), so peers can verify it
+/// cryptographically during the handshake. First call generates and
+/// persists the certificate; subsequent calls return the same value.
+Future<String> loadOrCreateFingerprint() async =>
+    (await DeviceCertificate.load()).fingerprint;
