@@ -97,7 +97,7 @@ class TwoVerbHome extends StatelessWidget {
   }
 }
 
-/// The "You're visible as <name>" line under the home verbs.
+/// The "You're visible as `<name>`" line under the home verbs.
 class VisibilityStatusLine extends StatelessWidget {
   const VisibilityStatusLine({
     super.key,

@@ -287,7 +287,7 @@ class _SendPageState extends State<SendPage> {
     }
     FilePickerResult? result;
     try {
-      result = await FilePicker.platform.pickFiles(
+      result = await FilePicker.pickFiles(
         allowMultiple: true,
         withData: false,
       );
@@ -461,7 +461,7 @@ class _SendPageState extends State<SendPage> {
     return MobileScanner(
       controller: _camera,
       onDetect: _onDetect,
-      errorBuilder: (context, error, _) => Center(
+      errorBuilder: (context, error) => Center(
         child: Padding(
           padding: const EdgeInsets.all(VSpace.x4),
           child: Text(

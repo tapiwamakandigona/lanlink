@@ -5,7 +5,7 @@ import '../theme/tokens.dart';
 import 'device_radar.dart';
 import 'verified_badge.dart';
 
-/// The receive prompt: "<Name> wants to send you N files (total size)".
+/// The receive prompt: "`<Name>` wants to send you N files (total size)".
 ///
 /// Friendly and calm — sender identity is a name plus an optional Verified
 /// badge; there are no hashes or addresses. Designed to be hosted inside a
