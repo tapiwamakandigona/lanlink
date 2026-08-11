@@ -8,6 +8,7 @@ import '../../core/platform/incoming_share.dart';
 import '../../state/app_state.dart';
 import '../v4/v4.dart';
 import '../widgets/connected_peer_card.dart';
+import '../widgets/desktop_drop_region.dart';
 import '../widgets/live_session_card.dart';
 import '../widgets/update_available_banner.dart';
 import 'send_page.dart';
@@ -55,93 +56,100 @@ class _HomePageState extends State<HomePage> {
     final hasFinished = visible.any((s) => s.isTerminal);
     final update = state.updateChecker.availableUpdate;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('LanLink'),
-        actions: [
-          IconButton(
-            tooltip: 'History',
-            icon: const Icon(Icons.history),
-            onPressed: () => Navigator.of(context).pushNamed('/history'),
-          ),
-          IconButton(
-            tooltip: 'Settings',
-            icon: const Icon(Icons.settings_outlined),
-            onPressed: () => Navigator.of(context).pushNamed('/settings'),
-          ),
-          PopupMenuButton<String>(
-            tooltip: 'More',
-            onSelected: (route) => Navigator.of(context).pushNamed(route),
-            itemBuilder: (context) => const [
-              PopupMenuItem(value: '/help', child: Text('Help')),
-              PopupMenuItem(value: '/about', child: Text('About')),
-            ],
-          ),
-        ],
-      ),
-      body: SafeArea(
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 720),
-            child: ListView(
-              padding: const EdgeInsets.all(VSpace.x4),
-              children: [
-                if (update != null &&
-                    state.settings.skippedUpdateVersion != update.tagName)
-                  UpdateAvailableBanner(
-                    release: update,
-                    onDismiss: () =>
-                        state.settings.setSkippedUpdateVersion(update.tagName),
-                  ),
-                TwoVerbHome(
-                  deviceName: state.displayAlias,
-                  visible: state.port != null,
-                  onSend: () => Navigator.of(context).pushNamed('/send'),
-                  onReceive: () => Navigator.of(context).pushNamed('/receive'),
-                ),
-                // Symmetric sessions (F3): every linked peer gets a strip
-                // with "Send files" (no re-scan needed) and Disconnect.
-                if (state.linkedPeers.isNotEmpty) ...[
-                  const SizedBox(height: VSpace.x6),
-                  for (final peer in state.linkedPeers) ...[
-                    ConnectedPeerCard(
-                      peerName: displayPeerName(state.settings, peer),
-                      verified: state.settings.isPinned(peer.fingerprint),
-                      onSendFiles: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => SendPage(targetPeer: peer),
-                        ),
-                      ),
-                      onDisconnect: () => unawaited(state.disconnectPeer(peer)),
-                    ),
-                    const SizedBox(height: VSpace.x3),
-                  ],
-                ],
-                if (clusters.isNotEmpty) ...[
-                  const SizedBox(height: VSpace.x6),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          'Transfers',
-                          style:
-                              VType.heading.copyWith(color: scheme.onSurface),
-                        ),
-                      ),
-                      if (hasFinished)
-                        TextButton(
-                          onPressed: state.dismissFinishedSessions,
-                          child: const Text('Clear finished'),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: VSpace.x2),
-                  for (final cluster in clusters) ...[
-                    _ClusterView(cluster: cluster, state: state),
-                    const SizedBox(height: VSpace.x3),
-                  ],
-                ],
+    return DesktopDropRegion(
+      onFiles: (files) => Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => SendPage(prestagedFiles: files),
+      )),
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('LanLink'),
+          actions: [
+            IconButton(
+              tooltip: 'History',
+              icon: const Icon(Icons.history),
+              onPressed: () => Navigator.of(context).pushNamed('/history'),
+            ),
+            IconButton(
+              tooltip: 'Settings',
+              icon: const Icon(Icons.settings_outlined),
+              onPressed: () => Navigator.of(context).pushNamed('/settings'),
+            ),
+            PopupMenuButton<String>(
+              tooltip: 'More',
+              onSelected: (route) => Navigator.of(context).pushNamed(route),
+              itemBuilder: (context) => const [
+                PopupMenuItem(value: '/help', child: Text('Help')),
+                PopupMenuItem(value: '/about', child: Text('About')),
               ],
+            ),
+          ],
+        ),
+        body: SafeArea(
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 720),
+              child: ListView(
+                padding: const EdgeInsets.all(VSpace.x4),
+                children: [
+                  if (update != null &&
+                      state.settings.skippedUpdateVersion != update.tagName)
+                    UpdateAvailableBanner(
+                      release: update,
+                      onDismiss: () => state.settings
+                          .setSkippedUpdateVersion(update.tagName),
+                    ),
+                  TwoVerbHome(
+                    deviceName: state.displayAlias,
+                    visible: state.port != null,
+                    onSend: () => Navigator.of(context).pushNamed('/send'),
+                    onReceive: () =>
+                        Navigator.of(context).pushNamed('/receive'),
+                  ),
+                  // Symmetric sessions (F3): every linked peer gets a strip
+                  // with "Send files" (no re-scan needed) and Disconnect.
+                  if (state.linkedPeers.isNotEmpty) ...[
+                    const SizedBox(height: VSpace.x6),
+                    for (final peer in state.linkedPeers) ...[
+                      ConnectedPeerCard(
+                        peerName: displayPeerName(state.settings, peer),
+                        verified: state.settings.isPinned(peer.fingerprint),
+                        onSendFiles: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => SendPage(targetPeer: peer),
+                          ),
+                        ),
+                        onDisconnect: () =>
+                            unawaited(state.disconnectPeer(peer)),
+                      ),
+                      const SizedBox(height: VSpace.x3),
+                    ],
+                  ],
+                  if (clusters.isNotEmpty) ...[
+                    const SizedBox(height: VSpace.x6),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Transfers',
+                            style:
+                                VType.heading.copyWith(color: scheme.onSurface),
+                          ),
+                        ),
+                        if (hasFinished)
+                          TextButton(
+                            onPressed: state.dismissFinishedSessions,
+                            child: const Text('Clear finished'),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: VSpace.x2),
+                    for (final cluster in clusters) ...[
+                      _ClusterView(cluster: cluster, state: state),
+                      const SizedBox(height: VSpace.x3),
+                    ],
+                  ],
+                ],
+              ),
             ),
           ),
         ),
