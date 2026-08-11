@@ -59,11 +59,6 @@ jobs:
           channel: ${{ env.FLUTTER_CHANNEL }}
           cache: true
 
-      - name: Install Android SDK platform 37
-        # permission_handler_android 14.x compiles against SDK 37, which the
-        # hosted runner image does not preinstall.
-        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37" > /dev/null
-
       - name: Pub get
         run: flutter pub get
 
