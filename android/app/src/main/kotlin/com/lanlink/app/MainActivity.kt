@@ -788,11 +788,16 @@ class MainActivity : FlutterActivity() {
             val source = appInfo.publicSourceDir ?: appInfo.sourceDir ?: return@mapNotNull null
             val apk = File(source)
             if (!apk.exists()) return@mapNotNull null
+            // `sourceDir` is only the base APK. A package delivered as base
+            // + configuration/feature splits cannot be reinstalled from that
+            // file alone, so identify it for the Dart picker to exclude.
+            val isSplitInstall = !appInfo.splitSourceDirs.isNullOrEmpty()
             val map = mutableMapOf<String, Any>(
                 "label" to pm.getApplicationLabel(appInfo).toString(),
                 "packageName" to packageName,
                 "apkPath" to apk.absolutePath,
                 "size" to apk.length(),
+                "isSplitInstall" to isSplitInstall,
             )
             map
         }.distinctBy { it["packageName"] as String }

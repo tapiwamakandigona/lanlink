@@ -154,6 +154,35 @@ void main() {
     expect(files.single.localPath, '/apk/com.whatsapp');
   });
 
+  testWidgets('split-installed apps are not offered as broken single APKs',
+      (tester) async {
+    final result = await _pump(
+      tester,
+      media: media,
+      apps: [
+        _app('Monolithic', 'com.example.monolithic', 100),
+        AndroidAppInfo(
+          label: 'Split install',
+          packageName: 'com.example.split',
+          apkPath: '/apk/base.apk',
+          size: 50,
+          isSplitInstall: true,
+        ),
+      ],
+      tab: SharePickerTab.apps,
+    );
+
+    expect(find.byKey(const Key('app-com.example.monolithic')), findsOneWidget);
+    expect(find.byKey(const Key('app-com.example.split')), findsNothing);
+
+    await tester.tap(find.byKey(const Key('app-com.example.monolithic')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('picker-add')));
+    await tester.pumpAndSettle();
+    expect(result.value, hasLength(1));
+    expect(result.value!.single.fileName, 'Monolithic.apk');
+  });
+
   testWidgets('search filters the apps tab and selection survives it',
       (tester) async {
     await _pump(tester, media: media, apps: apps, tab: SharePickerTab.apps);

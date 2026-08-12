@@ -197,7 +197,11 @@ class _SharePickerPageState extends State<SharePickerPage>
       try {
         final apps = await widget.loadApps();
         if (!mounted) return;
-        setState(() => _apps = apps);
+        // `applicationInfo.sourceDir` is only base.apk. Apps installed with
+        // configuration/feature splits need the whole split set and would be
+        // broken if we offered just that base file to another device.
+        setState(
+            () => _apps = apps.where((app) => !app.isSplitInstall).toList());
       } catch (_) {
         if (!mounted) return;
         setState(() => _appsFailed = true);

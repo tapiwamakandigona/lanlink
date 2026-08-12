@@ -10,6 +10,7 @@ class AndroidAppInfo {
     required this.packageName,
     required this.apkPath,
     required this.size,
+    this.isSplitInstall = false,
     this.icon,
   });
 
@@ -17,6 +18,10 @@ class AndroidAppInfo {
   final String packageName;
   final String apkPath;
   final int size;
+
+  /// Whether Android installed this package as a base APK plus splits.
+  /// Sharing only [apkPath] would yield an incomplete, non-installable app.
+  final bool isSplitInstall;
 
   /// Launcher icon as a small PNG, when the platform side could draw it.
   final Uint8List? icon;
@@ -29,6 +34,7 @@ class AndroidAppInfo {
       packageName: map['packageName'] as String,
       apkPath: map['apkPath'] as String,
       size: (map['size'] as num).toInt(),
+      isSplitInstall: map['isSplitInstall'] == true,
       icon: map['icon'] as Uint8List?,
     );
   }
