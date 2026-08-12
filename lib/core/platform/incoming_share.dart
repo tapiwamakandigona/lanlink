@@ -1,13 +1,16 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import '../models/file_info.dart';
 
 /// Files that another Android app handed us via "Share to LanLink".
-/// Each file has already been copied into our cache by the platform
-/// side, so [localPath] is owned by us and safe to read until the
-/// transfer is done.
+///
+/// The native side keeps the URI permission alive while this activity
+/// exists, and the sender streams directly from [FileInfo.contentUri].
+/// Avoiding an eager cache copy means selecting a multi-gigabyte video
+/// opens LanLink immediately and does not require double the free space.
 class IncomingShare {
   IncomingShare._();
 
@@ -15,11 +18,17 @@ class IncomingShare {
 
   static void Function()? _listener;
 
+  /// Test-only override so the Android bridge can be exercised on the host.
+  @visibleForTesting
+  static bool debugForceSupported = false;
+
+  static bool get isSupported => debugForceSupported || Platform.isAndroid;
+
   /// Drains any pending shares that the OS handed our [MainActivity]
   /// while we were closed or in the background. Returns empty on
   /// non-Android platforms or when the bridge isn't loaded.
   static Future<List<FileInfo>> consume() async {
-    if (!Platform.isAndroid) return const [];
+    if (!isSupported) return const [];
     try {
       final result = await _channel.invokeMethod<List<dynamic>>('consume');
       if (result == null) return const [];
@@ -47,19 +56,27 @@ class IncomingShare {
   static Future<FileInfo?> _decode(dynamic raw) async {
     if (raw is! Map) return null;
     final map = Map<String, dynamic>.from(raw);
+    final contentUri = map['contentUri']?.toString();
     final path = map['path']?.toString();
     final name = map['fileName']?.toString();
     final size = (map['size'] as num?)?.toInt() ?? -1;
-    if (path == null || name == null || path.isEmpty || name.isEmpty) {
+    final hasContentUri = contentUri != null && contentUri.isNotEmpty;
+    final hasPath = path != null && path.isNotEmpty;
+    if ((!hasContentUri && !hasPath) ||
+        name == null ||
+        name.isEmpty ||
+        size < -1) {
       return null;
     }
-    final actualSize = size >= 0 ? size : await _safeFileSize(path);
+    final actualSize =
+        size >= 0 ? size : (hasPath ? await _safeFileSize(path) : 0);
     return FileInfo(
       id: 'incoming-${DateTime.now().microsecondsSinceEpoch}-$name',
       fileName: name,
       size: actualSize,
       fileType: fileTypeForName(name),
-      localPath: path,
+      localPath: hasPath ? path : null,
+      contentUri: hasContentUri ? contentUri : null,
     );
   }
 

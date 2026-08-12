@@ -35,17 +35,19 @@ import io.flutter.plugin.common.MethodChannel
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileInputStream
-import java.io.FileOutputStream
 import java.net.Inet4Address
 import java.net.NetworkInterface
 
 class MainActivity : FlutterActivity() {
 
-    /// Buffer of files handed to us by an incoming `ACTION_SEND` /
+    /// Buffer of URIs handed to us by an incoming `ACTION_SEND` /
     /// `ACTION_SEND_MULTIPLE` intent before the Flutter side asks for
-    /// them. The pairing wizard / home page polls this on startup and
-    /// when the activity comes back to the foreground.
-    private val pendingShares = mutableListOf<Map<String, Any>>()
+    /// them. Metadata is resolved on a worker only when `consume` is called;
+    /// touching a cloud-backed ContentProvider during onCreate would delay
+    /// the first Flutter frame. The existing SAF bridge streams the URI
+    /// lazily — eager copies made a multi-GB share take minutes to open and
+    /// temporarily required twice its size.
+    private val pendingShareUris = mutableListOf<Uri>()
 
     /// Live LocalOnlyHotspot reservation. Non-null while LanLink is
     /// hosting a direct link. Closing it tears the hotspot down.
@@ -323,6 +325,17 @@ class MainActivity : FlutterActivity() {
             }
         }
         stopLocalHotspot()
+        synchronized(contentStreams) {
+            contentStreams.values.forEach {
+                try {
+                    it.close()
+                } catch (_: Exception) {
+                }
+            }
+            contentStreams.clear()
+        }
+        contentStreamExecutor.shutdownNow()
+        thumbnailExecutor.shutdownNow()
         try {
             if (multicastLock?.isHeld == true) multicastLock?.release()
         } catch (_: Exception) {
@@ -671,9 +684,12 @@ class MainActivity : FlutterActivity() {
         shareChannel?.setMethodCallHandler { call, result ->
             when (call.method) {
                 "consume" -> {
-                    val drained = ArrayList(pendingShares)
-                    pendingShares.clear()
-                    result.success(drained)
+                    val drained = ArrayList(pendingShareUris)
+                    pendingShareUris.clear()
+                    contentStreamExecutor.execute {
+                        val described = drained.mapNotNull(::describeIncomingUri)
+                        runOnUiThread { result.success(described) }
+                    }
                 }
                 else -> result.notImplemented()
             }
@@ -1226,9 +1242,9 @@ class MainActivity : FlutterActivity() {
 
     /**
      * Drains any `EXTRA_STREAM`(s) on an incoming `ACTION_SEND` /
-     * `ACTION_SEND_MULTIPLE` intent into [pendingShares] as cached app-
-     * private files. The Flutter side will pick them up via the
-     * `consume` method on `lanlink/incoming_share` once it's ready.
+     * `ACTION_SEND_MULTIPLE` intent into [pendingShareUris] as content URIs.
+     * The Flutter side will stream them via `lanlink/saf`, without copying
+     * the full payload before the Send page can appear.
      */
     private fun capturePendingShare(intent: Intent?) {
         if (intent == null) return
@@ -1255,13 +1271,10 @@ class MainActivity : FlutterActivity() {
             }
             else -> emptyList()
         }
-        for (uri in uris) {
-            val cached = copyIncomingUriToCache(uri) ?: continue
-            pendingShares += cached
-        }
+        pendingShareUris += uris
     }
 
-    private fun copyIncomingUriToCache(uri: Uri): Map<String, Any>? {
+    private fun describeIncomingUri(uri: Uri): Map<String, Any>? {
         return try {
             val resolver = contentResolver
             var displayName = "shared-file"
@@ -1275,21 +1288,25 @@ class MainActivity : FlutterActivity() {
                         if (!v.isNullOrBlank()) displayName = v
                     }
                     if (sizeIx >= 0) {
-                        size = c.getLong(sizeIx)
+                        if (!c.isNull(sizeIx)) size = c.getLong(sizeIx)
                     }
                 }
             }
-            val outDir = File(cacheDir, "incoming_share").apply { mkdirs() }
-            val safeName = displayName.replace(File.separatorChar, '_')
-            val out = File(outDir, "${System.currentTimeMillis()}_$safeName")
-            resolver.openInputStream(uri)?.use { input ->
-                FileOutputStream(out).use { output ->
-                    input.copyTo(output)
+            if (size < 0) {
+                try {
+                    resolver.openAssetFileDescriptor(uri, "r")?.use { descriptor ->
+                        if (descriptor.length >= 0) size = descriptor.length
+                    }
+                } catch (_: Exception) {
                 }
-            } ?: return null
-            if (size < 0) size = out.length()
+            }
+            // EXTRA_STREAM grants read access to this activity. Keep the URI
+            // untouched and let ContentStreams open it only when upload starts.
+            // Unknown size cannot be framed with HTTP Content-Length, so skip
+            // such virtual documents rather than pretending they are empty.
+            if (size < 0) return null
             mapOf(
-                "path" to out.absolutePath,
+                "contentUri" to uri.toString(),
                 "fileName" to displayName,
                 "size" to size,
             )
