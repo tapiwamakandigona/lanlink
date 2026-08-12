@@ -245,11 +245,17 @@ class TransferSession extends ChangeNotifier {
         fileType: (map['fileType'] as String?) ?? 'other',
         localPath: map['localPath'] as String?,
       );
+      final statusName =
+          map['status'] is String ? map['status'] as String : null;
+      final restoredStatus = _restoredStatus(statusName);
       files[id] = FileProgress(
         file: fileInfo,
         bytes: (map['bytes'] as num?)?.toInt() ?? 0,
-        status: _statusFromName(map['status'] as String?),
-        error: map['error'] as String?,
+        status: restoredStatus,
+        error: map['error'] as String? ??
+            (_isActiveName(statusName)
+                ? 'Transfer was interrupted when LanLink closed.'
+                : null),
         savedPath: map['savedPath'] as String?,
       );
     }
@@ -258,7 +264,7 @@ class TransferSession extends ChangeNotifier {
       direction: _directionFromName(json['direction'] as String?),
       peer: peer,
       files: files,
-      status: _statusFromName(json['status'] as String?),
+      status: _restoredStatus(json['status'] as String?),
     );
     final startedRaw = json['startedAt'] as String?;
     if (startedRaw != null) {
@@ -277,6 +283,22 @@ class TransferSession extends ChangeNotifier {
       orElse: () => TransferStatus.completed,
     );
   }
+
+  /// Only terminal sessions are supposed to be persisted. If an older or
+  /// corrupted store contains an in-flight state, it cannot resume after a
+  /// process restart; surface it as interrupted instead of resurrecting a
+  /// forever-active transfer that pins foreground-service/scan state.
+  static TransferStatus _restoredStatus(String? name) {
+    final status = _statusFromName(name);
+    return status == TransferStatus.awaitingAccept ||
+            status == TransferStatus.transferring
+        ? TransferStatus.failed
+        : status;
+  }
+
+  static bool _isActiveName(String? name) =>
+      name == TransferStatus.awaitingAccept.name ||
+      name == TransferStatus.transferring.name;
 
   static TransferDirection _directionFromName(String? name) {
     return TransferDirection.values.firstWhere(

@@ -40,4 +40,34 @@ void main() {
     expect(restored.status, TransferStatus.failed);
     expect(restored.files['f1']!.file.localPath, '/tmp/photo.jpg');
   });
+
+  test('restored snapshots never retain active transfer states', () {
+    for (final status in ['awaitingAccept', 'transferring']) {
+      final restored = TransferSession.fromJsonSnapshot({
+        'sessionId': 'stale-$status',
+        'direction': 'receive',
+        'status': status,
+        'peer': {
+          'alias': 'Old peer',
+          'ip': '192.168.1.7',
+          'port': 53317,
+          'protocol': 'https',
+        },
+        'files': [
+          {
+            'id': 'f1',
+            'fileName': 'unfinished.bin',
+            'size': 100,
+            'bytes': 40,
+            'status': status,
+          },
+        ],
+      });
+
+      expect(restored.status, TransferStatus.failed, reason: status);
+      expect(restored.isTerminal, isTrue, reason: status);
+      expect(restored.files['f1']!.status, TransferStatus.failed);
+      expect(restored.files['f1']!.error, contains('interrupted'));
+    }
+  });
 }
