@@ -20,7 +20,7 @@ class TransferNotifications {
   static final TransferNotifications instance = TransferNotifications._();
 
   static const _channel = MethodChannel('lanlink/notifications');
-  bool _askedForPermission = false;
+  Future<void>? _permissionRequest;
 
   /// Test hook: lets widget tests exercise the notification text/argument
   /// building on non-Android hosts by forcing [isSupported] true (the
@@ -32,18 +32,22 @@ class TransferNotifications {
   /// non-Android platforms that don't register the channel.
   bool get isSupported => debugForceSupported || Platform.isAndroid;
 
-  /// Asks for POST_NOTIFICATIONS once per process. Safe to call repeatedly;
-  /// subsequent calls are no-ops. Failure (denial, missing API on older
-  /// Android) doesn't throw — the notification methods just become silent.
-  Future<void> ensurePermission() async {
-    if (!isSupported || _askedForPermission) return;
-    _askedForPermission = true;
-    try {
-      await Permission.notification.request();
-    } catch (_) {
-      // ignore — POST_NOTIFICATIONS is only required on Android 13+ and
-      // permission_handler may throw on older OS where the call is moot.
-    }
+  /// Asks for POST_NOTIFICATIONS once per process. Safe to call repeatedly:
+  /// the first call owns the system dialog and every later call awaits the
+  /// same in-flight future (a bool guard here would let a second session
+  /// post pre-grant while the dialog is still up). Failure (denial, missing
+  /// API on older Android) doesn't throw — the notification methods just
+  /// become silent.
+  Future<void> ensurePermission() {
+    if (!isSupported) return Future.value();
+    return _permissionRequest ??= () async {
+      try {
+        await Permission.notification.request();
+      } catch (_) {
+        // ignore — POST_NOTIFICATIONS is only required on Android 13+ and
+        // permission_handler may throw on older OS where the call is moot.
+      }
+    }();
   }
 
   Future<void> showProgress(TransferSession session) async {

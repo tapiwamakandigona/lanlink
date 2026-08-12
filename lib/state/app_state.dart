@@ -852,7 +852,25 @@ class AppState extends ChangeNotifier {
     }
     // Throttle updates so we don't slam the system NotificationManager.
     DateTime lastPosted = DateTime.fromMillisecondsSinceEpoch(0);
-    unawaited(notifications.showProgress(session));
+    // Await the POST_NOTIFICATIONS request before the first post: firing
+    // showProgress concurrently with the Android 13+ permission dialog
+    // means the very first transfer's notifications are silently dropped
+    // (posted pre-grant). If the session ended while the dialog was up,
+    // post the terminal state instead of a stale ongoing row.
+    unawaited(() async {
+      await notifications.ensurePermission();
+      if (done) return;
+      switch (session.status) {
+        case TransferStatus.completed:
+        case TransferStatus.failed:
+        case TransferStatus.cancelled:
+          done = true;
+          await notifications.showFinal(session);
+        case TransferStatus.awaitingAccept:
+        case TransferStatus.transferring:
+          await notifications.showProgress(session);
+      }
+    }());
     session.addListener(() {
       if (done) return;
       switch (session.status) {
