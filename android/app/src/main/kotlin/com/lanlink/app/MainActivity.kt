@@ -324,6 +324,26 @@ class MainActivity : FlutterActivity() {
             } catch (_: Exception) {
             }
         }
+        // A configuration change/process teardown can otherwise leave the
+        // process bound to a LocalOnly network and its callback registered
+        // after this Activity (and its Flutter engine) are gone. Besides
+        // leaking the Activity, every HTTP request in the replacement
+        // engine would keep routing through the dead no-internet hotspot.
+        leaveHotspotNetwork()
+        hotspotPermissionResult?.let { pending ->
+            hotspotPermissionResult = null
+            try {
+                pending.success(false)
+            } catch (_: Exception) {
+            }
+        }
+        pickFilesResult?.let { pending ->
+            pickFilesResult = null
+            try {
+                pending.success(emptyList<Map<String, Any>>())
+            } catch (_: Exception) {
+            }
+        }
         stopLocalHotspot()
         synchronized(contentStreams) {
             contentStreams.values.forEach {
