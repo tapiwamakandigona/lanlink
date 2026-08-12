@@ -73,6 +73,9 @@ extension ConnectivityModeDetails on ConnectivityMode {
 
   bool get isAvailable {
     if (this != ConnectivityMode.bluetooth) return true;
-    return Platform.isAndroid || Platform.isWindows;
+    // The Bluetooth share channel is registered only by Android. Windows
+    // deliberately falls back to LanLink's normal LAN transport rather than
+    // routing legacy preferences into a guaranteed MissingPluginException.
+    return Platform.isAndroid;
   }
 }

@@ -43,10 +43,11 @@ class AppSettings extends ChangeNotifier {
   ConnectivityMode get connectivityMode {
     final name = _prefs.getString(_connectivityModeKey);
     if (name != null && name.isNotEmpty) {
-      return ConnectivityMode.values.firstWhere(
+      final mode = ConnectivityMode.values.firstWhere(
         (mode) => mode.name == name,
         orElse: () => _platformDefaultConnectivity(),
       );
+      return mode.isAvailable ? mode : _platformDefaultConnectivity();
     }
     return _platformDefaultConnectivity();
   }

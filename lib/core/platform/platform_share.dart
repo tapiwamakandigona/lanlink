@@ -35,6 +35,8 @@ class PlatformShare {
     );
   }
 
-  static bool get supportsBluetoothShare =>
-      Platform.isAndroid || Platform.isWindows;
+  // Only Android registers `lanlink/share`. Windows has no Bluetooth share
+  // channel, so advertising it there turns a legacy saved preference into a
+  // guaranteed MissingPluginException instead of a LAN transfer.
+  static bool get supportsBluetoothShare => Platform.isAndroid;
 }
