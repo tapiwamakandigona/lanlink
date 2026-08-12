@@ -79,6 +79,20 @@ void main() {
     return json.decode(await utf8.decodeStream(resp)) as Map<String, dynamic>;
   }
 
+  Future<HttpClientResponse> prepareWithInfo(
+    FileInfo file,
+    Map<String, dynamic> info,
+  ) async {
+    final req = await client.postUrl(Uri.parse(
+        'https://127.0.0.1:$port${LanLinkProtocol.routePrepareUpload}'));
+    req.headers.contentType = ContentType.json;
+    req.write(json.encode({
+      'info': info,
+      'files': {file.id: file.toJson()},
+    }));
+    return req.close();
+  }
+
   Future<HttpClientResponse> upload({
     required String sessionId,
     required String fileId,
@@ -106,6 +120,23 @@ void main() {
       : const <File>[];
 
   group('B2 consented-size enforcement', () {
+    test('prepare-upload rejects sender identity without a fingerprint',
+        () async {
+      final file = FileInfo(
+        id: 'anonymous-file',
+        fileName: 'anonymous.bin',
+        size: 16,
+        fileType: 'other',
+      );
+      final info = _device('sender', 'sender-fp').toJson()
+        ..remove('fingerprint');
+      final resp = await prepareWithInfo(file, info);
+      await resp.drain<void>();
+
+      expect(resp.statusCode, 400);
+      expect(lastSession, isNull);
+    });
+
     test('an upload streaming past the declared size fails the file', () async {
       const declared = 16 * 1024;
       final file = FileInfo(

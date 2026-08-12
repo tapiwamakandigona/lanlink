@@ -324,6 +324,14 @@ class Receiver {
                 .address ??
             '0.0.0.0';
     final peer = Device.fromJson(info, ip: peerIp);
+    // A stable sender identity is required for disconnect blocking, resume
+    // part isolation, trust decisions, and notification/session grouping.
+    // Treating a missing/wrong-typed fingerprint as the empty string would
+    // collapse every anonymous peer on the LAN into one identity and make
+    // their partial uploads share a resume namespace.
+    if (peer.fingerprint.trim().isEmpty) {
+      return Response.badRequest(body: 'missing sender fingerprint');
+    }
 
     // F3 server-side enforcement: a disconnected peer cannot push files.
     // Rejected before the consent prompt, so the local user is never
