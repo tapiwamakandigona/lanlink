@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 
+import '../util/network.dart';
+
 /// Self-describing QR payload that LanLink encodes for instant pairing.
 ///
 /// Looks like `lanlink://pair?ip=192.168.1.42&port=53317&alias=Pixel&fp=abcd…`.
@@ -69,7 +71,7 @@ class PairPayload {
     final ip = uri.queryParameters['ip'];
     final portStr = uri.queryParameters['port'];
     final alias = uri.queryParameters['alias'];
-    if (ip == null || ip.isEmpty) return null;
+    if (ip == null || !isPrivateLanIPv4(ip)) return null;
     if (portStr == null || portStr.isEmpty) return null;
     if (alias == null || alias.isEmpty) return null;
     final port = int.tryParse(portStr);

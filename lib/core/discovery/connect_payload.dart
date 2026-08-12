@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import '../util/network.dart';
 import 'pair_payload.dart';
 
 /// QR payload for the Simple-mode connect-first flow.
@@ -91,7 +92,7 @@ class ConnectPayload {
     final ip = uri.queryParameters['ip'];
     final portStr = uri.queryParameters['port'];
     final alias = uri.queryParameters['alias'];
-    if (ip == null || ip.isEmpty) return null;
+    if (ip == null || !isPrivateLanIPv4(ip)) return null;
     if (portStr == null || portStr.isEmpty) return null;
     if (alias == null || alias.isEmpty) return null;
     final port = int.tryParse(portStr);

@@ -1,5 +1,22 @@
 import 'dart:io';
 
+/// Whether [raw] is a canonical IPv4 literal in an RFC 1918 private range.
+///
+/// Scanned pairing codes are untrusted input. LanLink only advertises
+/// non-loopback, non-link-local LAN interfaces, so accepting host names,
+/// public addresses, loopback, or link-local targets would only let a QR
+/// redirect the app's HTTP client somewhere LanLink itself never advertises.
+bool isPrivateLanIPv4(String raw) {
+  final address = InternetAddress.tryParse(raw);
+  if (address == null || address.type != InternetAddressType.IPv4) {
+    return false;
+  }
+  final octets = address.rawAddress;
+  return octets[0] == 10 ||
+      (octets[0] == 172 && octets[1] >= 16 && octets[1] <= 31) ||
+      (octets[0] == 192 && octets[1] == 168);
+}
+
 /// Returns all non-loopback IPv4 addresses, with the most likely-routable
 /// interface first.
 ///

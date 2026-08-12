@@ -48,5 +48,25 @@ void main() {
       expect(d.port, greaterThan(0));
       expect(d.alias, 'Unknown device');
     });
+    test('hostile URI schemes cannot escape the LAN transport', () {
+      for (final scheme in [
+        'file',
+        'data',
+        'javascript',
+        'ftp',
+        'HTTP',
+        ' https ',
+      ]) {
+        final d = Device.fromJson({
+          'fingerprint': 'abc',
+          'protocol': scheme,
+        }, ip: '10.0.0.5');
+        expect(
+          d.protocol,
+          anyOf('http', 'https'),
+          reason: 'untrusted protocol=$scheme',
+        );
+      }
+    });
   });
 }

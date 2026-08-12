@@ -99,7 +99,7 @@ class Device {
           _asString(json['deviceType']) ?? LanLinkProtocol.deviceTypeHeadless,
       fingerprint: _asString(json['fingerprint']) ?? '',
       port: _asPort(json['port']) ?? LanLinkProtocol.defaultPort,
-      protocol: _asString(json['protocol']) ?? 'https',
+      protocol: _asProtocol(json['protocol']),
       ip: ip,
       announcement: json['announce'] == true,
       download: json['download'] == true,
@@ -109,6 +109,15 @@ class Device {
   /// Reads a value that should be a string, tolerating anything else by
   /// returning null (the caller supplies the default).
   static String? _asString(Object? v) => v is String ? v : null;
+
+  /// The scheme is peer-controlled and later fed to [Uri]. Only the two
+  /// transports the protocol implements are valid; everything else must
+  /// fail closed to HTTPS rather than becoming `file:`, `data:`, etc.
+  static String _asProtocol(Object? v) {
+    if (v is! String) return 'https';
+    final protocol = v.trim().toLowerCase();
+    return protocol == 'http' || protocol == 'https' ? protocol : 'https';
+  }
 
   /// Reads a TCP port that may arrive as an int, a JSON float (`53317.0`),
   /// or a numeric string (`"53317"`). Out-of-range or unparseable values

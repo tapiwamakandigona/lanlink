@@ -79,5 +79,43 @@ void main() {
         isNull,
       );
     });
+
+    test('rejects non-IP and non-LAN targets from scanned QRs', () {
+      for (final ip in [
+        'example.com',
+        'localhost',
+        '127.0.0.1',
+        '0.0.0.0',
+        '8.8.8.8',
+        '172.32.0.1',
+        '169.254.1.2',
+        '999.1.2.3',
+      ]) {
+        expect(
+          ConnectPayload.tryParse(
+            'lanlink://connect?ip=$ip&port=53317&alias=attacker',
+          ),
+          isNull,
+          reason: 'QR target=$ip',
+        );
+      }
+    });
+
+    test('accepts every private IPv4 LAN range', () {
+      for (final ip in [
+        '10.0.0.1',
+        '172.16.0.1',
+        '172.31.255.254',
+        '192.168.49.1',
+      ]) {
+        expect(
+          ConnectPayload.tryParse(
+            'lanlink://connect?ip=$ip&port=53317&alias=peer',
+          )?.ip,
+          ip,
+          reason: 'private QR target=$ip',
+        );
+      }
+    });
   });
 }
