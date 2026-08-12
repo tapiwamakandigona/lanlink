@@ -45,4 +45,16 @@ void main() {
     expect(info?.ssid, 'LanLink');
     expect(info?.hostIps, ['192.168.49.1']);
   });
+
+  test('forced platform support also exercises permission bridge', () async {
+    final calls = <String>[];
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      calls.add(call.method);
+      return true;
+    });
+
+    expect(await LocalHotspot.hasPermission(), isTrue);
+    expect(await LocalHotspot.requestPermission(), isTrue);
+    expect(calls, ['hasPermission', 'requestPermission']);
+  });
 }

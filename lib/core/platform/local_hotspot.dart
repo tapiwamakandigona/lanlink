@@ -71,7 +71,7 @@ class LocalHotspot {
   /// Windows has no such permission — always granted there.
   static Future<bool> hasPermission() async {
     if (Platform.isWindows) return true;
-    if (!Platform.isAndroid) return false;
+    if (!Platform.isAndroid && !debugForceSupported) return false;
     try {
       return await _channel.invokeMethod<bool>('hasPermission') ?? false;
     } on PlatformException {
@@ -85,7 +85,7 @@ class LocalHotspot {
   /// permission ended up granted. A no-op success on Windows.
   static Future<bool> requestPermission() async {
     if (Platform.isWindows) return true;
-    if (!Platform.isAndroid) return false;
+    if (!Platform.isAndroid && !debugForceSupported) return false;
     try {
       return await _channel.invokeMethod<bool>('requestPermission') ?? false;
     } on PlatformException {
