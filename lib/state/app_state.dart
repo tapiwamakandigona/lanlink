@@ -623,8 +623,11 @@ class AppState extends ChangeNotifier {
   /// Installs the currently mounted app's consent UI hook. Passing null on
   /// teardown prevents a long-lived receiver from retaining/calling a dead
   /// Navigator State during root replacement or widget-test disposal.
-  void installIncomingPrompt(IncomingTransferPrompt? prompt) {
+  IncomingTransferPrompt? installIncomingPrompt(
+      IncomingTransferPrompt? prompt) {
+    final previous = _incomingPrompt;
     _incomingPrompt = prompt;
+    return previous;
   }
 
   /// Builds the Device payload representing this install.

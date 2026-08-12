@@ -174,8 +174,15 @@ void main() {
     final state = await _makeState(tester);
     await tester.pumpWidget(LanLinkApp(state: state));
     await tester.pump();
+    final installed = state.installIncomingPrompt(null);
+    expect(installed, isNotNull,
+        reason: 'the mounted app must own the consent callback');
+    state.installIncomingPrompt(installed);
     await tester.pumpWidget(const SizedBox());
 
+    final retained = state.installIncomingPrompt(null);
+    expect(retained, isNull,
+        reason: 'disposing the app must release the bound State callback');
     final decision = await state.debugTriggerIncomingPrompt(
       _peer(),
       [_file('after-dispose.txt')],
