@@ -25,6 +25,7 @@ class SubnetScanner {
     this.perHostTimeout = const Duration(seconds: 2),
     this.parallelProbes = 32,
     this.minScanInterval = const Duration(seconds: 20),
+    this.hotspotPrefixes = wellKnownHotspotPrefixes,
   });
 
   final Sender sender;
@@ -46,6 +47,12 @@ class SubnetScanner {
   ];
   final Duration perHostTimeout;
   final int parallelProbes;
+
+  /// The extra always-swept /24 prefixes. Defaults to
+  /// [wellKnownHotspotPrefixes]; injectable so tests can scope a sweep to
+  /// loopback only (a real sweep of 5 unroutable subnets x 254 hosts is
+  /// pure timeout-waiting in a test environment).
+  final Set<String> hotspotPrefixes;
 
   /// Minimum spacing between full sweeps. Callers re-kick the scan on a
   /// short UI cadence (~6 s); each sweep sets up/tears down hundreds of
@@ -139,7 +146,7 @@ class SubnetScanner {
       if (parts.length != 4) continue;
       subnets.add('${parts[0]}.${parts[1]}.${parts[2]}');
     }
-    subnets.addAll(wellKnownHotspotPrefixes);
+    subnets.addAll(hotspotPrefixes);
     return subnets;
   }
 
@@ -162,28 +169,30 @@ class SubnetScanner {
       hostQueue.add(i);
     }
 
-    final futures = <Future<void>>[];
+    // A fixed pool of workers draining a shared index. The previous
+    // launch/whenComplete chain fed `Future.wait` a list that kept growing
+    // *after* wait had already snapshotted it, so `scan()` returned once the
+    // first [parallelProbes] probes finished while ~220 probes per subnet
+    // were still in flight — subnets then overlapped (stacking concurrency
+    // well past the cap), `_running` flipped false early, and the
+    // minScanInterval throttle measured from a sweep that was still running.
     var idx = 0;
-    void launch() {
-      if (idx >= hostQueue.length) return;
-      if (_generation != gen) return;
-      final hostByte = hostQueue[idx++];
-      final ip = '$prefix.$hostByte';
-      if (mySet.contains(ip)) {
-        // Skip our own IPs — probing them is wasted work and the response
-        // would be filtered out by the announcer anyway.
-        launch();
-        return;
+    Future<void> worker() async {
+      while (true) {
+        if (_generation != gen) return;
+        if (idx >= hostQueue.length) return;
+        final hostByte = hostQueue[idx++];
+        final ip = '$prefix.$hostByte';
+        if (mySet.contains(ip)) {
+          // Skip our own IPs — probing them is wasted work and the response
+          // would be filtered out by the announcer anyway.
+          continue;
+        }
+        await _probe(ip, gen);
       }
-      final f = _probe(ip, gen);
-      futures.add(f);
-      f.whenComplete(launch);
     }
 
-    for (var i = 0; i < parallelProbes; i++) {
-      launch();
-    }
-    await Future.wait(futures);
+    await Future.wait([for (var i = 0; i < parallelProbes; i++) worker()]);
   }
 
   Future<void> _probe(String ip, int gen) async {

@@ -83,6 +83,9 @@ void main() {
       ports: [fake.port],
       perHostTimeout: const Duration(seconds: 2),
       parallelProbes: 8,
+      // Scope the sweep to loopback: the well-known hotspot /24s are
+      // unroutable here and would only add timeout-waiting.
+      hotspotPrefixes: const {},
     );
     // We only need scanner to look at the 127.0.0.0/24 range, which it
     // derives from any IPv4 in the supplied list whose first three octets
@@ -145,6 +148,7 @@ void main() {
       ports: [blocker.port, fake.port],
       perHostTimeout: const Duration(seconds: 2),
       parallelProbes: 8,
+      hotspotPrefixes: const {},
     );
 
     await scanner.scan(localIps: ['127.0.0.1'], force: true);
@@ -178,6 +182,7 @@ void main() {
       perHostTimeout: const Duration(milliseconds: 50),
       parallelProbes: 4,
       minScanInterval: const Duration(minutes: 5),
+      hotspotPrefixes: const {},
     );
 
     await scanner.scan(localIps: const [], force: true);

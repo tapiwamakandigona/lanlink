@@ -387,6 +387,12 @@ class Sender {
           } else {
             session.markFile(fileId, TransferStatus.failed,
                 error: friendlyTransferError(e, peerName: peer.alias));
+            // Siblings still queued or in flight are aborted by the shared
+            // cancel token below, but their workers return early (stopped)
+            // without marking anything — without this sweep those file rows
+            // stay "transferring" forever inside a failed session (and get
+            // persisted that way in history).
+            _markPendingFiles(session, files, TransferStatus.cancelled);
             session.markStatus(TransferStatus.failed);
           }
           // Abort the sibling uploads still in flight.

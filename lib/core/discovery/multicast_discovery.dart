@@ -92,7 +92,14 @@ class MulticastDiscovery {
   /// [poke] so interfaces that appear after startup (the hotspot interface,
   /// a reconnected Wi-Fi) still receive group traffic.
   static const _rejoinEveryTicks = 6; // every ~30s with a 5s interval
-  final Set<String> _joinedInterfaces = {};
+
+  /// Join attempts made across all refreshes; lets tests assert that every
+  /// refresh re-attempts every interface (no stale memoization).
+  @visibleForTesting
+  int joinAttempts = 0;
+
+  @visibleForTesting
+  Future<void> refreshMulticastJoins() => _refreshMulticastJoins();
 
   Future<void> _refreshMulticastJoins() async {
     if (!_running || _sockets.isEmpty) return;
@@ -110,10 +117,17 @@ class MulticastDiscovery {
     if (!_running) return;
     for (final socket in _sockets) {
       for (final iface in interfaces) {
-        if (_joinedInterfaces.contains(iface.name)) continue;
+        // Always re-attempt: joins are NOT memoized by interface name.
+        // A Wi-Fi off/on (or hotspot toggle) brings the interface back
+        // under the same name (wlan0) with the kernel-side group
+        // membership silently gone — a name memo would skip the rejoin
+        // forever and multicast reception would stay dead until app
+        // restart. An already-joined interface just throws "address in
+        // use", which we swallow below; that costs a few syscalls every
+        // ~30 s.
+        joinAttempts += 1;
         try {
           socket.joinMulticast(group, iface);
-          _joinedInterfaces.add(iface.name);
         } catch (e) {
           // Some interfaces (e.g. VPN tunnels) refuse to join multicast,
           // and already-joined interfaces throw "address in use". Swallow
@@ -142,7 +156,6 @@ class MulticastDiscovery {
       } catch (_) {}
     }
     _sockets.clear();
-    _joinedInterfaces.clear();
     await _setMulticastLock(false);
   }
 
