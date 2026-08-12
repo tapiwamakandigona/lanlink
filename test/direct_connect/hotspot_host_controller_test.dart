@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lanlink/core/platform/local_hotspot.dart';
@@ -118,6 +120,56 @@ void main() {
       await c.enable();
       c.dispose();
       expect(log.last, 'stop');
+    });
+
+    test('disable while start is pending cannot resurrect an orphan hotspot',
+        () async {
+      final startEntered = Completer<void>();
+      final startResult = Completer<HotspotInfo?>();
+      var stops = 0;
+      final c = HotspotHostController(
+        isSupported: () async => true,
+        hasPermission: () async => true,
+        requestPermission: () async => true,
+        start: () {
+          startEntered.complete();
+          return startResult.future;
+        },
+        stop: () async => stops++,
+      );
+
+      final enabling = c.enable();
+      await startEntered.future;
+      expect(c.phase, HotspotHostPhase.starting);
+
+      await c.disable();
+      startResult.complete(_info);
+      await enabling;
+
+      expect(c.phase, HotspotHostPhase.idle);
+      expect(c.info, isNull);
+      expect(
+        stops,
+        2,
+        reason: 'stop once on disable and again when the late reservation '
+            'materialises',
+      );
+    });
+
+    test('platform start exception becomes a failed state, not a stuck future',
+        () async {
+      final c = HotspotHostController(
+        isSupported: () async => true,
+        hasPermission: () async => true,
+        requestPermission: () async => true,
+        start: () => Future<HotspotInfo?>.error(StateError('native died')),
+        stop: () async {},
+      );
+
+      await expectLater(c.enable(), completes);
+
+      expect(c.phase, HotspotHostPhase.failed);
+      expect(c.error, isNotEmpty);
     });
 
     group('on Windows', () {

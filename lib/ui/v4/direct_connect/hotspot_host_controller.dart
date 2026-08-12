@@ -56,6 +56,7 @@ class HotspotHostController extends ChangeNotifier {
   HotspotInfo? _info;
   String? _error;
   bool _disposed = false;
+  int _operation = 0;
 
   HotspotHostPhase get phase => _phase;
   HotspotInfo? get info => _info;
@@ -70,9 +71,16 @@ class HotspotHostController extends ChangeNotifier {
         _phase == HotspotHostPhase.checking) {
       return;
     }
+    final operation = ++_operation;
     _set(HotspotHostPhase.checking);
-    final supported = await _isSupported();
-    if (_disposed) return;
+    bool supported;
+    try {
+      supported = await _isSupported();
+    } catch (_) {
+      if (_isCurrent(operation)) _fail(_unsupportedMessage());
+      return;
+    }
+    if (!_isCurrent(operation)) return;
     if (!supported) {
       _fail(_unsupportedMessage());
       return;
@@ -81,14 +89,20 @@ class HotspotHostController extends ChangeNotifier {
     // start instead of dead-ending in a permission phase that can never
     // show a dialog.
     if (defaultTargetPlatform != TargetPlatform.windows) {
-      final granted = await _hasPermission();
-      if (_disposed) return;
+      bool granted;
+      try {
+        granted = await _hasPermission();
+      } catch (_) {
+        if (_isCurrent(operation)) _fail(_permissionCheckFailedMessage());
+        return;
+      }
+      if (!_isCurrent(operation)) return;
       if (!granted) {
         _set(HotspotHostPhase.needsPermission);
         return;
       }
     }
-    await _startHotspot();
+    await _startHotspot(operation);
   }
 
   /// Why "No shared Wi-Fi" can't run here, in words that fit the device
@@ -102,33 +116,48 @@ class HotspotHostController extends ChangeNotifier {
         '(needs Android 8 or newer).';
   }
 
+  static String _permissionCheckFailedMessage() =>
+      'Could not check the direct-link permission. Try again.';
+
   /// Runs the OS permission dialog, then starts the hotspot on grant.
   Future<void> grantPermission() async {
-    final ok = await _requestPermission();
-    if (_disposed) return;
+    final operation = ++_operation;
+    bool ok;
+    try {
+      ok = await _requestPermission();
+    } catch (_) {
+      if (_isCurrent(operation)) {
+        _fail('Could not request the direct-link permission. Try again.');
+      }
+      return;
+    }
+    if (!_isCurrent(operation)) return;
     if (!ok) {
       _fail('Permission was declined. LanLink needs it only to create '
           'the direct link — nothing is tracked.');
       return;
     }
-    await _startHotspot();
+    await _startHotspot(operation);
   }
 
-  Future<void> _startHotspot() async {
+  Future<void> _startHotspot(int operation) async {
     _set(HotspotHostPhase.starting);
-    final info = await _start();
-    if (_disposed) {
-      // The page died while the platform was still starting up — don't
-      // leave an orphaned reservation behind.
+    HotspotInfo? info;
+    try {
+      info = await _start();
+    } catch (_) {
+      if (_isCurrent(operation)) _fail(_startFailedMessage());
+      return;
+    }
+    if (!_isCurrent(operation)) {
+      // The page died or the user switched modes while the platform was
+      // still starting. A late successful reservation must be stopped or it
+      // would outlive both the controller state and its UI owner.
       if (info != null) await _stop();
       return;
     }
     if (info == null) {
-      _fail(defaultTargetPlatform == TargetPlatform.windows
-          ? 'Could not start the direct link. Check that Wi-Fi is turned '
-              'on, then try again.'
-          : 'Could not start the direct link. Check that Location is on '
-              'and that regular hotspot/tethering is off, then try again.');
+      _fail(_startFailedMessage());
       return;
     }
     _info = info;
@@ -136,8 +165,18 @@ class HotspotHostController extends ChangeNotifier {
     _set(HotspotHostPhase.running);
   }
 
+  static String _startFailedMessage() =>
+      defaultTargetPlatform == TargetPlatform.windows
+          ? 'Could not start the direct link. Check that Wi-Fi is turned '
+              'on, then try again.'
+          : 'Could not start the direct link. Check that Location is on '
+              'and that regular hotspot/tethering is off, then try again.';
+
+  bool _isCurrent(int operation) => !_disposed && operation == _operation;
+
   /// Tears the hotspot down and returns to idle. Safe to call anytime.
   Future<void> disable() async {
+    _operation++;
     final wasIdle = _phase == HotspotHostPhase.idle;
     _info = null;
     _error = null;
@@ -162,6 +201,7 @@ class HotspotHostController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _operation++;
     // Fire-and-forget: the reservation must never outlive its page.
     if (_phase != HotspotHostPhase.idle) {
       _info = null;
