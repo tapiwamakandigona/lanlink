@@ -1,5 +1,72 @@
 # Changelog
 
+## 4.3.3 (+20) — Robustness pass
+
+A long adversarial audit of everything that touches peer-controlled data,
+platform payloads, saved state, and app teardown. Twenty-one issues fixed,
+each with a regression test proven failing first — 523 tests total (up from
+476).
+
+### Fixed — transfers
+- **A file that vanishes mid-batch no longer wedges the batch.** If a
+  selected file was moved or deleted before its turn to upload, that file
+  failed but its queued siblings could stay stuck at "transferring"
+  forever — including in history.
+- **Progress can no longer run backwards or past 100%.** Out-of-order or
+  impossible progress reports from a peer used to move the bar around;
+  counters are now clamped and monotonic.
+- **Impossible file sizes are rejected.** A peer declaring a fractional,
+  NaN, or infinite size is refused cleanly instead of being truncated into
+  a size that can never complete.
+- **Notifications keep one identity per transfer.** When the receiver
+  assigned its own session ID mid-handshake, a transfer could end with a
+  duplicate "done" notification plus an orphaned progress bar that never
+  went away.
+- **Gallery sends stream directly.** Photos and videos picked on Android
+  are read through their scoped-storage URI instead of being copied into
+  the cache first — faster starts, no duplicate disk usage on large
+  videos.
+- **Incoming Android shares stream too**, with no cache copy step.
+
+### Fixed — security & trust
+- **A stranger can no longer burn your pairing code.** `/connect` used to
+  consume the one-time token before checking who was calling, so a
+  malformed request could invalidate the QR code you were showing and
+  leave the real device with a mysterious rejection. The caller is now
+  identified first; a bad request gets a 400 and your code stays valid.
+- **Anonymous senders are refused.** A transfer request with no device
+  identity is rejected before the consent prompt, so blocked devices and
+  per-device resume state can't collapse onto one empty identity.
+- **Manually typed addresses are validated strictly.** A malformed port in
+  a Direct Link is now a clear error instead of silently connecting to the
+  default port on a different machine.
+- **Untrusted peers can't steer us off the local network.**
+
+### Fixed — corrupted or hostile data
+- Partially corrupt settings, device trust/pin lists, and transfer history
+  now keep every valid entry instead of losing the file or throwing later;
+  malformed rows are skipped one by one.
+- Malformed update manifests, Android share rows, document-picker rows,
+  app/media picker rows, and native hotspot credentials are each validated
+  per row and fail closed instead of crashing the screen they feed.
+- Interrupted transfers restored from history no longer come back as
+  permanently "in progress".
+
+### Fixed — lifecycle & platform
+- **Closing the app releases everything it owns.** Hosted hotspots, guest
+  Wi-Fi bindings, the Android foreground service, network requests,
+  pending picker/permission callbacks, and share listeners are all now
+  released on teardown — no leaked hotspot, no stuck notification, no dead
+  screen holding a callback.
+- **Android foreground-service updates can't reorder.** Fast start/stop
+  sequences are serialized, so the transfer notification always matches
+  reality.
+- Stale hotspot startup attempts are cancelled when you back out.
+- Incomplete split APKs no longer show up as sendable apps.
+- Bluetooth-era saved transports migrate to LAN instead of failing.
+- The update check offers the universal APK, which installs on every
+  device.
+
 ## 4.3.2 (+19) — Hardening & reliability
 
 An adversarial audit pass over everything that parses peer-controlled

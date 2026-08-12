@@ -1,7 +1,7 @@
 name: lanlink
 description: "LanLink — cross-platform LAN file sharing for Windows, macOS, Android, and iOS."
 publish_to: 'none'
-version: 4.3.2+19
+version: 4.3.3+20
 
 environment:
   sdk: ^3.5.4
