@@ -38,6 +38,20 @@ class _LanLinkAppState extends State<LanLinkApp> {
     widget.state.installIncomingPrompt(_promptForIncoming);
   }
 
+  @override
+  void didUpdateWidget(covariant LanLinkApp oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.state == widget.state) return;
+    oldWidget.state.installIncomingPrompt(null);
+    widget.state.installIncomingPrompt(_promptForIncoming);
+  }
+
+  @override
+  void dispose() {
+    widget.state.installIncomingPrompt(null);
+    super.dispose();
+  }
+
   /// Incoming transfer → v4 ConsentSheet in a bottom sheet. Accept takes
   /// every offered file; anything else (decline, dismiss) rejects.
   Future<AcceptDecision> _promptForIncoming(

@@ -169,6 +169,21 @@ void main() {
     });
   });
 
+  testWidgets('disposing the app unregisters its incoming consent prompt',
+      (tester) async {
+    final state = await _makeState(tester);
+    await tester.pumpWidget(LanLinkApp(state: state));
+    await tester.pump();
+    await tester.pumpWidget(const SizedBox());
+
+    final decision = await state.debugTriggerIncomingPrompt(
+      _peer(),
+      [_file('after-dispose.txt')],
+    );
+
+    expect(decision.reject, isTrue);
+  });
+
   group('home sessions', () {
     testWidgets('groups sessions by groupId and renders live progress',
         (tester) async {
@@ -301,6 +316,32 @@ void main() {
       // The staged file went straight into a send session.
       expect(state.visibleSessions, hasLength(1));
       expect(fake.sentTo.single.fingerprint, 'fp-direct');
+
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('Direct Link rejects a malformed port instead of defaulting',
+        (tester) async {
+      final state = await _makeState(tester);
+      final fake = _FakeSender(probeResult: _peer());
+      state.debugInstallSender(fake);
+
+      await tester.pumpWidget(_wrap(
+        state,
+        SendPage(
+          scannerBuilder: fakeScanner,
+          prestagedFiles: [_file('photo.jpg')],
+        ),
+      ));
+      await tester.pump();
+
+      await tester.enterText(find.byType(TextField), '192.168.1.20:not-a-port');
+      await tester.tap(find.text('Connect'));
+      await tester.pumpAndSettle();
+
+      expect(fake.probedHosts, isEmpty);
+      expect(find.textContaining('valid address'), findsOneWidget);
+      expect(state.visibleSessions, isEmpty);
 
       await tester.pumpWidget(const SizedBox());
     });

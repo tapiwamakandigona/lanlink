@@ -530,6 +530,10 @@ class _SendPageState extends State<SendPage> with WidgetsBindingObserver {
           'address shown on their Receive screen.');
       return;
     }
+    if (!AppState.isValidHostPort(hostPort)) {
+      _showError('Enter a valid address, such as 192.168.1.20:53317.');
+      return;
+    }
     setState(() {
       _busy = true;
       _connecting = true;

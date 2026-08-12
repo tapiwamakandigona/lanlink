@@ -620,7 +620,10 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  void installIncomingPrompt(IncomingTransferPrompt prompt) {
+  /// Installs the currently mounted app's consent UI hook. Passing null on
+  /// teardown prevents a long-lived receiver from retaining/calling a dead
+  /// Navigator State during root replacement or widget-test disposal.
+  void installIncomingPrompt(IncomingTransferPrompt? prompt) {
     _incomingPrompt = prompt;
   }
 
@@ -1188,27 +1191,47 @@ class AppState extends ChangeNotifier {
     return trimmed.startsWith('[') || ':'.allMatches(trimmed).length > 1;
   }
 
+  /// True when [hostPort] is a dialable IPv4/hostname plus an optional
+  /// decimal port. A supplied port is never silently replaced with the
+  /// default: typos such as `192.168.1.2:533I7`, zero, or 99999 must fail
+  /// before we probe a different endpoint than the user entered.
+  static bool isValidHostPort(String hostPort) =>
+      _parseHostPort(hostPort) != null;
+
   Device? _stubForHostPort(String hostPort) {
-    // IPv6 would need bracket-aware parsing and a v6 HTTP stack check;
-    // reject it here so callers can surface a clear error (see
-    // [looksLikeIpv6]) rather than dialing a garbled host.
-    if (looksLikeIpv6(hostPort)) return null;
-    final parts = hostPort.split(':');
-    if (parts.isEmpty || parts[0].isEmpty) return null;
-    final host = parts[0];
-    final port = parts.length > 1
-        ? int.tryParse(parts[1]) ?? LanLinkProtocol.defaultPort
-        : LanLinkProtocol.defaultPort;
+    final parsed = _parseHostPort(hostPort);
+    if (parsed == null) return null;
     return Device(
-      alias: host,
+      alias: parsed.host,
       version: LanLinkProtocol.protocolVersion,
       deviceModel: '',
       deviceType: LanLinkProtocol.deviceTypeHeadless,
       fingerprint: '',
-      port: port,
+      port: parsed.port,
       protocol: 'https',
-      ip: host,
+      ip: parsed.host,
     );
+  }
+
+  static ({String host, int port})? _parseHostPort(String hostPort) {
+    final trimmed = hostPort.trim();
+    // IPv6 would need bracket-aware parsing and a v6 HTTP stack check;
+    // reject it here so callers can surface a clear error (see
+    // [looksLikeIpv6]) rather than dialing a garbled host.
+    if (trimmed.isEmpty || looksLikeIpv6(trimmed)) return null;
+    final parts = trimmed.split(':');
+    if (parts.length > 2) return null;
+    final host = parts.first.trim();
+    if (host.isEmpty || host.contains(RegExp(r'\s'))) return null;
+    var port = LanLinkProtocol.defaultPort;
+    if (parts.length == 2) {
+      final rawPort = parts[1].trim();
+      if (rawPort.isEmpty) return null;
+      final parsed = int.tryParse(rawPort);
+      if (parsed == null || parsed <= 0 || parsed > 65535) return null;
+      port = parsed;
+    }
+    return (host: host, port: port);
   }
 
   /// Cancels an in-flight session from the local side, in either direction.
