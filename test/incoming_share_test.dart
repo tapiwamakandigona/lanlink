@@ -62,4 +62,22 @@ void main() {
 
     expect(files.map((file) => file.fileName), ['good.jpg']);
   });
+
+  test('clearing a share listener prevents callbacks into a disposed page',
+      () async {
+    var calls = 0;
+    IncomingShare.onShareReceived(() => calls++);
+    IncomingShare.onShareReceived(null);
+
+    await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .handlePlatformMessage(
+      'lanlink/incoming_share',
+      const StandardMethodCodec().encodeMethodCall(
+        const MethodCall('onShareReceived'),
+      ),
+      (_) {},
+    );
+
+    expect(calls, 0);
+  });
 }

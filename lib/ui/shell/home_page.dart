@@ -51,6 +51,12 @@ class _HomePageState extends State<HomePage> {
   }
 
   @override
+  void dispose() {
+    IncomingShare.onShareReceived(null);
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
     final scheme = Theme.of(context).colorScheme;

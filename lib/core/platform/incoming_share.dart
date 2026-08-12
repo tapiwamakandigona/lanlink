@@ -42,8 +42,10 @@ class IncomingShare {
   }
 
   /// Registers a callback that fires when a new share arrives while the
-  /// app is already running. Pair with [consume] inside the callback.
-  static void onShareReceived(void Function() callback) {
+  /// app is already running. Pair with [consume] inside the callback. Pass
+  /// null when the owning page is disposed so the static platform handler
+  /// cannot retain/call a dead State object.
+  static void onShareReceived(void Function()? callback) {
     _listener = callback;
     _channel.setMethodCallHandler((call) async {
       if (call.method == 'onShareReceived') {
