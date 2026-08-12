@@ -953,7 +953,6 @@ class MainActivity : FlutterActivity() {
             MediaStore.MediaColumns._ID,
             MediaStore.MediaColumns.DISPLAY_NAME,
             MediaStore.MediaColumns.SIZE,
-            MediaStore.MediaColumns.DATA,
             MediaStore.MediaColumns.DATE_MODIFIED,
             MediaStore.MediaColumns.BUCKET_DISPLAY_NAME,
         )
@@ -963,17 +962,18 @@ class MainActivity : FlutterActivity() {
             val idCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
             val nameCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
             val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
-            val dataCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATA)
             val dateCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_MODIFIED)
             val bucketCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.BUCKET_DISPLAY_NAME)
             while (cursor.moveToNext()) {
-                val path = cursor.getString(dataCol) ?: continue
+                val id = cursor.getLong(idCol)
                 val size = cursor.getLong(sizeCol)
                 if (size <= 0) continue
+                val contentUri = ContentUris.withAppendedId(collection, id)
                 items += mapOf(
-                    "id" to cursor.getLong(idCol),
-                    "name" to (cursor.getString(nameCol) ?: File(path).name),
-                    "path" to path,
+                    "id" to id,
+                    "name" to (cursor.getString(nameCol) ?: "media-$id"),
+                    "path" to "",
+                    "contentUri" to contentUri.toString(),
                     "size" to size,
                     "isVideo" to isVideo,
                     "dateModified" to cursor.getLong(dateCol),

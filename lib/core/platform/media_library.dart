@@ -16,13 +16,15 @@ class MediaItem {
     required this.isVideo,
     required this.dateModified,
     required this.bucket,
+    this.contentUri,
   });
 
   /// MediaStore row id — used to fetch thumbnails.
   final int id;
   final String name;
 
-  /// Absolute, readable file path the sender can stream from.
+  /// Legacy absolute path, when one exists. Modern Android media is streamed
+  /// from [contentUri] instead so scoped storage cannot block the send.
   final String path;
   final int size;
   final bool isVideo;
@@ -33,6 +35,10 @@ class MediaItem {
   /// Album / folder display name ("Camera", "Screenshots", …).
   final String bucket;
 
+  /// Stable MediaStore URI. Prefer this over [path] for reads: direct paths
+  /// are not accessible under Android 10 scoped storage.
+  final String? contentUri;
+
   factory MediaItem.fromMap(Map<dynamic, dynamic> map) => MediaItem(
         id: (map['id'] as num).toInt(),
         name: map['name'] as String,
@@ -41,6 +47,7 @@ class MediaItem {
         isVideo: map['isVideo'] as bool,
         dateModified: (map['dateModified'] as num?)?.toInt() ?? 0,
         bucket: (map['bucket'] as String?) ?? '',
+        contentUri: map['contentUri'] as String?,
       );
 }
 

@@ -41,6 +41,7 @@ Future<_Result> _pump(
   Future<MediaAccess> Function()? requestMediaAccess,
   Future<bool> Function()? openSettings,
   Future<List<FileInfo>> Function()? pickAnyFiles,
+  bool Function(String path)? mediaPathExists,
 }) async {
   final result = _Result();
   await tester.pumpWidget(
@@ -62,7 +63,7 @@ Future<_Result> _pump(
                     pickAnyFiles: pickAnyFiles ?? (() async => const []),
                     // Test media use fake paths; the real check would drop
                     // them all at staging time.
-                    mediaPathExists: (_) => true,
+                    mediaPathExists: mediaPathExists ?? (_) => true,
                   ),
                 ),
               );
@@ -136,6 +137,37 @@ void main() {
     expect(clip.size, 4000);
     expect(clip.fileType, 'video');
     expect(clip.localPath, '/dcim/clip.mp4');
+  });
+
+  testWidgets('scoped-storage media is staged by content URI', (tester) async {
+    final item = MediaItem(
+      id: 42,
+      name: 'scoped.jpg',
+      path: 'DCIM/Camera/scoped.jpg',
+      size: 123,
+      isVideo: false,
+      dateModified: 1,
+      bucket: 'Camera',
+      contentUri: 'content://media/external/images/media/42',
+    );
+    final result = await _pump(
+      tester,
+      media: [item],
+      apps: const [],
+      mediaPathExists: (_) => false,
+    );
+
+    await tester.tap(find.byKey(const Key('media-42')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('picker-add')));
+    await tester.pumpAndSettle();
+
+    expect(result.value, hasLength(1));
+    expect(
+      result.value!.single.contentUri,
+      'content://media/external/images/media/42',
+    );
+    expect(result.value!.single.localPath, isNull);
   });
 
   testWidgets('selected apps come back as .apk FileInfos', (tester) async {

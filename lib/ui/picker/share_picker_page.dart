@@ -272,13 +272,15 @@ class _SharePickerPageState extends State<SharePickerPage>
       // items here: a stale MediaStore row for a deleted file would
       // otherwise fail the whole send session.
       for (final item in _selectedMedia.values)
-        if (widget.mediaPathExists(item.path))
+        if ((item.contentUri ?? '').isNotEmpty ||
+            widget.mediaPathExists(item.path))
           FileInfo(
             id: _uuid.v4(),
             fileName: item.name,
             size: item.size,
             fileType: fileTypeForName(item.name),
-            localPath: item.path,
+            localPath: (item.contentUri ?? '').isEmpty ? item.path : null,
+            contentUri: item.contentUri,
           ),
       for (final app in _selectedApps.values)
         FileInfo(
