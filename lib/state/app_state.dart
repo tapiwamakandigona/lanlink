@@ -1274,6 +1274,13 @@ class AppState extends ChangeNotifier {
     _subnetScanner?.cancel();
     _discovery?.stop();
     _receiver?.stop();
+    // AppState may own Direct Connect infrastructure after a Receive/Send
+    // page hands a live link off to the session. Widget/process teardown can
+    // happen without the user pressing Disconnect, so release that owner
+    // here too; otherwise Android can keep the local-only hotspot or process
+    // network binding alive after the app state that manages it is gone.
+    unawaited(_teardownDirectConnect());
+    unawaited(TransferForegroundService.instance.sync(0));
     super.dispose();
   }
 }

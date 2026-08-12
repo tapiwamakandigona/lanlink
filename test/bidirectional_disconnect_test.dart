@@ -269,6 +269,23 @@ void main() {
         reason: 'AppState owns the adopted controller and must dispose it');
   }, timeout: const Timeout(Duration(seconds: 30)));
 
+  test('disposing AppState releases an adopted hosted hotspot', () async {
+    var teardowns = 0;
+    var disposes = 0;
+    a.state.adoptHotspot(
+      teardown: () async => teardowns++,
+      dispose: () => disposes++,
+    );
+
+    a.state.dispose();
+    await Future<void>.delayed(Duration.zero);
+
+    expect(teardowns, 1,
+        reason: 'process-state teardown must stop the owned hotspot');
+    expect(disposes, 1,
+        reason: 'process-state teardown must dispose the owned controller');
+  });
+
   test(
       'progress ticks do NOT fan out into AppState.notifyListeners '
       '(status transitions still do)', () async {
