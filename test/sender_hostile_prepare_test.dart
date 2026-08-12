@@ -36,6 +36,7 @@ void main() {
   /// What the fake (hostile) receiver answers to prepare-upload.
   late Map<String, dynamic> Function(Map<String, dynamic> request)
       prepareResponse;
+  late int uploadRequests;
 
   setUp(() async {
     tmpRoot = await Directory.systemTemp.createTemp('lanlink_c2_test_');
@@ -45,11 +46,17 @@ void main() {
     hostileServer = await HttpServer.bindSecure(
         InternetAddress.loopbackIPv4, 0, testCertificate().securityContext());
     port = hostileServer.port;
+    uploadRequests = 0;
     hostileServer.listen((req) async {
-      final body = await utf8.decoder.bind(req).join();
-      final decoded = body.isEmpty
-          ? <String, dynamic>{}
-          : json.decode(body) as Map<String, dynamic>;
+      if (req.uri.path == LanLinkProtocol.routeUpload) {
+        uploadRequests++;
+        await req.drain<void>();
+        req.response.statusCode = 200;
+        await req.response.close();
+        return;
+      }
+      final decoded = json.decode(await utf8.decoder.bind(req).join())
+          as Map<String, dynamic>;
       req.response.statusCode = 200;
       req.response.headers.contentType = ContentType.json;
       req.response.write(json.encode(prepareResponse(decoded)));
@@ -123,6 +130,52 @@ void main() {
         };
     final session = await drive();
     expect(session.status, TransferStatus.failed);
+  });
+
+  test('empty sessionId fails before any upload is attempted', () async {
+    prepareResponse = (req) {
+      final files = (req['files'] as Map<String, dynamic>).keys;
+      return {
+        'sessionId': '',
+        'files': {for (final id in files) id: 'token'},
+      };
+    };
+    final session = await drive();
+    expect(session.status, TransferStatus.failed);
+    expect(session.sessionId, 'sending-test');
+    expect(uploadRequests, 0);
+  });
+
+  test('blank upload token fails before any upload is attempted', () async {
+    prepareResponse = (req) {
+      final files = (req['files'] as Map<String, dynamic>).keys;
+      return {
+        'sessionId': 'evil-session',
+        'files': {for (final id in files) id: '   '},
+      };
+    };
+    final session = await drive();
+    expect(session.status, TransferStatus.failed);
+    expect(
+      session.files.values
+          .every((file) => file.status != TransferStatus.completed),
+      isTrue,
+    );
+    expect(uploadRequests, 0);
+  });
+
+  test('fractional resume offsets fail cleanly', () async {
+    prepareResponse = (req) {
+      final files = (req['files'] as Map<String, dynamic>).keys;
+      return {
+        'sessionId': 'evil-session',
+        'files': {for (final id in files) id: 'token'},
+        'resume': {for (final id in files) id: 12.5},
+      };
+    };
+    final session = await drive();
+    expect(session.status, TransferStatus.failed);
+    expect(uploadRequests, 0);
   });
 
   test('non-map body fails the session cleanly', () async {

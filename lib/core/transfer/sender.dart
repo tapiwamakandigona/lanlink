@@ -251,11 +251,21 @@ class Sender {
     try {
       final prepData = prepResp.data as Map<String, dynamic>;
       sessionId = prepData['sessionId'] as String;
+      if (sessionId.trim().isEmpty) {
+        throw const FormatException('empty sessionId');
+      }
       tokens = Map<String, String>.from(prepData['files'] as Map);
+      if (tokens.values.any((token) => token.trim().isEmpty)) {
+        throw const FormatException('empty upload token');
+      }
       final resumeRaw = prepData['resume'];
       if (resumeRaw is Map) {
         for (final e in resumeRaw.entries) {
-          resume['${e.key}'] = (e.value as num).toInt();
+          final value = e.value;
+          if (value is! int) {
+            throw const FormatException('invalid resume offset');
+          }
+          resume['${e.key}'] = value;
         }
       }
     } catch (_) {
