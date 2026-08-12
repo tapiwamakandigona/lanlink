@@ -1,5 +1,35 @@
 # Changelog
 
+## 4.3.2 (+19) — Hardening & reliability
+
+An adversarial audit pass over everything that parses peer-controlled
+data, plus notification correctness. Sixteen edge-case bugs and gaps
+fixed, 19 new tests (476 total).
+
+### Fixed
+- **Truncated transfers can no longer look successful.** A sender that
+  declared a file of N bytes but delivered fewer used to get the file
+  marked *completed* — a silently cut-off file presented as done. The
+  receiver now rejects short uploads, keeps the partial bytes as a resume
+  head start, and reports the failure.
+- **A malformed discovery packet can't break finding devices.** One bad
+  UDP announcement from any device on the network could previously kill
+  the discovery listener with an unhandled error.
+- **Very long file names now transfer.** A name longer than the
+  filesystem limit used to fail the upload mid-transfer; names are now
+  shortened safely (keeping the extension) and the transfer completes.
+- **Notifications:** a failed or cancelled *send* now says "To <device>"
+  instead of "From <device>"; a transfer that ends instantly can no longer
+  leave a stuck, non-dismissible progress notification; notification
+  errors can never take down a transfer.
+- **Low-space warning works on more devices.** On phones where the system
+  reports disk space in wrapped rows, the free-space check silently did
+  nothing; it now parses correctly (including folders with spaces in the
+  name).
+- Malformed transfer requests now get clean "bad request" replies instead
+  of internal errors, and error replies no longer echo the receiver's
+  local folder paths back to the sender.
+
 ## 4.3.1 (+18) — UI flow polish
 
 A pixels-first review pass over the core journeys (home -> send ->
