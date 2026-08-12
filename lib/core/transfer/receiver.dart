@@ -862,6 +862,27 @@ class Receiver {
     final connInfo0 =
         req.context['shelf.io.connection_info'] as HttpConnectionInfo?;
     final remoteIp = connInfo0?.remoteAddress.address ?? '';
+    // Validate the caller before consuming the one-time token. A random
+    // client that learns/scans the URL but sends no stable identity must not
+    // burn the receiver's on-screen QR and leave the intended peer with a
+    // mysterious 401. It also cannot be linked safely for send-back.
+    //
+    // Read before mutating token state; oversized bodies must still abort via
+    // the bounded-body helper rather than becoming a normal 400 response.
+    final body = await _readBoundedControlBody(req, _maxDeviceInfoBodyBytes);
+    Device? caller;
+    try {
+      final decoded = json.decode(body);
+      if (decoded is Map<String, dynamic> && remoteIp.isNotEmpty) {
+        final parsed = Device.fromJson(decoded, ip: remoteIp);
+        if (parsed.fingerprint.trim().isNotEmpty) caller = parsed;
+      }
+    } catch (_) {
+      // Falls through to the bad-request below.
+    }
+    if (caller == null) {
+      return Response.badRequest(body: 'missing caller fingerprint');
+    }
     _pruneRedeemedTokens();
     final fresh = _connectTokens.remove(token);
     if (!fresh) {
@@ -884,32 +905,11 @@ class Receiver {
     }
     // Token accepted (and consumed): behave like /info so the caller learns
     // who we are, and surface the caller as a peer like /register does.
-    // Read outside the try: an oversized body aborts via a shelf
-    // HijackException that must propagate, not be swallowed below.
-    final body = await _readBoundedControlBody(req, _maxDeviceInfoBodyBytes);
-    try {
-      if (body.isNotEmpty) {
-        final decoded = json.decode(body);
-        if (decoded is Map<String, dynamic>) {
-          final connInfo =
-              req.context['shelf.io.connection_info'] as HttpConnectionInfo?;
-          final ip = connInfo?.remoteAddress.address;
-          if (ip != null && ip.isNotEmpty) {
-            final caller = Device.fromJson(decoded, ip: ip);
-            onPeerSeen?.call(caller);
-            // Symmetric pairing (F3): the caller proved possession of our
-            // one-time token, so trust it back — pin + link on our side
-            // too, making "Send files" work in both directions without a
-            // second scan.
-            if (caller.fingerprint.isNotEmpty) {
-              onPeerConnected?.call(caller);
-            }
-          }
-        }
-      }
-    } catch (_) {
-      // A malformed self-description is not fatal; the token was valid.
-    }
+    onPeerSeen?.call(caller);
+    // Symmetric pairing (F3): the caller proved possession of our one-time
+    // token, so trust it back — pin + link on our side too, making "Send
+    // files" work in both directions without a second scan.
+    onPeerConnected?.call(caller);
     final me = localDeviceProvider();
     return Response.ok(
       json.encode(me.toJson()),

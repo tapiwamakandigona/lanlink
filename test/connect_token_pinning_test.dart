@@ -177,6 +177,27 @@ void main() {
       expect(await sender.connectWithToken(stub, 'garbage-token'), isNull);
     });
 
+    test('malformed caller identity does not consume a valid token', () async {
+      final token = receiver.issueConnectToken();
+      final dio = trustAllDio(BaseOptions(validateStatus: (_) => true));
+
+      final malformed = await dio.post<String>(
+        'https://127.0.0.1:$port${LanLinkProtocol.routeConnect}',
+        queryParameters: {'token': token},
+        data: {'alias': 'anonymous', 'port': 1},
+      );
+
+      expect(malformed.statusCode, 400);
+      expect(receiver.isConnectTokenValid(token), isTrue,
+          reason: 'bad caller metadata must not burn the on-screen QR');
+
+      final sender =
+          Sender(localDeviceProvider: () => _device('me', 'me-fp', 1));
+      final stub = _device('127.0.0.1', '', port);
+      expect(await sender.connectWithToken(stub, token), isNotNull,
+          reason: 'the legitimate caller can still redeem the code');
+    });
+
     test('ConnectPayload round-trips the token', () {
       const payload = ConnectPayload(
         ip: '192.168.1.7',
