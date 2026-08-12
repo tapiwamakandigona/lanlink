@@ -21,6 +21,8 @@ class TransferNotifications {
 
   static const _channel = MethodChannel('lanlink/notifications');
   Future<void>? _permissionRequest;
+  final Expando<int> _sessionIds =
+      Expando<int>('lanlink transfer notification id');
 
   /// Test hook: lets widget tests exercise the notification text/argument
   /// building on non-Android hosts by forcing [isSupported] true (the
@@ -153,10 +155,17 @@ class TransferNotifications {
   /// Different sessions hashing to the same id is extremely unlikely (~1 in
   /// 2 billion) and only means two in-flight notifications would collide.
   int _idFor(TransferSession session) {
+    final existing = _sessionIds[session];
+    if (existing != null) return existing;
     var hash = 0;
     for (final c in session.sessionId.codeUnits) {
       hash = ((hash << 5) - hash + c) & 0x7fffffff;
     }
+    // A sender's sessionId changes from the local pending id to the
+    // receiver-assigned id after prepare-upload. Cache by session object so
+    // progress, final, and cancel always address the original notification
+    // row instead of orphaning an ongoing notification in the shade.
+    _sessionIds[session] = hash;
     return hash;
   }
 }

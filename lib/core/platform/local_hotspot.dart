@@ -47,8 +47,13 @@ class LocalHotspot {
 
   static const MethodChannel _channel = MethodChannel('lanlink/hotspot');
 
+  /// Test hook for validating native payloads on a non-Android host.
+  @visibleForTesting
+  static bool debugForceSupported = false;
+
   /// Platforms where an in-app hotspot host exists (Android 8+, Windows).
-  static bool get _platformHasHost => Platform.isAndroid || Platform.isWindows;
+  static bool get _platformHasHost =>
+      debugForceSupported || Platform.isAndroid || Platform.isWindows;
 
   /// True when the platform can host an in-app hotspot.
   static Future<bool> isSupported() async {
@@ -98,12 +103,20 @@ class LocalHotspot {
     try {
       final raw = await _channel.invokeMapMethod<String, Object?>('start');
       if (raw == null) return null;
-      final ssid = raw['ssid'] as String?;
-      final password = raw['password'] as String?;
-      final ips = (raw['hostIps'] as List<Object?>? ?? const [])
+      final ssid = raw['ssid'];
+      final password = raw['password'];
+      final hostIps = raw['hostIps'];
+      if (ssid is! String ||
+          ssid.trim().isEmpty ||
+          password is! String ||
+          password.isEmpty ||
+          (hostIps != null && hostIps is! List)) {
+        return null;
+      }
+      final ips = (hostIps is List ? hostIps : const [])
           .whereType<String>()
-          .toList();
-      if (ssid == null || password == null) return null;
+          .where((ip) => ip.trim().isNotEmpty)
+          .toList(growable: false);
       return HotspotInfo(ssid: ssid, password: password, hostIps: ips);
     } on PlatformException {
       return null;

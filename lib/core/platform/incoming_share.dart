@@ -59,7 +59,14 @@ class IncomingShare {
     final contentUri = map['contentUri']?.toString();
     final path = map['path']?.toString();
     final name = map['fileName']?.toString();
-    final size = (map['size'] as num?)?.toInt() ?? -1;
+    final sizeRaw = map['size'];
+    if (sizeRaw != null &&
+        (sizeRaw is! num ||
+            !sizeRaw.isFinite ||
+            sizeRaw != sizeRaw.truncateToDouble())) {
+      return null;
+    }
+    final size = sizeRaw is num ? sizeRaw.toInt() : -1;
     final hasContentUri = contentUri != null && contentUri.isNotEmpty;
     final hasPath = path != null && path.isNotEmpty;
     if ((!hasContentUri && !hasPath) ||

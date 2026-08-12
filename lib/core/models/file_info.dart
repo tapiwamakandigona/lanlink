@@ -70,6 +70,9 @@ class FileInfo {
     final sizeRaw = raw['size'];
     int size;
     if (sizeRaw is num) {
+      if (!sizeRaw.isFinite || sizeRaw != sizeRaw.truncateToDouble()) {
+        return null;
+      }
       size = sizeRaw.toInt();
     } else if (sizeRaw is String) {
       final parsed = int.tryParse(sizeRaw.trim());

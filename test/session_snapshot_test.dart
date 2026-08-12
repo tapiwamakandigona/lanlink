@@ -70,4 +70,49 @@ void main() {
       expect(restored.files['f1']!.error, contains('interrupted'));
     }
   });
+
+  test('partially corrupt history rows are salvaged without throwing', () {
+    final restored = TransferSession.fromJsonSnapshot({
+      'sessionId': 99,
+      'direction': false,
+      'status': {'bad': 'shape'},
+      'startedAt': 12,
+      'finishedAt': [],
+      'peer': {
+        'alias': 4,
+        'deviceModel': false,
+        'deviceType': [],
+        'fingerprint': {},
+        'port': double.infinity,
+        'protocol': 7,
+        'ip': null,
+      },
+      'files': [
+        'not-a-map',
+        {
+          'id': 3,
+          'fileName': false,
+          'size': double.nan,
+          'bytes': -200,
+          'status': [],
+          'localPath': 8,
+          'error': false,
+          'savedPath': {},
+        },
+        {
+          'id': 'valid',
+          'fileName': 'kept.bin',
+          'size': 100,
+          'bytes': 500,
+          'status': 'completed',
+        },
+      ],
+    });
+
+    expect(restored.sessionId, isEmpty);
+    expect(restored.peer.alias, 'Unknown device');
+    expect(restored.peer.port, 53317);
+    expect(restored.files.keys, ['valid']);
+    expect(restored.files['valid']!.bytes, 100);
+  });
 }

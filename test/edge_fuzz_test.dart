@@ -12,10 +12,17 @@ void main() {
           ip: '10.0.0.5');
       expect(d.port, 53317);
     });
-    test('port as double is truncated to int', () {
+    test('integral double port is accepted', () {
       final d = Device.fromJson({'fingerprint': 'abc', 'port': 53317.0},
           ip: '10.0.0.5');
       expect(d.port, 53317);
+    });
+    test('fractional and non-finite ports fall back to default', () {
+      for (final bad in [53317.9, double.nan, double.infinity]) {
+        final d = Device.fromJson({'fingerprint': 'abc', 'port': bad},
+            ip: '10.0.0.5');
+        expect(d.port, LanLinkProtocol.defaultPort, reason: 'port=$bad');
+      }
     });
     test('port out of range falls back to default', () {
       for (final bad in [0, -1, 70000, 'abc', '', 99999.9]) {

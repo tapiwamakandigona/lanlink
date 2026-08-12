@@ -52,6 +52,25 @@ void main() {
     expect(picked.single.size, 1234);
   });
 
+  test('pickFiles skips malformed platform rows and keeps valid picks',
+      () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'pickFiles') {
+        return [
+          'not-a-map',
+          {'uri': 'content://bad', 'name': 'bad.bin', 'size': double.nan},
+          {'uri': 'content://x/good', 'name': 'good.bin', 'size': 42},
+        ];
+      }
+      return null;
+    });
+
+    final picked = await ContentStreams.pickFiles();
+
+    expect(picked.map((item) => item.name), ['good.bin']);
+  });
+
   test('openRead yields chunks until EOF and closes the handle', () async {
     chunkQueue = [
       Uint8List.fromList([1, 2, 3]),

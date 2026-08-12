@@ -38,4 +38,28 @@ void main() {
     expect(files.single.contentUri, 'content://photos/large-video');
     expect(files.single.localPath, isNull);
   });
+
+  test('malformed native rows are skipped without dropping valid shares',
+      () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (_) async {
+      return [
+        'not a map',
+        {
+          'contentUri': 'content://photos/bad-size',
+          'fileName': 'bad.bin',
+          'size': double.infinity,
+        },
+        {
+          'contentUri': 'content://photos/good',
+          'fileName': 'good.jpg',
+          'size': 123,
+        },
+      ];
+    });
+
+    final files = await IncomingShare.consume();
+
+    expect(files.map((file) => file.fileName), ['good.jpg']);
+  });
 }

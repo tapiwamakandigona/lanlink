@@ -110,7 +110,7 @@ class AppSettings extends ChangeNotifier {
     try {
       final decoded = json.decode(raw);
       if (decoded is! Map) return const {};
-      return decoded.map((k, v) => MapEntry(k.toString(), v.toString()));
+      return _stringMap(decoded);
     } catch (_) {
       return const {};
     }
@@ -128,7 +128,7 @@ class AppSettings extends ChangeNotifier {
     final raw = _prefs.getString(_trustedKey);
     if (raw == null || raw.isEmpty) return <String>{};
     try {
-      return (json.decode(raw) as List).cast<String>().toSet();
+      return _stringSet(json.decode(raw));
     } catch (_) {
       return <String>{};
     }
@@ -242,7 +242,7 @@ class AppSettings extends ChangeNotifier {
     final raw = _prefs.getString(_pinnedKey);
     if (raw == null || raw.isEmpty) return <String>{};
     try {
-      return (json.decode(raw) as List).cast<String>().toSet();
+      return _stringSet(json.decode(raw));
     } catch (_) {
       return <String>{};
     }
@@ -299,9 +299,39 @@ class AppSettings extends ChangeNotifier {
     final raw = _prefs.getString(_trustedAliasKey);
     if (raw == null || raw.isEmpty) return <String, String>{};
     try {
-      return (json.decode(raw) as Map).cast<String, String>();
+      return _stringMap(json.decode(raw));
     } catch (_) {
       return <String, String>{};
     }
+  }
+
+  /// Salvages well-formed entries from preferences written by older builds
+  /// or damaged storage. One wrong-typed element must not erase every trusted
+  /// or pinned device on the next read.
+  static Set<String> _stringSet(Object? decoded) {
+    if (decoded is! List) return <String>{};
+    return decoded
+        .whereType<String>()
+        .map((value) => value.trim())
+        .where((value) => value.isNotEmpty)
+        .toSet();
+  }
+
+  /// As above for maps: preserve only non-empty string keys and string
+  /// values, instead of using a lazy cast that can throw later at lookup.
+  static Map<String, String> _stringMap(Object? decoded) {
+    if (decoded is! Map) return <String, String>{};
+    final out = <String, String>{};
+    for (final entry in decoded.entries) {
+      final key = entry.key;
+      final value = entry.value;
+      if (key is String &&
+          key.isNotEmpty &&
+          value is String &&
+          value.trim().isNotEmpty) {
+        out[key] = value;
+      }
+    }
+    return out;
   }
 }

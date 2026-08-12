@@ -95,6 +95,23 @@ void main() {
     expect(args['indeterminate'], false);
   });
 
+  test('notification id stays stable when sender replaces pending session id',
+      () async {
+    final s = session(
+        direction: TransferDirection.send, status: TransferStatus.transferring);
+    await TransferNotifications.instance.showProgress(s);
+    final firstId = (calls.single.arguments as Map)['id'];
+
+    // Sender replaces its local pending id with the receiver-assigned id
+    // after prepare-upload. The same notification row must be updated rather
+    // than leaving an orphaned ongoing row in the shade.
+    s.sessionId = 'receiver-assigned-id';
+    s.markStatus(TransferStatus.completed);
+    await TransferNotifications.instance.showFinal(s);
+
+    expect((calls.last.arguments as Map)['id'], firstId);
+  });
+
   test('platform-side PlatformException never escapes', () async {
     handler = (call) =>
         throw PlatformException(code: 'boom', message: 'no permission');

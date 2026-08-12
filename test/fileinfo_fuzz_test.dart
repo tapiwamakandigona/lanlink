@@ -22,10 +22,17 @@ void main() {
           FileInfo.tryFromJson({'id': 'a', 'fileName': 'x', 'size': '4096'});
       expect(fi?.size, 4096);
     });
-    test('double size is truncated', () {
-      final fi =
-          FileInfo.tryFromJson({'id': 'a', 'fileName': 'x', 'size': 12.9});
-      expect(fi?.size, 12);
+    test('fractional and non-finite sizes are rejected', () {
+      expect(FileInfo.tryFromJson({'id': 'a', 'fileName': 'x', 'size': 12.9}),
+          isNull);
+      expect(
+          FileInfo.tryFromJson(
+              {'id': 'a', 'fileName': 'x', 'size': double.nan}),
+          isNull);
+      expect(
+          FileInfo.tryFromJson(
+              {'id': 'a', 'fileName': 'x', 'size': double.infinity}),
+          isNull);
     });
     test('non-numeric size -> null', () {
       expect(FileInfo.tryFromJson({'id': 'a', 'fileName': 'x', 'size': 'big'}),

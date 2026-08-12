@@ -39,16 +39,45 @@ class MediaItem {
   /// are not accessible under Android 10 scoped storage.
   final String? contentUri;
 
-  factory MediaItem.fromMap(Map<dynamic, dynamic> map) => MediaItem(
-        id: (map['id'] as num).toInt(),
-        name: map['name'] as String,
-        path: map['path'] as String,
-        size: (map['size'] as num).toInt(),
-        isVideo: map['isVideo'] as bool,
-        dateModified: (map['dateModified'] as num?)?.toInt() ?? 0,
-        bucket: (map['bucket'] as String?) ?? '',
-        contentUri: map['contentUri'] as String?,
-      );
+  static MediaItem? tryFromMap(Object? raw) {
+    if (raw is! Map) return null;
+    int? exactNonNegative(Object? value) {
+      if (value is! num ||
+          !value.isFinite ||
+          value != value.truncateToDouble() ||
+          value < 0) {
+        return null;
+      }
+      return value.toInt();
+    }
+
+    final id = exactNonNegative(raw['id']);
+    final size = exactNonNegative(raw['size']);
+    final name = raw['name'];
+    final path = raw['path'];
+    final contentUri = raw['contentUri'];
+    if (id == null ||
+        size == null ||
+        name is! String ||
+        name.isEmpty ||
+        path is! String ||
+        raw['isVideo'] is! bool ||
+        (path.isEmpty &&
+            (contentUri is! String || contentUri.trim().isEmpty))) {
+      return null;
+    }
+    return MediaItem(
+      id: id,
+      name: name,
+      path: path,
+      size: size,
+      isVideo: raw['isVideo'] as bool,
+      dateModified: exactNonNegative(raw['dateModified']) ?? 0,
+      bucket: raw['bucket'] is String ? raw['bucket'] as String : '',
+      contentUri:
+          contentUri is String && contentUri.isNotEmpty ? contentUri : null,
+    );
+  }
 }
 
 /// Dart bridge to the `lanlink/media` platform channel (Android only).
@@ -78,8 +107,9 @@ class MediaLibrary {
     final raw = await _channel.invokeListMethod<dynamic>('listMedia');
     if (raw == null) return const [];
     return raw
-        .map((e) => MediaItem.fromMap(e as Map<dynamic, dynamic>))
-        .toList();
+        .map(MediaItem.tryFromMap)
+        .whereType<MediaItem>()
+        .toList(growable: false);
   }
 
   /// Small JPEG thumbnail for a media item, or null when unavailable.

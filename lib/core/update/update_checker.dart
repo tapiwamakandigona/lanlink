@@ -155,15 +155,21 @@ class UpdateChecker extends ChangeNotifier {
       final isPrerelease = entry['prerelease'] == true;
       if (isPrerelease && !_includePrereleases) continue;
       if (entry['draft'] == true) continue;
-      final tag = entry['tag_name'] as String? ?? '';
+      final tag = entry['tag_name'];
+      if (tag is! String) continue;
       final version = _parseVersion(tag);
       if (version == null) continue;
       final assets = (entry['assets'] as List?) ?? const [];
       String? android, windows, macos, linux, ios;
       for (final raw in assets) {
         if (raw is! Map<String, dynamic>) continue;
-        final name = (raw['name'] as String? ?? '').toLowerCase();
-        final url = raw['browser_download_url'] as String? ?? '';
+        final rawName = raw['name'];
+        final rawUrl = raw['browser_download_url'];
+        if (rawName is! String || rawUrl is! String || rawUrl.isEmpty) {
+          continue;
+        }
+        final name = rawName.toLowerCase();
+        final url = rawUrl;
         // One APK must work on every Android device. GitHub's asset order is
         // not a compatibility signal and currently puts arm64 before the
         // universal build, which would offer an un-installable update to
@@ -199,16 +205,19 @@ class UpdateChecker extends ChangeNotifier {
       releases.add(ReleaseInfo(
         version: version,
         tagName: tag,
-        htmlUrl: entry['html_url'] as String? ?? '',
-        body: entry['body'] as String? ?? '',
+        htmlUrl: entry['html_url'] is String ? entry['html_url'] as String : '',
+        body: entry['body'] is String ? entry['body'] as String : '',
         androidAssetUrl: android,
         windowsAssetUrl: windows,
         macosAssetUrl: macos,
         linuxAssetUrl: linux,
         iosAssetUrl: ios,
-        publishedAt:
-            DateTime.tryParse(entry['published_at'] as String? ?? '') ??
-                DateTime.fromMillisecondsSinceEpoch(0),
+        publishedAt: DateTime.tryParse(
+              entry['published_at'] is String
+                  ? entry['published_at'] as String
+                  : '',
+            ) ??
+            DateTime.fromMillisecondsSinceEpoch(0),
         isPrerelease: isPrerelease,
       ));
     }

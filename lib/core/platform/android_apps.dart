@@ -26,16 +26,29 @@ class AndroidAppInfo {
   /// Launcher icon as a small PNG, when the platform side could draw it.
   final Uint8List? icon;
 
-  factory AndroidAppInfo.fromMap(Map<dynamic, dynamic> map) {
+  static AndroidAppInfo? tryFromMap(Object? raw) {
+    if (raw is! Map) return null;
+    final packageName = raw['packageName'];
+    final apkPath = raw['apkPath'];
+    final size = raw['size'];
+    if (packageName is! String ||
+        packageName.isEmpty ||
+        apkPath is! String ||
+        apkPath.isEmpty ||
+        size is! num ||
+        !size.isFinite ||
+        size != size.truncateToDouble() ||
+        size < 0) {
+      return null;
+    }
+    final label = raw['label'];
     return AndroidAppInfo(
-      label: (map['label'] as String?)?.trim().isNotEmpty == true
-          ? map['label'] as String
-          : map['packageName'] as String,
-      packageName: map['packageName'] as String,
-      apkPath: map['apkPath'] as String,
-      size: (map['size'] as num).toInt(),
-      isSplitInstall: map['isSplitInstall'] == true,
-      icon: map['icon'] as Uint8List?,
+      label: label is String && label.trim().isNotEmpty ? label : packageName,
+      packageName: packageName,
+      apkPath: apkPath,
+      size: size.toInt(),
+      isSplitInstall: raw['isSplitInstall'] == true,
+      icon: raw['icon'] is Uint8List ? raw['icon'] as Uint8List : null,
     );
   }
 }
@@ -55,8 +68,9 @@ class AndroidApps {
     final raw = await _channel.invokeListMethod<dynamic>('listApps');
     if (raw == null) return const [];
     return raw
-        .map((e) => AndroidAppInfo.fromMap(e as Map<dynamic, dynamic>))
-        .toList()
+        .map(AndroidAppInfo.tryFromMap)
+        .whereType<AndroidAppInfo>()
+        .toList(growable: false)
       ..sort((a, b) => a.label.toLowerCase().compareTo(b.label.toLowerCase()));
   }
 

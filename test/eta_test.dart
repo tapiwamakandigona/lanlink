@@ -134,5 +134,23 @@ void main() {
       s.recomputeSpeedAt(s.startedAt.add(const Duration(milliseconds: 100)));
       expect(s.speedBytesPerSec, greaterThan(0));
     });
+
+    test('progress counters clamp malformed/out-of-order byte updates', () {
+      final s = session(100);
+
+      s.updateBytes('f', -20);
+      expect(s.transferredBytes, 0);
+      expect(s.fraction, 0);
+
+      s.updateBytes('f', 150);
+      expect(s.transferredBytes, 100);
+      expect(s.fraction, 1);
+
+      // A stale async progress callback must not move the completed byte
+      // counter backwards and make the UI/ETA regress.
+      s.updateBytes('f', 40);
+      expect(s.transferredBytes, 100);
+      expect(s.fraction, 1);
+    });
   });
 }

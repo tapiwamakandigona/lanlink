@@ -127,6 +127,7 @@ class Device {
     if (v is int) {
       n = v;
     } else if (v is num) {
+      if (!v.isFinite || v != v.truncateToDouble()) return null;
       n = v.toInt();
     } else if (v is String) {
       n = int.tryParse(v.trim());

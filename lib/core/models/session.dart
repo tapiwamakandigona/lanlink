@@ -1,6 +1,5 @@
 import 'package:flutter/foundation.dart';
 
-import '../protocol/constants.dart';
 import 'device.dart';
 import 'file_info.dart';
 
@@ -94,9 +93,18 @@ class TransferSession extends ChangeNotifier {
   void updateBytes(String fileId, int newBytes) {
     final p = _files[fileId];
     if (p == null) return;
-    final done = newBytes >= p.file.size;
-    final firstBytes = p.bytes == 0 && newBytes > 0;
-    p.bytes = newBytes;
+    // Network callbacks can race cancellation/EOF and platform sources are
+    // not trusted to report perfect counters. Progress must remain monotonic
+    // and within the declared file size or the UI/ETA can go negative,
+    // exceed 100%, then jump backwards.
+    final bounded = newBytes.clamp(0, p.file.size);
+    // Equal values still tick listeners: an EOF/final-byte callback may be
+    // the only repaint opportunity for a live session card. Only an actual
+    // regression is stale.
+    if (bounded < p.bytes) return;
+    final done = bounded >= p.file.size;
+    final firstBytes = p.bytes == 0 && bounded > 0;
+    p.bytes = bounded;
     // Streaming transfers call this for every network chunk (tens of
     // thousands of times for a large file). Recomputing speed and rebuilding
     // the UI per chunk burns CPU that should go to disk/network I/O, so
@@ -219,62 +227,78 @@ class TransferSession extends ChangeNotifier {
   /// returned session is "frozen" — listeners are not wired and progress
   /// will not advance. Intended for display in history.
   static TransferSession fromJsonSnapshot(Map<String, dynamic> json) {
-    final peerJson =
-        Map<String, dynamic>.from(json['peer'] as Map? ?? const {});
-    final peer = Device(
-      alias: (peerJson['alias'] as String?) ?? 'Unknown device',
-      version: LanLinkProtocol.protocolVersion,
-      deviceModel: (peerJson['deviceModel'] as String?) ?? '',
-      deviceType: (peerJson['deviceType'] as String?) ??
-          LanLinkProtocol.deviceTypeHeadless,
-      fingerprint: (peerJson['fingerprint'] as String?) ?? '',
-      port: (peerJson['port'] as num?)?.toInt() ?? LanLinkProtocol.defaultPort,
-      protocol: (peerJson['protocol'] as String?) ?? 'https',
-      ip: (peerJson['ip'] as String?) ?? '0.0.0.0',
+    final peerRaw = json['peer'];
+    final peerJson = peerRaw is Map
+        ? Map<String, dynamic>.from(peerRaw)
+        : <String, dynamic>{};
+    final peer = Device.fromJson(
+      peerJson,
+      ip: _stringOr(peerJson['ip'], '0.0.0.0'),
     );
-    final filesJson = (json['files'] as List?) ?? const [];
+    final filesRaw = json['files'];
+    final filesJson = filesRaw is List ? filesRaw : const [];
     final files = <String, FileProgress>{};
     for (final raw in filesJson) {
-      final map = Map<String, dynamic>.from(raw as Map);
-      final id = (map['id'] as String?) ?? '';
+      if (raw is! Map) continue;
+      final map = Map<String, dynamic>.from(raw);
+      final id = _stringOr(map['id'], '');
       if (id.isEmpty) continue;
+      final size = _nonNegativeInt(map['size']) ?? 0;
+      final bytes = (_nonNegativeInt(map['bytes']) ?? 0).clamp(0, size);
       final fileInfo = FileInfo(
         id: id,
-        fileName: (map['fileName'] as String?) ?? 'unknown',
-        size: (map['size'] as num?)?.toInt() ?? 0,
-        fileType: (map['fileType'] as String?) ?? 'other',
-        localPath: map['localPath'] as String?,
+        fileName: _stringOr(map['fileName'], 'unknown'),
+        size: size,
+        fileType: _stringOr(map['fileType'], 'other'),
+        localPath: _string(map['localPath']),
       );
-      final statusName =
-          map['status'] is String ? map['status'] as String : null;
+      final statusName = _string(map['status']);
       final restoredStatus = _restoredStatus(statusName);
       files[id] = FileProgress(
         file: fileInfo,
-        bytes: (map['bytes'] as num?)?.toInt() ?? 0,
+        bytes: bytes,
         status: restoredStatus,
-        error: map['error'] as String? ??
+        error: _string(map['error']) ??
             (_isActiveName(statusName)
                 ? 'Transfer was interrupted when LanLink closed.'
                 : null),
-        savedPath: map['savedPath'] as String?,
+        savedPath: _string(map['savedPath']),
       );
     }
     final session = TransferSession(
-      sessionId: (json['sessionId'] as String?) ?? '',
-      direction: _directionFromName(json['direction'] as String?),
+      sessionId: _stringOr(json['sessionId'], ''),
+      direction: _directionFromName(_string(json['direction'])),
       peer: peer,
       files: files,
-      status: _restoredStatus(json['status'] as String?),
+      status: _restoredStatus(_string(json['status'])),
     );
-    final startedRaw = json['startedAt'] as String?;
+    final startedRaw = _string(json['startedAt']);
     if (startedRaw != null) {
       session.startedAt = DateTime.tryParse(startedRaw) ?? DateTime.now();
     }
-    final finishedRaw = json['finishedAt'] as String?;
+    final finishedRaw = _string(json['finishedAt']);
     if (finishedRaw != null) {
       session.finishedAt = DateTime.tryParse(finishedRaw);
     }
     return session;
+  }
+
+  static String? _string(Object? value) => value is String ? value : null;
+
+  static String _stringOr(Object? value, String fallback) =>
+      _string(value) ?? fallback;
+
+  static int? _nonNegativeInt(Object? value) {
+    int? parsed;
+    if (value is int) {
+      parsed = value;
+    } else if (value is num) {
+      if (!value.isFinite || value != value.truncateToDouble()) return null;
+      parsed = value.toInt();
+    } else if (value is String) {
+      parsed = int.tryParse(value.trim());
+    }
+    return parsed != null && parsed >= 0 ? parsed : null;
   }
 
   static TransferStatus _statusFromName(String? name) {

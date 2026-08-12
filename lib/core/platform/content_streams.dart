@@ -18,11 +18,22 @@ class PickedContent {
   final String name;
   final int size;
 
-  factory PickedContent.fromMap(Map<dynamic, dynamic> map) => PickedContent(
-        uri: map['uri'] as String,
-        name: map['name'] as String,
-        size: (map['size'] as num).toInt(),
-      );
+  static PickedContent? tryFromMap(Object? raw) {
+    if (raw is! Map) return null;
+    final uri = raw['uri'];
+    final name = raw['name'];
+    final size = raw['size'];
+    if (uri is! String || uri.isEmpty || name is! String || name.isEmpty) {
+      return null;
+    }
+    if (size is! num ||
+        !size.isFinite ||
+        size != size.truncateToDouble() ||
+        size < 0) {
+      return null;
+    }
+    return PickedContent(uri: uri, name: name, size: size.toInt());
+  }
 }
 
 /// Dart bridge to the `lanlink/saf` platform channel (Android only).
@@ -54,8 +65,9 @@ class ContentStreams {
     final raw = await _channel.invokeListMethod<dynamic>('pickFiles');
     if (raw == null) return const [];
     return raw
-        .map((e) => PickedContent.fromMap(e as Map<dynamic, dynamic>))
-        .toList();
+        .map(PickedContent.tryFromMap)
+        .whereType<PickedContent>()
+        .toList(growable: false);
   }
 
   /// Streams the content of [uri] starting at byte [start].

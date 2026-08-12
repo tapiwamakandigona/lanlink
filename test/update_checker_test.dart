@@ -104,6 +104,49 @@ void main() {
         checker.availableUpdate?.androidAssetUrl, endsWith('-universal.apk'));
   });
 
+  test('malformed release fields are skipped instead of killing the poll',
+      () async {
+    final server = await _serveJson([
+      {
+        'tag_name': 999,
+        'prerelease': false,
+        'draft': false,
+        'assets': const [],
+      },
+      {
+        'tag_name': 'v3.1.0',
+        'html_url': 42,
+        'body': ['wrong'],
+        'prerelease': false,
+        'draft': false,
+        'published_at': 123,
+        'assets': [
+          {
+            'name': 77,
+            'browser_download_url': false,
+          },
+          {
+            'name': 'lanlink-v3.1.0-universal.apk',
+            'browser_download_url':
+                'https://example.test/lanlink-v3.1.0-universal.apk',
+          },
+        ],
+      },
+    ]);
+    addTearDown(() => server.close(force: true));
+    final checker = UpdateChecker(
+      manifestUrl: 'http://${server.address.address}:${server.port}/releases',
+    );
+    addTearDown(checker.dispose);
+    _setCurrent(checker, Version.parse('3.0.0'));
+
+    await checker.checkNow();
+
+    expect(checker.availableUpdate?.tagName, 'v3.1.0');
+    expect(
+        checker.availableUpdate?.androidAssetUrl, endsWith('-universal.apk'));
+  });
+
   test(
       'UpdateChecker reports an update when the latest tag is greater than current',
       () async {
