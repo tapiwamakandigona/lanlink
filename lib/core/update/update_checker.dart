@@ -164,7 +164,17 @@ class UpdateChecker extends ChangeNotifier {
         if (raw is! Map<String, dynamic>) continue;
         final name = (raw['name'] as String? ?? '').toLowerCase();
         final url = raw['browser_download_url'] as String? ?? '';
-        if (name.endsWith('.apk')) android ??= url;
+        // One APK must work on every Android device. GitHub's asset order is
+        // not a compatibility signal and currently puts arm64 before the
+        // universal build, which would offer an un-installable update to
+        // x86_64 and 32-bit devices.
+        if (name.endsWith('.apk')) {
+          if (name.contains('universal')) {
+            android = url;
+          } else {
+            android ??= url;
+          }
+        }
         if (name.contains('windows') &&
             (name.endsWith('.exe') || name.endsWith('.zip'))) {
           windows ??= url;

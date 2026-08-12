@@ -60,6 +60,50 @@ void main() {
     expect(checker.availableUpdate?.windowsAssetUrl, endsWith('.exe'));
   });
 
+  test('UpdateChecker prefers the universal APK over ABI-specific APKs',
+      () async {
+    final server = await _serveJson([
+      {
+        'tag_name': 'v3.1.0',
+        'name': 'v3.1.0',
+        'html_url': '',
+        'body': '',
+        'prerelease': false,
+        'draft': false,
+        'published_at': '2025-01-01T00:00:00Z',
+        // GitHub currently returns LanLink's arm64 asset before universal.
+        // Offering that APK to an x86_64 or 32-bit device fails to install.
+        'assets': [
+          {
+            'name': 'lanlink-v3.1.0-arm64-v8a.apk',
+            'browser_download_url':
+                'https://example.test/lanlink-v3.1.0-arm64-v8a.apk',
+          },
+          {
+            'name': 'lanlink-v3.1.0-armeabi-v7a.apk',
+            'browser_download_url':
+                'https://example.test/lanlink-v3.1.0-armeabi-v7a.apk',
+          },
+          {
+            'name': 'lanlink-v3.1.0-universal.apk',
+            'browser_download_url':
+                'https://example.test/lanlink-v3.1.0-universal.apk',
+          },
+        ],
+      },
+    ]);
+    addTearDown(() => server.close(force: true));
+    final url = 'http://${server.address.address}:${server.port}/releases';
+    final checker = UpdateChecker(manifestUrl: url);
+    addTearDown(checker.dispose);
+    _setCurrent(checker, Version.parse('3.0.0'));
+
+    await checker.checkNow();
+
+    expect(
+        checker.availableUpdate?.androidAssetUrl, endsWith('-universal.apk'));
+  });
+
   test(
       'UpdateChecker reports an update when the latest tag is greater than current',
       () async {
