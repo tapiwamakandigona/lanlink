@@ -312,9 +312,9 @@ class Receiver {
     } catch (e) {
       return Response.badRequest(body: 'invalid json: $e');
     }
-    final info = body['info'] as Map<String, dynamic>?;
-    final filesRaw = body['files'] as Map<String, dynamic>?;
-    if (info == null || filesRaw == null) {
+    final info = body['info'];
+    final filesRaw = body['files'];
+    if (info is! Map<String, dynamic> || filesRaw is! Map<String, dynamic>) {
       return Response.badRequest(body: 'missing info or files');
     }
 
@@ -332,9 +332,20 @@ class Receiver {
       return Response.forbidden('disconnected - pair again to send');
     }
 
-    final files = filesRaw.values
-        .map((e) => FileInfo.fromJson(e as Map<String, dynamic>))
-        .toList();
+    // Parse each file entry totally: one malformed entry from a hostile or
+    // buggy peer yields a clean 400, never a thrown TypeError turned into a
+    // 500. An empty/all-invalid file set is itself a bad request.
+    final files = <FileInfo>[];
+    for (final e in filesRaw.values) {
+      final fi = FileInfo.tryFromJson(e);
+      if (fi == null) {
+        return Response.badRequest(body: 'invalid file entry');
+      }
+      files.add(fi);
+    }
+    if (files.isEmpty) {
+      return Response.badRequest(body: 'no valid files');
+    }
 
     final decision = await onAccept(peer, files);
     if (decision.reject || decision.fileIdsToAccept.isEmpty) {
@@ -437,6 +448,13 @@ class Receiver {
     // byte offset we advertised in prepare-upload. The offset must match
     // the part file exactly — otherwise the sender restarts from zero.
     final offset = int.tryParse(req.url.queryParameters['offset'] ?? '0') ?? 0;
+    // A negative or past-the-end offset is never something a well-behaved
+    // sender asks for (resume offsets are the receiver's own advertised
+    // part length, 0 < offset < size). Reject rather than let it drive the
+    // write into append/truncate corner cases.
+    if (offset < 0 || offset > info.size) {
+      return Response.badRequest(body: 'invalid offset $offset');
+    }
     final partFile = await _partFileFor(saveDir, ps.session.peer, info);
     if (offset > 0) {
       final have = await partFile.exists() ? await partFile.length() : 0;
@@ -548,6 +566,25 @@ class Receiver {
       }
       await sink.flush();
       await sink.close();
+      // Lower-bound check: the sender declared info.size bytes but the body
+      // ended early (a short Content-Length, a truncated source, a dropped
+      // stream that still closed cleanly). Finalizing here would publish a
+      // silently truncated file as "completed". Keep the partial bytes as a
+      // resume head start and fail the file instead. (The upper bound —
+      // more bytes than declared — is handled by the `oversized` path
+      // above.) Skipped only when the peer declared size 0, which
+      // legitimately streams no body.
+      if (info.size > 0 && received < info.size) {
+        _activePartPaths.remove(partFile.path);
+        _failSession(
+          sessionId,
+          ps,
+          fileId,
+          'Transfer ended early: got $received of ${info.size} bytes.',
+        );
+        return Response.badRequest(
+            body: 'incomplete body: $received of ${info.size} bytes');
+      }
       // Folder transfers carry a relative path in fileName; recreate the
       // structure under the save dir (sanitized, traversal-proof).
       final segments = splitSafeRelativePath(info.fileName);

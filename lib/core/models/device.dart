@@ -80,22 +80,50 @@ class Device {
   ///
   /// The `ip` is required because the announcement payload itself omits it
   /// (the receiver fills it from the UDP / TCP socket address).
+  ///
+  /// Every field is read defensively and this constructor is **total**: it
+  /// never throws, whatever the peer put on the wire. The payload is fully
+  /// peer-controlled (a multicast announcement, a `/info` body, a
+  /// `prepare-upload` `info` object), so a value of the wrong JSON type —
+  /// `port` as a string or a float, `alias` as a number — must degrade to a
+  /// sane default, not a `TypeError`. A single malformed UDP announce from
+  /// any device on the LAN was previously enough to throw an unhandled
+  /// async error out of the discovery socket listener.
   factory Device.fromJson(Map<String, dynamic> json, {required String ip}) {
+    final alias = _asString(json['alias'])?.trim();
     return Device(
-      alias: (json['alias'] as String?)?.trim().isNotEmpty == true
-          ? json['alias'] as String
-          : 'Unknown device',
-      version: (json['version'] as String?) ?? LanLinkProtocol.protocolVersion,
-      deviceModel: (json['deviceModel'] as String?) ?? '',
+      alias: (alias != null && alias.isNotEmpty) ? alias : 'Unknown device',
+      version: _asString(json['version']) ?? LanLinkProtocol.protocolVersion,
+      deviceModel: _asString(json['deviceModel']) ?? '',
       deviceType:
-          (json['deviceType'] as String?) ?? LanLinkProtocol.deviceTypeHeadless,
-      fingerprint: (json['fingerprint'] as String?) ?? '',
-      port: (json['port'] as int?) ?? LanLinkProtocol.defaultPort,
-      protocol: (json['protocol'] as String?) ?? 'https',
+          _asString(json['deviceType']) ?? LanLinkProtocol.deviceTypeHeadless,
+      fingerprint: _asString(json['fingerprint']) ?? '',
+      port: _asPort(json['port']) ?? LanLinkProtocol.defaultPort,
+      protocol: _asString(json['protocol']) ?? 'https',
       ip: ip,
       announcement: json['announce'] == true,
       download: json['download'] == true,
     );
+  }
+
+  /// Reads a value that should be a string, tolerating anything else by
+  /// returning null (the caller supplies the default).
+  static String? _asString(Object? v) => v is String ? v : null;
+
+  /// Reads a TCP port that may arrive as an int, a JSON float (`53317.0`),
+  /// or a numeric string (`"53317"`). Out-of-range or unparseable values
+  /// return null so the default port is used instead of a bad one.
+  static int? _asPort(Object? v) {
+    int? n;
+    if (v is int) {
+      n = v;
+    } else if (v is num) {
+      n = v.toInt();
+    } else if (v is String) {
+      n = int.tryParse(v.trim());
+    }
+    if (n == null || n <= 0 || n > 65535) return null;
+    return n;
   }
 
   Device copyWith({

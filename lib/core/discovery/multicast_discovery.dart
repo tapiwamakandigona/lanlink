@@ -216,13 +216,23 @@ class MulticastDiscovery {
     } catch (_) {
       return;
     }
-    final fingerprint = payload['fingerprint'] as String?;
+    final fingerprint = payload['fingerprint'] is String
+        ? payload['fingerprint'] as String
+        : null;
     if (fingerprint == null || fingerprint.isEmpty) return;
     // Ignore our own announce.
     if (fingerprint == selfDevice.fingerprint) {
       return;
     }
-    final peer = Device.fromJson(payload, ip: fromIp);
+    // Device.fromJson is total, but keep a guard here so any future field
+    // parsing that can throw never escapes the socket listener as an
+    // unhandled async error.
+    final Device peer;
+    try {
+      peer = Device.fromJson(payload, ip: fromIp);
+    } catch (_) {
+      return;
+    }
     onPeer(peer);
 
     // LocalSend register mechanism: a *fresh announcement* (announce=true)

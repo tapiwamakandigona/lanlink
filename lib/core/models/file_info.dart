@@ -55,6 +55,40 @@ class FileInfo {
         preview: json['preview'] as String?,
       );
 
+  /// Total, non-throwing parse of one peer-controlled `prepare-upload` file
+  /// entry. Returns null when the entry is not a JSON object or is missing
+  /// the mandatory `id` / `fileName` / a non-negative `size` — a hostile or
+  /// buggy peer must yield a clean rejection, never a thrown [TypeError]
+  /// that turns a bad request into a 500 (or, at an unguarded call site, an
+  /// unhandled async error).
+  static FileInfo? tryFromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final id = raw['id'];
+    final fileName = raw['fileName'];
+    if (id is! String || id.isEmpty) return null;
+    if (fileName is! String || fileName.isEmpty) return null;
+    final sizeRaw = raw['size'];
+    int size;
+    if (sizeRaw is num) {
+      size = sizeRaw.toInt();
+    } else if (sizeRaw is String) {
+      final parsed = int.tryParse(sizeRaw.trim());
+      if (parsed == null) return null;
+      size = parsed;
+    } else {
+      return null;
+    }
+    if (size < 0) return null;
+    return FileInfo(
+      id: id,
+      fileName: fileName,
+      size: size,
+      fileType: raw['fileType'] is String ? raw['fileType'] as String : 'other',
+      sha256: raw['sha256'] is String ? raw['sha256'] as String : null,
+      preview: raw['preview'] is String ? raw['preview'] as String : null,
+    );
+  }
+
   FileInfo copyWith({String? localPath, String? contentUri}) => FileInfo(
         id: id,
         fileName: fileName,
