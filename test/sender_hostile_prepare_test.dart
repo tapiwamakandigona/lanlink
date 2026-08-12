@@ -95,6 +95,43 @@ void main() {
     return session;
   }
 
+  Future<TransferSession> driveMissingSource() async {
+    final sender = Sender(
+      localDeviceProvider: () => _device('me', 'me-fp', 1),
+      maxParallelUploads: 1,
+    );
+    final peer = _device('hostile', testCertificate().fingerprint, port);
+    final missing = FileInfo(
+      id: const Uuid().v4(),
+      fileName: 'missing.bin',
+      size: 1024,
+      fileType: 'other',
+      localPath: p.join(tmpRoot.path, 'missing.bin'),
+    );
+    final queued = FileInfo(
+      id: const Uuid().v4(),
+      fileName: 'queued.bin',
+      size: 1024,
+      fileType: 'other',
+      localPath: sourceFile.path,
+    );
+    final session = TransferSession(
+      sessionId: 'sending-test',
+      direction: TransferDirection.send,
+      peer: peer,
+      files: {
+        missing.id: FileProgress(file: missing),
+        queued.id: FileProgress(file: queued),
+      },
+    );
+    await sender.send(
+      session: session,
+      peer: peer,
+      files: [missing, queued],
+    ).timeout(const Duration(seconds: 10));
+    return session;
+  }
+
   test('unknown fileId in the prepare-upload response fails the session',
       () async {
     prepareResponse = (req) => {
@@ -175,6 +212,24 @@ void main() {
     };
     final session = await drive();
     expect(session.status, TransferStatus.failed);
+    expect(uploadRequests, 0);
+  });
+
+  test('missing source terminalizes files still queued behind it', () async {
+    prepareResponse = (req) {
+      final files = (req['files'] as Map<String, dynamic>).keys;
+      return {
+        'sessionId': 'receiver-session',
+        'files': {for (final id in files) id: 'token-$id'},
+      };
+    };
+    final session = await driveMissingSource();
+    expect(session.status, TransferStatus.failed);
+    expect(
+      session.files.values
+          .where((progress) => progress.status == TransferStatus.transferring),
+      isEmpty,
+    );
     expect(uploadRequests, 0);
   });
 

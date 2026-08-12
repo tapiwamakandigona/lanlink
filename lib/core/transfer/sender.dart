@@ -331,7 +331,15 @@ class Sender {
             stopped = true;
             session.markFile(fileId, TransferStatus.failed,
                 error: 'Source file missing: ${info.localPath}');
+            // This early return bypasses the shared upload catch below. Mark
+            // every sibling still queued (or already opened by another
+            // worker) terminal as well; otherwise a failed batch is saved
+            // with rows stuck at "transferring" forever.
+            _markPendingFiles(session, files, TransferStatus.cancelled);
             session.markStatus(TransferStatus.failed);
+            if (!cancelToken.isCancelled) {
+              cancelToken.cancel('source file missing');
+            }
             return;
           }
           openRead = file.openRead;
