@@ -6,6 +6,10 @@
 /// characters the local filesystem rejects.
 library;
 
+import 'dart:convert';
+
+import 'package:crypto/crypto.dart';
+
 const _illegal = r'[\\/:*?"<>|]';
 
 /// Control characters (0x00–0x1F) are rejected by Windows and are at best
@@ -44,8 +48,39 @@ List<String> splitSafeRelativePath(String fileName) {
     safe = safe.replaceAll(RegExp(r'[. ]+$'), '');
     if (safe.isEmpty) continue;
     if (_windowsReserved.hasMatch(safe)) safe = '_$safe';
-    segments.add(safe);
+    segments.add(clampFileNameSegment(safe));
   }
   if (segments.isEmpty) return const ['file'];
   return segments;
+}
+
+/// Clamps one path segment to a filesystem-safe byte length.
+///
+/// Most filesystems cap a single name at 255 bytes; the receiver also
+/// prepends part-file prefixes and " (1)" dedup suffixes, so we clamp well
+/// below that. Over-long names are truncated (preserving a reasonable
+/// extension) and suffixed with a short hash of the original so two
+/// distinct long names never collapse into the same file. A peer sending a
+/// 1000-char filename used to sail through prepare-upload and then blow up
+/// the upload with ENAMETOOLONG (surfaced as a 500).
+String clampFileNameSegment(String name, {int maxBytes = 180}) {
+  if (utf8.encode(name).length <= maxBytes) return name;
+  final digest = sha1.convert(utf8.encode(name)).toString().substring(0, 8);
+  final dot = name.lastIndexOf('.');
+  // Keep the extension only when it looks like one (short, not the whole
+  // name) so `.hidden`-style or dotless names degrade gracefully.
+  var ext = '';
+  var base = name;
+  if (dot > 0 && name.length - dot <= 16) {
+    ext = name.substring(dot);
+    base = name.substring(0, dot);
+  }
+  // Reserve room for "~<hash>" + extension, then trim the base by whole
+  // code units until it fits in bytes.
+  final budget = maxBytes - utf8.encode('~$digest$ext').length;
+  var keep = base.length < budget ? base.length : budget;
+  while (keep > 0 && utf8.encode(base.substring(0, keep)).length > budget) {
+    keep--;
+  }
+  return '${base.substring(0, keep)}~$digest$ext';
 }

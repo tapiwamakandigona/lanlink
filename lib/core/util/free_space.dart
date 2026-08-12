@@ -2,6 +2,7 @@ import 'dart:ffi';
 import 'dart:io';
 
 import 'package:ffi/ffi.dart';
+import 'package:flutter/foundation.dart';
 
 /// Best-effort free disk space for the volume containing [path], in bytes.
 ///
@@ -16,19 +17,37 @@ Future<int?> freeSpaceBytes(String path) async {
     //   Filesystem 1K-blocks Used Available Use% Mounted on
     final result = await Process.run('df', ['-k', path]);
     if (result.exitCode != 0) return null;
-    final lines = (result.stdout as String).trim().split('\n');
-    if (lines.length < 2) return null;
-    // The data row can wrap when the device name is long; take the last
-    // line and pick the 4th whitespace-separated column from the combined
-    // tail fields.
-    final fields = lines.last.trim().split(RegExp(r'\s+'));
-    if (fields.length < 4) return null;
-    final availKb = int.tryParse(fields[3]);
-    if (availKb == null) return null;
-    return availKb * 1024;
+    return parseDfAvailableBytes(result.stdout as String);
   } catch (_) {
     return null;
   }
+}
+
+/// Parses `df -k` output and returns the Available column in bytes, or null.
+///
+/// Robust to the two layouts real devices produce:
+///  * normal: `/dev/sda1  62914560 10485760 52428800  17% /`
+///  * wrapped: a long device name pushes the numbers onto their own line,
+///    so the last line has no filesystem field and "Available" is no longer
+///    the 4th column. (A naive `fields[3]` reads the `17%` token there and
+///    silently disables the low-space warning — seen on Android where fuse
+///    device names are long.)
+///
+/// Anchors on the use-percent token (`NN%`), which is unique in the row,
+/// and takes the field just before it; this also survives mount points
+/// containing spaces since those only appear after the percent column.
+@visibleForTesting
+int? parseDfAvailableBytes(String stdout) {
+  final lines = stdout.trim().split('\n');
+  if (lines.length < 2) return null;
+  final fields = lines.last.trim().split(RegExp(r'\s+'));
+  final pctIndex = fields.lastIndexWhere(
+    (f) => RegExp(r'^\d{1,3}%$').hasMatch(f),
+  );
+  if (pctIndex < 1) return null;
+  final availKb = int.tryParse(fields[pctIndex - 1]);
+  if (availKb == null || availKb < 0) return null;
+  return availKb * 1024;
 }
 
 int? _windowsFreeSpace(String path) {

@@ -835,6 +835,21 @@ class AppState extends ChangeNotifier {
     final notifications = TransferNotifications.instance;
     unawaited(notifications.ensurePermission());
     var done = false;
+    // A session that is already terminal at attach time (instant failure,
+    // rejected before attach, races in tests) must never get an ongoing
+    // progress notification: nothing would ever replace it, leaving a
+    // non-dismissible row in the shade until the app posts again with the
+    // same id. Post the terminal notification directly instead.
+    switch (session.status) {
+      case TransferStatus.completed:
+      case TransferStatus.failed:
+      case TransferStatus.cancelled:
+        unawaited(notifications.showFinal(session));
+        return;
+      case TransferStatus.awaitingAccept:
+      case TransferStatus.transferring:
+        break;
+    }
     // Throttle updates so we don't slam the system NotificationManager.
     DateTime lastPosted = DateTime.fromMillisecondsSinceEpoch(0);
     unawaited(notifications.showProgress(session));

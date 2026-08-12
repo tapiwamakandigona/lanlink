@@ -113,8 +113,9 @@ class UpdateChecker extends ChangeNotifier {
     await checkNow();
   }
 
-  /// Forces a fresh fetch of the manifest. Honoured even if a previous
-  /// check is still in flight (it queues behind it).
+  /// Forces a fresh fetch of the manifest. A call made while a previous
+  /// check is still in flight is dropped (the in-flight result will land
+  /// shortly anyway).
   Future<void> checkNow() async {
     if (_checking) return;
     _checking = true;

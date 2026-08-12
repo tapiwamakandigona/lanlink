@@ -14,10 +14,10 @@ import androidx.core.app.NotificationManagerCompat
  * receive progress in the system notification shade. The Dart side calls
  * through a MethodChannel as transfers start, progress, and finish.
  *
- * On Android 8.0+ we route everything through a single high-importance
- * channel so OEM skins that hide low-importance notifications still show
- * progress. The user can mute the channel from Settings -> Apps -> LanLink
- * -> Notifications if they don't want it.
+ * On Android 8.0+ we route everything through a single low-importance
+ * channel (progress rows should update silently, not buzz on every tick).
+ * The user can mute the channel from Settings -> Apps -> LanLink ->
+ * Notifications if they don't want it.
  */
 class TransferNotifier(private val context: Context) {
 

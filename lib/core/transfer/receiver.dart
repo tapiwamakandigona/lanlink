@@ -440,8 +440,7 @@ class Receiver {
       await saveDir.create(recursive: true);
     } catch (e) {
       _failSession(sessionId, ps, fileId, 'Cannot create save folder: $e');
-      return Response.internalServerError(
-          body: 'cannot create save folder: $e');
+      return Response.internalServerError(body: 'cannot create save folder');
     }
 
     // Resume support: the sender may continue an interrupted upload at the
@@ -492,7 +491,9 @@ class Receiver {
     } catch (e) {
       _activePartPaths.remove(partFile.path);
       _failSession(sessionId, ps, fileId, 'Cannot open ${partFile.path}: $e');
-      return Response.internalServerError(body: 'cannot open temp file: $e');
+      // Terse for the same reason as the write-failure below: exception
+      // text carries local paths.
+      return Response.internalServerError(body: 'cannot open temp file');
     }
 
     int received = offset;
@@ -630,7 +631,10 @@ class Receiver {
       } catch (_) {}
       _activePartPaths.remove(partFile.path);
       _failSession(sessionId, ps, fileId, '$e');
-      return Response.internalServerError(body: 'write failed: $e');
+      // Deliberately terse: the exception text contains local filesystem
+      // paths, which are none of the peer's business. The local user gets
+      // the detailed reason through _failSession above.
+      return Response.internalServerError(body: 'write failed');
     }
 
     // On Android, the path we just wrote to is almost always inside the app's
@@ -981,7 +985,15 @@ class Receiver {
     final partsDir = Directory(p.join(saveDir.path, '.lanlink_parts'));
     await partsDir.create(recursive: true);
     final unsafe = RegExp(r'[\\/:*?"<>|]');
-    final safe = info.fileName.replaceAll(unsafe, '_');
+    // Clamp + strip control chars so a hostile fileName can neither exceed
+    // the filesystem's 255-byte name limit (ENAMETOOLONG at openWrite) nor
+    // embed invisible characters into the staging name.
+    final safe = clampFileNameSegment(
+      info.fileName
+          .replaceAll(RegExp(r'[\x00-\x1f]'), '')
+          .replaceAll(unsafe, '_'),
+      maxBytes: 160,
+    );
     var fp = peer.fingerprint.replaceAll(unsafe, '_');
     if (fp.length > 16) fp = fp.substring(0, 16);
     if (fp.isEmpty) fp = 'anon';
@@ -1002,8 +1014,10 @@ class Receiver {
     String candidate = p.join(dir.path, fileName);
     int i = 1;
     while (true) {
+      // (A legacy `$candidate.lanlink-part` sibling probe used to sit here;
+      // part files have lived under `.lanlink_parts/` for several releases,
+      // so the extra stat per candidate was pure waste.)
       final taken = await File(candidate).exists() ||
-          await File('$candidate.lanlink-part').exists() ||
           // No await between this check and the add below: reservation is
           // atomic within the event loop.
           !_reservedPaths.add(candidate);

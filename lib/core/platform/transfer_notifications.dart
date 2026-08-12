@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 
@@ -21,9 +22,15 @@ class TransferNotifications {
   static const _channel = MethodChannel('lanlink/notifications');
   bool _askedForPermission = false;
 
+  /// Test hook: lets widget tests exercise the notification text/argument
+  /// building on non-Android hosts by forcing [isSupported] true (the
+  /// channel itself is mocked in tests). Production code never sets this.
+  @visibleForTesting
+  static bool debugForceSupported = false;
+
   /// Lightweight runtime check — saves Dart from issuing channel calls on
   /// non-Android platforms that don't register the channel.
-  bool get isSupported => Platform.isAndroid;
+  bool get isSupported => debugForceSupported || Platform.isAndroid;
 
   /// Asks for POST_NOTIFICATIONS once per process. Safe to call repeatedly;
   /// subsequent calls are no-ops. Failure (denial, missing API on older
@@ -66,6 +73,9 @@ class TransferNotifications {
       });
     } on MissingPluginException {
       // Channel not wired — desktop build, or older snapshot.
+    } on PlatformException catch (e) {
+      // A notification failure must never take down a transfer.
+      if (kDebugMode) debugPrint('[notif] showProgress failed: $e');
     }
   }
 
@@ -100,12 +110,12 @@ class TransferNotifications {
       case TransferStatus.failed:
         success = false;
         title = isReceive ? 'Receive failed' : 'Send failed';
-        text = 'From $peer';
+        text = isReceive ? 'From $peer' : 'To $peer';
         break;
       case TransferStatus.cancelled:
         success = false;
         title = isReceive ? 'Receive cancelled' : 'Send cancelled';
-        text = 'From $peer';
+        text = isReceive ? 'From $peer' : 'To $peer';
         break;
       default:
         return;
@@ -119,6 +129,8 @@ class TransferNotifications {
       });
     } on MissingPluginException {
       // ignore
+    } on PlatformException catch (e) {
+      if (kDebugMode) debugPrint('[notif] showFinal failed: $e');
     }
   }
 
@@ -128,6 +140,8 @@ class TransferNotifications {
       await _channel.invokeMethod('cancel', {'id': _idFor(session)});
     } on MissingPluginException {
       // ignore
+    } on PlatformException catch (e) {
+      if (kDebugMode) debugPrint('[notif] cancel failed: $e');
     }
   }
 
