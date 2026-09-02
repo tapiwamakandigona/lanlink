@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 
 import '../models/device.dart';
 import '../models/file_info.dart';
+import '../platform/content_streams.dart';
 import '../models/session.dart';
 import '../protocol/constants.dart';
 import '../security/cert_pinning.dart';
@@ -22,7 +23,10 @@ class Sender {
     required this.localDeviceProvider,
     Dio? dio,
     CertificatePinner? pinner,
-  }) : pinner = pinner ?? CertificatePinner() {
+    Stream<List<int>> Function(String uri, int startAt)? contentOpener,
+  })  : pinner = pinner ?? CertificatePinner(),
+        _contentOpener = contentOpener ??
+            ((uri, startAt) => ContentStreams.openRead(uri, start: startAt)) {
     _dio = dio ?? _defaultDio(this.pinner);
   }
 
@@ -30,6 +34,11 @@ class Sender {
   final Device Function() localDeviceProvider;
 
   late final Dio _dio;
+
+  /// Opens a byte stream for a `content://` source ([FileInfo.contentUri]).
+  /// Defaults to the SAF platform channel; injectable so tests can feed
+  /// synthetic streams without a platform.
+  final Stream<List<int>> Function(String uri, int startAt) _contentOpener;
 
   /// Verifies peer TLS certificates against pinned fingerprints (and records
   /// cert hashes on first contact — TOFU). Shared with the default Dio's
@@ -148,8 +157,8 @@ class Sender {
     required List<FileInfo> files,
   }) async {
     assert(
-      files.every((f) => f.localPath != null),
-      'Sender.send requires localPath on every file.',
+      files.every((f) => f.localPath != null || f.contentUri != null),
+      'Sender.send requires localPath or contentUri on every file.',
     );
 
     _pin(peer);
@@ -269,12 +278,27 @@ class Sender {
             'Malformed prepare-upload response (unknown file id).');
         return;
       }
-      final file = File(info.localPath!);
-      if (!await file.exists()) {
-        session.markFile(fileId, TransferStatus.failed,
-            error: 'Source file missing: ${info.localPath}');
-        session.markStatus(TransferStatus.failed);
-        return;
+      // Resolve the byte source: a filesystem path (desktop, media library)
+      // or an Android content URI (SAF pick — streamed, never copied).
+      final Stream<List<int>> Function(int startAt) openRead;
+      final int length;
+      final contentUri = info.contentUri;
+      if (contentUri != null) {
+        openRead = (startAt) => _contentOpener(contentUri, startAt);
+        // SAF reports the size at pick time; the provider owns the bytes,
+        // so there is no cheap existence probe — a vanished document fails
+        // the upload and lands in the normal per-file error path below.
+        length = info.size;
+      } else {
+        final file = File(info.localPath!);
+        if (!await file.exists()) {
+          session.markFile(fileId, TransferStatus.failed,
+              error: 'Source file missing: ${info.localPath}');
+          session.markStatus(TransferStatus.failed);
+          return;
+        }
+        openRead = file.openRead;
+        length = await file.length();
       }
       final uri = peer.baseUri.replace(
         path: LanLinkProtocol.routeUpload,
@@ -285,7 +309,6 @@ class Sender {
         },
       );
       try {
-        final length = await file.length();
         var startAt = resume[fileId] ?? 0;
         if (startAt < 0 || startAt >= length) startAt = 0;
 
@@ -296,7 +319,7 @@ class Sender {
             await _uploadFrom(
               session: session,
               fileId: fileId,
-              file: file,
+              openRead: openRead,
               length: length,
               startAt: startAt,
               uri: uri,
@@ -428,19 +451,19 @@ class Sender {
     }
   }
 
-  /// Streams [file] to [uri] starting at byte [startAt], updating the
-  /// session's live byte counter as chunks go out.
+  /// Streams the bytes from [openRead] to [uri] starting at byte [startAt],
+  /// updating the session's live byte counter as chunks go out.
   Future<void> _uploadFrom({
     required TransferSession session,
     required String fileId,
-    required File file,
+    required Stream<List<int>> Function(int startAt) openRead,
     required int length,
     required int startAt,
     required Uri uri,
     CancelToken? cancelToken,
   }) async {
     session.updateBytes(fileId, startAt);
-    final stream = file.openRead(startAt);
+    final stream = openRead(startAt);
     int sent = startAt;
     await _dio.postUri<dynamic>(
       startAt > 0
